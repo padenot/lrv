@@ -1,0 +1,55 @@
+[package]
+name = "lrv"
+version = "0.2.0"
+edition = "2021"
+description = "Local code review tool for unified diffs"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/padenot/lrv"
+readme = "README.md"
+
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ version }-{ target }.{ archive-format }"
+bin-dir = "{ bin }{ binary-ext }"
+
+[dependencies]
+axum = "0.8"
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+tower-http = { version = "0.6", features = ["fs", "cors", "trace"] }
+rust-embed = "8.0"
+open = "5.0"
+anyhow = "1.0"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+toml = "1"
+dirs = "6"
+mime_guess = "2.0"
+moz-cli-version-check = "0.2.3"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+[[bin]]
+name = "lrv"
+path = "src/main.rs"
+
+[[bin]]
+name = "parse_diff"
+path = "src/bin/parse_diff.rs"
+required-features = ["dev-tools"]
+
+[[bin]]
+name = "simulate_api"
+path = "src/bin/simulate_api.rs"
+required-features = ["dev-tools"]
+
+[[bin]]
+name = "lrv_show"
+path = "src/bin/lrv_show.rs"
+required-features = ["dev-tools"]
+
+[features]
+dev-tools = []
+
+[dev-dependencies]
+tower = "0.5"

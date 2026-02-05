@@ -1,0 +1,36 @@
+import type { AppContext } from './app';
+import type { UIThemeDefinitionMap } from '../themes';
+
+interface PerfHelpers {
+  mark(name: string): void;
+  measure(name: string, startMark: string, endMark: string): void;
+  recordAppInitStart(): void;
+  recordAppInitEnd(): void;
+  recordFileSwitchStart(): void;
+  recordFileSwitchEnd(): void;
+  getMetrics(): Record<string, unknown>;
+  clear(): void;
+}
+
+type RequireLike = {
+  (deps: string[], callback: (...modules: unknown[]) => void): void;
+  config(config: { paths?: Record<string, string> }): void;
+};
+
+declare global {
+  const monaco: typeof import('monaco-editor/esm/vs/editor/editor.api');
+
+  interface Window {
+    DEBUG: boolean;
+    __APP_READY: boolean;
+    __APP?: Partial<Pick<AppContext, 'eagerPrefetchAllFiles'>>;
+    __ACCENT_READY?: boolean;
+    MONACO_VS_BASE?: string;
+    Perf: PerfHelpers;
+    UI_THEME_DEFS?: UIThemeDefinitionMap;
+    UIThemeAccentsHex?: Record<string, string>;
+    require?: RequireLike;
+  }
+}
+
+export {};

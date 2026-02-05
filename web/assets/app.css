@@ -1,0 +1,1685 @@
+@font-face {
+  font-family: 'Inter';
+  src: url('/assets/fonts/Inter-Variable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Geist Sans';
+  src: url('/assets/fonts/GeistSans-Variable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  src:
+    url('/assets/fonts/JetBrainsMono-Variable.woff2') format('woff2'),
+    url('/assets/fonts/JetBrainsMono-Regular.ttf') format('truetype');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* Dynamic theme variables - set by JavaScript based on Monaco editor theme */
+:root {
+  /* Colors are set at runtime by applyThemeToUI() based on the selected Monaco theme */
+  --bg-primary: #1e1e1e;
+  --bg-secondary: #252526;
+  --bg-elevated: #2d2d30;
+  --border-color: #3e3e42;
+  --text-primary: #cccccc;
+  --text-secondary: #858585;
+  --text-tertiary: #6e6e6e;
+  /* --accent-color is set from the theme (e.g., Firefox DevTools Dark uses pink) */
+  --accent-color: #007acc;
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Monaco', 'Menlo', 'Consolas', monospace;
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
+  --ui-transition: 150ms;
+}
+
+/* Prevent flash of default theme: hide body until UI theme is applied */
+html:not([data-ui-ready='1']) body {
+  visibility: hidden;
+}
+
+html.preloading body {
+  overflow: hidden !important;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: var(--font-sans);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.skill-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 16px;
+  background: #78350f;
+  color: #fef3c7;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.skill-banner span {
+  flex: 1;
+}
+.skill-install-btn {
+  background: #f59e0b;
+  color: #1c1917;
+  border: none;
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.skill-install-btn:hover {
+  background: #fbbf24;
+}
+.skill-dismiss-btn {
+  background: transparent;
+  border: none;
+  color: #fef3c7;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 4px;
+  opacity: 0.7;
+}
+.skill-dismiss-btn:hover {
+  opacity: 1;
+}
+
+.header {
+  background: var(--bg-secondary);
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  z-index: 100;
+  flex-shrink: 0;
+}
+
+.header h1 {
+  font-size: 14px;
+  font-weight: 600;
+  display: flex;
+  /* Align text baselines of lrv, message, date, etc. */
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* Wordmark styling for "lrv" */
+.header .wordmark {
+  font-family: 'Geist Sans', var(--font-sans);
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  line-height: 1.1;
+  color: var(--accent-color);
+}
+
+/* Small delayed fetch spinner shown only when /api/file requests run long */
+.fetch-spinner {
+  display: none;
+  width: 14px;
+  height: 14px;
+  border: 2px solid color-mix(in srgb, var(--text-secondary), transparent 40%);
+  border-top-color: var(--accent-color);
+  border-radius: 50%;
+  animation: fetch-spin 0.8s linear infinite;
+  margin-left: 10px;
+}
+.fetch-spinner.visible {
+  display: inline-block;
+}
+@keyframes fetch-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.review-time {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.1;
+}
+
+.project-info {
+  color: var(--text-tertiary);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.project-info-value {
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+}
+
+.commit-message {
+  color: var(--text-secondary);
+  font-size: 12px;
+  max-width: 40vw;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.commit-message:hover {
+  text-decoration: underline;
+}
+
+.auto-link {
+  color: var(--accent-color);
+  text-decoration: underline;
+}
+
+/* Popover for full commit message */
+.commit-popover {
+  position: fixed;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  box-shadow: var(--shadow-md);
+  padding: 10px 12px;
+  z-index: 2147483647;
+  max-width: 60vw;
+  max-height: 50vh;
+  overflow: auto;
+}
+.commit-popover .commit-popover-title {
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.commit-popover .commit-popover-body {
+  white-space: pre-wrap;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.git-branch {
+  color: var(--accent-color);
+}
+
+.public-banner {
+  background: #c42b1c;
+  color: #fff;
+  padding: 4px 8px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.old-missing-banner {
+  background: #6a737d;
+  color: #fff;
+  padding: 4px 8px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.project-info-separator {
+  margin: 0 8px;
+  color: var(--border-color);
+}
+
+.header-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.settings-btn {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  padding: 6px 10px;
+}
+
+.settings-btn:hover {
+  background: var(--border-color);
+}
+
+.comment-badge {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  padding: 4px 10px;
+  border-radius: 0px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+/* Navigation indicator (ephemeral) */
+.nav-indicator {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+}
+
+.header button {
+  background: var(--accent-color);
+  color: white;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 0px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  transition: background 0.15s ease;
+}
+
+/* Keep Settings button neutral (not primary) in header */
+.header .settings-btn {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+
+.header button:hover {
+  opacity: 0.8;
+}
+
+.header button:disabled {
+  background: var(--text-tertiary);
+  cursor: not-allowed;
+}
+
+/* Smooth, short transitions for theme changes (no heavy animations) */
+@media (prefers-reduced-motion: no-preference) {
+  body,
+  .header,
+  .sidebar,
+  .content,
+  .submit-modal,
+  .comment-badge,
+  .file-list li,
+  .project-info,
+  .settings-btn,
+  .header button,
+  .btn-primary,
+  .btn-secondary,
+  .btn-danger {
+    transition:
+      background-color var(--ui-transition) ease,
+      color var(--ui-transition) ease,
+      border-color var(--ui-transition) ease;
+  }
+}
+
+.main {
+  display: flex;
+  flex: 1;
+}
+
+.sidebar {
+  width: 280px;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border-color);
+  height: calc(100vh - 48px);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  transition: width 150ms ease;
+}
+
+.sidebar-section {
+  padding: 16px;
+  border-bottom: 1px solid var(--border-color);
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.sidebar-header h2 {
+  margin-bottom: 0;
+}
+
+.sidebar-collapse-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 2px 4px;
+  font-size: 16px;
+  line-height: 1;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.sidebar-collapse-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-elevated);
+}
+
+.sidebar.collapsed {
+  width: 32px;
+  min-width: 32px;
+}
+
+.sidebar.collapsed #commit-strip,
+.sidebar.collapsed #commit-strip-resizer {
+  display: none !important;
+}
+
+.sidebar.collapsed .sidebar-section {
+  padding: 6px 4px;
+  align-items: center;
+}
+
+.sidebar.collapsed .sidebar-header h2,
+.sidebar.collapsed .stats,
+.sidebar.collapsed .file-list-toolbar,
+.sidebar.collapsed .file-list-summary,
+.sidebar.collapsed .file-list-scroll {
+  display: none;
+}
+
+.sidebar.collapsed .sidebar-resizer {
+  display: none;
+}
+
+.sidebar.collapsed .sidebar-collapse-btn {
+  font-size: 16px;
+}
+
+.sidebar-section h2 {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.stats {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
+.file-list {
+  list-style: none;
+  margin-top: 8px;
+  min-width: 0;
+}
+
+.file-list li {
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.file-list-toolbar {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.file-list-toolbar-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.file-list-toolbar-actions .btn-secondary {
+  flex: 1;
+  padding: 5px 8px;
+  font-size: 11px;
+}
+
+.file-list-filter {
+  width: 100%;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 12px;
+}
+
+.file-list-summary {
+  min-height: 16px;
+  margin-top: 8px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.file-list-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  margin-top: 2px;
+  padding-bottom: 8px;
+}
+
+.file-tree {
+  margin-top: 0;
+}
+
+.file-tree-root,
+.file-tree-children {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.file-tree-children {
+  margin-left: 8px;
+}
+
+.tree-row {
+  width: 100%;
+}
+
+.tree-row-content {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.tree-toggle {
+  width: 14px;
+  min-width: 14px;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 0;
+  font-size: 10px;
+  line-height: 1;
+}
+
+.tree-toggle-spacer {
+  width: 14px;
+  min-width: 14px;
+}
+
+.file-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.directory-row {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.directory-row .file-right {
+  color: var(--text-secondary);
+}
+
+.file-list-empty {
+  padding: 12px 8px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.file-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.file-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+/* Small per-file comment count badge */
+.file-comment-badge {
+  display: inline-block;
+  min-width: 16px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  font-size: 10px;
+  line-height: 1;
+  text-align: center;
+}
+
+/* +/- delta styling */
+.file-delta {
+  font-size: 10px;
+  font-weight: 700;
+  display: inline-flex;
+  gap: 4px;
+}
+.file-delta .delta-add {
+  color: #22c55e;
+}
+.file-delta .delta-del {
+  color: #ef4444;
+}
+
+.tree-row > .tree-row-content {
+  padding: 5px 8px;
+}
+
+.tree-row:hover > .tree-row-content,
+.tree-row.active > .tree-row-content {
+  background: var(--bg-elevated);
+}
+
+/* File status badges */
+.file-status {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 999px;
+  line-height: 1;
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+}
+.file-status.modified {
+  background: rgba(33, 150, 243, 0.25);
+  border-color: rgba(33, 150, 243, 0.5);
+}
+.file-status.added {
+  background: rgba(76, 175, 80, 0.25);
+  border-color: rgba(76, 175, 80, 0.5);
+}
+.file-status.deleted {
+  background: rgba(244, 67, 54, 0.25);
+  border-color: rgba(244, 67, 54, 0.5);
+}
+.file-status.renamed {
+  background: rgba(255, 215, 0, 0.2);
+  border-color: rgba(255, 215, 0, 0.5);
+}
+
+.sidebar-resizer {
+  width: 4px;
+  cursor: ew-resize;
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  background: transparent;
+}
+
+.content {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+/* ─── Stacked (Phabricator-style) view ────────────────────────────────────── */
+
+#stacked-container {
+  height: calc(100vh - 48px);
+  overflow-y: auto;
+  background: var(--bg-primary);
+  font-size: 12px;
+}
+
+.stacked-file-section {
+  margin: 16px 0;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.stacked-file-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border-color);
+  font-size: 12px;
+}
+
+.stacked-file-name {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--text-primary);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stacked-file-status {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 5px;
+  border-radius: 3px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+}
+
+.stacked-file-stats {
+  display: flex;
+  gap: 6px;
+  font-size: 11px;
+}
+
+.stacked-no-hunks,
+.stacked-empty {
+  padding: 16px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.stacked-diff-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.stacked-num {
+  width: 44px;
+  text-align: right;
+  padding: 0 6px;
+  color: var(--text-secondary);
+  background: var(--bg-elevated);
+  border-right: 1px solid var(--border-color);
+  user-select: none;
+  vertical-align: top;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.stacked-code {
+  padding: 1px 10px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  vertical-align: top;
+  color: var(--text-primary);
+}
+
+.stacked-code-add {
+  background: rgba(151, 234, 151, 0.3);
+}
+.stacked-num-add {
+  background: rgba(151, 234, 151, 0.18);
+}
+.stacked-code-del {
+  background: rgba(251, 175, 175, 0.3);
+}
+.stacked-num-del {
+  background: rgba(251, 175, 175, 0.18);
+}
+
+.stacked-old {
+  border-right: 1px solid var(--border-color);
+}
+.stacked-code:hover {
+  filter: brightness(0.93);
+}
+
+.stacked-hunk-header td {
+  padding: 2px 10px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  border-top: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.stacked-show-more td {
+  padding: 4px 0;
+  text-align: center;
+  background: var(--bg-elevated);
+  border-top: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.stacked-show-more-btn {
+  background: none;
+  border: none;
+  color: var(--accent-color, #007acc);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 12px;
+}
+
+.stacked-show-more-btn:hover {
+  text-decoration: underline;
+}
+.stacked-show-more-btn:disabled {
+  color: var(--text-secondary);
+  cursor: default;
+}
+
+/* Inline comment form */
+.stacked-comment-form-row td,
+.stacked-comment-row td {
+  padding: 8px 12px;
+  background: var(--bg-elevated);
+  border-top: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.stacked-comment-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.stacked-comment-ta {
+  width: 100%;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 12px;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.stacked-comment-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.stacked-comment-box {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  position: relative;
+}
+
+.stacked-comment-meta {
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+.stacked-comment-body {
+  color: var(--text-primary);
+  font-size: 12px;
+  white-space: pre-wrap;
+  font-family: var(--font-sans);
+}
+
+.stacked-comment-del {
+  position: absolute;
+  top: 0;
+  right: 0;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 4px;
+}
+.stacked-comment-del:hover {
+  color: var(--text-primary);
+}
+
+#toggle-stacked.active {
+  background: var(--accent-color, #007acc);
+  color: #fff;
+  border-color: var(--accent-color, #007acc);
+}
+
+#editor-container {
+  height: calc(100vh - 48px);
+  opacity: 0;
+  transition: opacity 350ms ease;
+  position: relative;
+  z-index: 10;
+}
+
+/* Cover while diff reloads so hideUnchangedRegions fold reflow is invisible.
+   Always present at opacity 0; snaps to 1 on load start, fades out on reveal. */
+#editor-container::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--bg-primary);
+  z-index: 100;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.08s ease;
+}
+#editor-container.diff-loading::after {
+  opacity: 1;
+  transition: none;
+}
+
+/* Remove custom hover backgrounds to avoid masking Monaco diff overlays */
+
+/* Diff decorations */
+.line-added {
+  background: rgba(76, 175, 80, 0.15);
+}
+.line-deleted {
+  background: rgba(244, 67, 54, 0.15);
+}
+.line-modified {
+  background: rgba(33, 150, 243, 0.15);
+}
+/* Focused hunk highlight (our decoration class) */
+/* Hunk-level focus: very light tint + thin left rail */
+.monaco-editor .focused-hunk-line {
+  background-color: color-mix(in srgb, var(--accent-color), transparent 92%) !important;
+  /* Left rail via background-image so line-level overlay can add its own rail */
+  background-image: linear-gradient(var(--accent-color), var(--accent-color));
+  background-size: 2px 100%;
+  background-repeat: no-repeat;
+  background-position: 0 0;
+}
+
+/* Single-line focus indicator (keyboard j/k) */
+/* Line-level focus: slightly stronger tint + second rail a few px in */
+.monaco-editor .focused-line {
+  position: relative;
+  background-color: color-mix(in srgb, var(--accent-color), transparent 86%) !important;
+}
+.monaco-editor .focused-line::before {
+  content: '';
+  position: absolute;
+  left: 3px; /* offset from hunk rail */
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--accent-color);
+}
+
+/* Use Monaco codicon for comment glyphs */
+
+.monaco-editor .review-note-glyph {
+  color: var(--accent-color);
+}
+
+.monaco-editor .review-note-line-decoration {
+  border-left: 2px solid var(--accent-color);
+}
+
+.monaco-editor .view-zones,
+.monaco-editor .view-zones * {
+  pointer-events: auto;
+}
+
+.review-note-zone {
+  display: flex;
+  align-items: stretch;
+  height: 100%;
+  min-width: 0;
+  pointer-events: auto;
+}
+
+.review-note-zone-old {
+  justify-content: flex-start;
+}
+
+.review-note-zone-new {
+  justify-content: flex-end;
+}
+
+.review-note {
+  position: relative;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  height: calc(100% - 8px);
+  margin: 4px 12px;
+  padding: 8px 10px;
+  background: color-mix(in srgb, var(--bg-elevated), var(--accent-color) 8%);
+  border: 1px solid color-mix(in srgb, var(--accent-color), var(--border-color) 35%);
+  border-left: 3px solid var(--accent-color);
+  border-radius: 4px;
+  overflow: auto;
+  box-shadow:
+    var(--shadow-sm),
+    inset 0 0 0 1px color-mix(in srgb, var(--accent-color), transparent 82%);
+  font-family: var(--font-sans);
+  pointer-events: auto;
+}
+
+.review-note-zone > .review-note {
+  width: calc(100% - 24px);
+}
+
+.review-note * {
+  pointer-events: auto;
+}
+
+.review-note-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.review-note-source {
+  color: var(--accent-color);
+  text-decoration: none;
+  margin-left: auto;
+}
+
+.review-note-source:hover {
+  text-decoration: underline;
+}
+
+.review-note-body {
+  min-height: 0;
+  overflow: auto;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.review-note-actions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid color-mix(in srgb, var(--accent-color), transparent 72%);
+}
+
+.review-note-btn {
+  padding: 4px 9px;
+  font-size: 11px;
+}
+
+.review-note-status {
+  color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.review-note-ignored {
+  opacity: 0.72;
+  border-left-color: var(--text-secondary);
+}
+
+.review-note-addressed {
+  border-left-color: #22c55e;
+}
+
+.review-note-status-addressed {
+  color: #22c55e;
+}
+
+.review-note-status-ignored {
+  color: var(--text-secondary);
+}
+
+.review-note-reply {
+  flex-basis: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.review-note-reply-text {
+  width: 100%;
+  min-height: 70px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid color-mix(in srgb, var(--accent-color), var(--border-color) 45%);
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  resize: vertical;
+}
+
+.review-note-reply-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.stacked-review-note-row .stacked-review-note-cell {
+  padding: 0 12px;
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.stacked-review-note-row .stacked-review-note-spacer {
+  padding: 0;
+  background: var(--bg-primary);
+  border-top: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.stacked-review-note-old .stacked-review-note-cell {
+  border-right: 1px solid var(--border-color);
+}
+
+.stacked-review-note-new .stacked-review-note-spacer {
+  border-right: 1px solid var(--border-color);
+}
+
+.stacked-review-note-row .review-note {
+  height: auto;
+  margin: 8px 0;
+}
+
+.inline-comment-box {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-sm);
+  padding: 10px;
+  border-radius: 4px;
+  width: 380px;
+}
+
+.inline-comment-box h3 {
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+.comment-textarea {
+  width: 100%;
+  height: 80px;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 8px;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  margin-bottom: 10px;
+}
+
+.comment-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.shortcut-hint {
+  margin-right: auto;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.btn-primary,
+.btn-secondary,
+.btn-danger {
+  padding: 6px 12px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.btn-primary {
+  background: var(--accent-color);
+  color: white;
+}
+
+.btn-secondary {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+
+.btn-danger {
+  background: #a50c0c;
+  color: white;
+}
+
+.btn-secondary:hover {
+  background: var(--border-color);
+}
+
+.submit-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2147483647; /* keep modal above Monaco inline widgets (e.g. "N hidden lines") */
+}
+
+/* Ensure Monaco scrollbars/widgets never overdraw overlays */
+.monaco-editor .scrollbar,
+.monaco-editor .overlayWidgets,
+.monaco-editor .minimap-shadow-visible,
+.monaco-editor .decorationsOverviewRuler {
+  z-index: 1 !important;
+}
+
+/* Content widgets (e.g. inline comment box) must appear above overlay widgets */
+.monaco-editor .contentWidgets,
+.monaco-editor .overflowingContentWidgets {
+  z-index: 2 !important;
+}
+
+.monaco-editor .overflowingContentWidgets .inline-comment-box,
+.monaco-editor .contentWidgets .inline-comment-box {
+  position: relative;
+  z-index: 3;
+}
+
+.submit-modal {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-md);
+  border-radius: 6px;
+  width: 800px;
+  max-width: 90vw;
+}
+
+.submit-modal-header,
+.submit-modal-footer {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.submit-modal-header h2 {
+  font-size: 14px;
+}
+
+.submit-modal-close {
+  background: transparent;
+  color: var(--text-primary);
+  border: none;
+  font-size: 20px;
+  cursor: pointer;
+}
+
+.submit-modal-body {
+  padding: 10px 16px 16px;
+  max-height: calc(85vh - 120px);
+  overflow: auto;
+}
+
+/* Keyboard shortcuts table */
+.shortcuts-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.shortcuts-table thead th {
+  text-align: left;
+  color: var(--text-secondary);
+  background: var(--bg-elevated);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.shortcuts-table th,
+.shortcuts-table td {
+  border-bottom: 1px solid var(--border-color);
+  padding: 8px 10px;
+  vertical-align: middle;
+}
+.key-combo {
+  display: inline-flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.key-combo .key {
+  display: inline-block;
+  padding: 2px 6px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.2;
+}
+.key-combo .key-or {
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+
+/* Settings modal styles */
+.settings-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.settings-field label {
+  display: block;
+  color: var(--text-secondary);
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+.settings-hint {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.settings-hint code {
+  font-family: var(--font-mono);
+  background: var(--bg-primary);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+.settings-form input[type='text'],
+.settings-form select {
+  width: 100%;
+  padding: 8px 10px;
+  font-size: 12px;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+}
+.settings-form optgroup {
+  color: var(--text-secondary);
+}
+.help-btn {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  padding: 6px 10px;
+}
+
+/* Ensure header overrides apply equally to help + settings (not accent) */
+.header .help-btn,
+.header .settings-btn {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+
+.settings-form option {
+  color: var(--text-primary);
+}
+
+.submit-review-modal {
+  width: 920px;
+  max-width: 94vw;
+}
+
+.submit-review-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin: 2px 0 14px;
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--accent-color), transparent 90%);
+  border: 1px solid color-mix(in srgb, var(--accent-color), var(--border-color) 48%);
+  border-radius: 8px;
+}
+
+.submit-review-summary-item {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.submit-review-summary-item strong {
+  color: var(--text-primary);
+  font-size: 18px;
+  line-height: 1;
+}
+
+.submit-review-summary-item span,
+.submit-review-summary-hint {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.submit-review-summary-hint {
+  margin-left: auto;
+  text-align: right;
+}
+
+.comment-preview {
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--border-color), var(--text-secondary) 18%);
+  border-radius: 8px;
+  margin-bottom: 14px;
+  background: var(--bg-secondary);
+  box-shadow: var(--shadow-sm);
+}
+
+.comment-preview-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  background: color-mix(in srgb, var(--bg-elevated), var(--bg-primary) 28%);
+  border-bottom: 1px solid var(--border-color);
+  padding: 9px 12px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.comment-preview-location {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.comment-preview-side {
+  flex-shrink: 0;
+  color: var(--text-secondary);
+}
+
+.comment-preview-code {
+  overflow: auto;
+  max-height: 220px;
+  background: var(--bg-primary);
+  border-bottom: 1px solid var(--border-color);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  padding: 6px 0;
+}
+
+.comment-preview-code-line {
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr);
+  gap: 12px;
+  border-left: 2px solid transparent;
+  padding: 0 12px 0 0;
+  white-space: pre;
+}
+
+.comment-preview-code-line.target {
+  border-left-color: var(--accent-color);
+  background: color-mix(in srgb, var(--accent-color), transparent 84%);
+}
+
+.comment-preview-code-line-number {
+  color: var(--text-tertiary);
+  text-align: right;
+  user-select: none;
+}
+
+.comment-preview-code-line-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.comment-preview-text {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+}
+
+.comment-preview-body-plain,
+.comment-preview-action-text,
+.comment-preview-quote {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.comment-preview-body-plain {
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.comment-preview-action {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: 10px;
+  background: color-mix(in srgb, var(--accent-color), transparent 91%);
+  border: 1px solid color-mix(in srgb, var(--accent-color), var(--border-color) 55%);
+  border-radius: 6px;
+}
+
+.comment-preview-action-badge {
+  padding: 2px 5px;
+  border: 1px solid color-mix(in srgb, var(--accent-color), var(--border-color) 36%);
+  border-radius: 4px;
+  color: var(--accent-color);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1.3;
+  text-transform: uppercase;
+}
+
+.comment-preview-action-text {
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.comment-preview-review {
+  overflow: hidden;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+}
+
+.comment-preview-review-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.comment-preview-review-label {
+  font-weight: 600;
+}
+
+.comment-preview-review-author {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.comment-preview-quote {
+  margin: 0;
+  padding: 10px 12px 10px 14px;
+  border-left: 3px solid var(--accent-color);
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.comment-preview-source {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.checkbox-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.checkbox-wrapper span {
+  color: var(--text-secondary);
+}
+
+/* Make the Monaco diff hidden-lines expand strips visible as clickable buttons */
+.monaco-editor .diff-hidden-lines .top,
+.monaco-editor .diff-hidden-lines .bottom {
+  height: 18px !important;
+  border: none !important;
+  background-color: transparent !important;
+  cursor: pointer !important;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.4;
+  transition: opacity 0.15s ease;
+}
+
+.monaco-editor .diff-hidden-lines .top::after,
+.monaco-editor .diff-hidden-lines .bottom::after {
+  content: '';
+  width: 40px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--vscode-focusBorder, #007fd4);
+  display: block;
+}
+
+.monaco-editor .diff-hidden-lines .top::after {
+  box-shadow:
+    0 -3px 0 var(--vscode-focusBorder, #007fd4),
+    0 3px 0 var(--vscode-focusBorder, #007fd4);
+}
+
+.monaco-editor .diff-hidden-lines .bottom::after {
+  box-shadow:
+    0 -3px 0 var(--vscode-focusBorder, #007fd4),
+    0 3px 0 var(--vscode-focusBorder, #007fd4);
+}
+
+.monaco-editor .diff-hidden-lines .top:hover,
+.monaco-editor .diff-hidden-lines .bottom:hover {
+  opacity: 1;
+  background-color: transparent !important;
+}
+
+/* Series navigation */
+#commit-strip {
+  background: var(--bg-secondary);
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+
+.commit-strip-resizer {
+  height: 4px;
+  background: var(--border-color);
+  cursor: ns-resize;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border-color);
+  transition: background 0.1s;
+}
+
+.commit-strip-resizer:hover,
+.commit-strip-resizer.dragging {
+  background: var(--accent-color, #007acc);
+}
+
+.series-nav {
+  display: flex;
+  flex-direction: column;
+}
+
+.series-commit {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  border-left: 2px solid transparent;
+  transition: background 0.1s;
+}
+
+.series-commit:hover {
+  background: var(--bg-elevated);
+}
+
+.series-commit.active {
+  border-left-color: var(--accent-color, #f97316);
+  background: var(--bg-elevated);
+}
+
+.series-commit-num {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  min-width: 16px;
+  padding-top: 2px;
+}
+
+.series-commit-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.series-commit-msg {
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-primary);
+}
+
+.series-commit-meta {
+  font-size: 10px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+.series-hash {
+  font-family: var(--font-mono);
+}
+
+.delta-add {
+  color: #22c55e;
+}
+
+.delta-del {
+  color: #ef4444;
+}

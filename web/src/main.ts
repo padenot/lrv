@@ -1,0 +1,39 @@
+import './perf';
+import './themes';
+import { MonacoApp } from './monaco-app';
+import type { AppContext } from './types/app';
+
+document.title = 'lrv — Loading…';
+
+window.DEBUG = false;
+window.__APP_READY = false;
+
+if (window.DEBUG) {
+  window.addEventListener('error', function (e: ErrorEvent) {
+    console.info('[onerror]', e.message, e.filename, e.lineno, e.colno);
+  });
+}
+
+performance.mark('page:script-start');
+window.addEventListener(
+  'DOMContentLoaded',
+  () => {
+    performance.mark('page:dom-content-loaded');
+  },
+  { once: true },
+);
+window.addEventListener(
+  'load',
+  () => {
+    performance.mark('page:load-event');
+  },
+  { once: true },
+);
+
+const app = new MonacoApp();
+window.__APP = app as Partial<Pick<AppContext, 'eagerPrefetchAllFiles'>>;
+app.init().then(() => {
+  if (window.DEBUG) {
+    console.info('Monaco Editor initialized');
+  }
+});

@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="en" data-ui-ready="0">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>lrv - local review</title>
+    <link rel="icon" type="image/png" sizes="16x16" href="/assets/lrv-favicon-16.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/assets/lrv-favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="48x48" href="/assets/lrv-favicon-48.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/assets/lrv-favicon-180.png" />
+    <!-- External app styles -->
+    <link rel="stylesheet" href="/assets/app.css" />
+  </head>
+  <body>
+    <!-- Lightweight inline preloader (fox tail waggle) -->
+    <div
+      id="preloader-overlay"
+      style="
+        position: fixed;
+        inset: 0;
+        background: #161b22;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 2147483647;
+      "
+    >
+      <canvas
+        id="preloader-canvas"
+        width="600"
+        height="600"
+        style="width: min(80vw, 600px); height: min(80vh, 600px)"
+      ></canvas>
+    </div>
+    <script id="preloader" nonce="__CSP_NONCE__">
+      (function () {
+        const m = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)');
+        if (m && m.matches) {
+          const ov = document.getElementById('preloader-overlay');
+          if (ov) {
+            ov.remove();
+          }
+          const ed = document.getElementById('editor-container');
+          if (ed) {
+            ed.style.opacity = '1';
+          }
+          return;
+        }
+        try {
+          document.documentElement.classList.add('preloading');
+        } catch {}
+        const d = document,
+          w = window;
+        const c = d.getElementById('preloader-canvas');
+        if (!c) {
+          return;
+        }
+        const ctx = c.getContext('2d');
+        const DPR = Math.max(1, w.devicePixelRatio || 1);
+        const CSS_W = Math.min(w.innerWidth * 0.8, 600);
+        const CSS_H = Math.min(w.innerHeight * 0.8, 600);
+        c.style.width = CSS_W + 'px';
+        c.style.height = CSS_H + 'px';
+        c.width = Math.round(CSS_W * DPR);
+        c.height = Math.round(CSS_H * DPR);
+        ctx.scale(DPR, DPR);
+        const W = CSS_W,
+          H = CSS_H;
+        let t0 = performance.now();
+        let rafId = 0;
+        const BG = '#161b22';
+        const SCLERA = '#ffffff';
+        const IRIS = '#ff7a00';
+        const PUPIL = '#000000';
+        function easeInOut(t) {
+          return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+        }
+        function blinkOpen(t) {
+          if (t >= 500) {
+            return 1;
+          }
+          const ph = t / 500;
+          if (ph < 0.2) {
+            return 1;
+          }
+          if (ph < 0.4) {
+            return 1 - easeInOut((ph - 0.2) / 0.2);
+          }
+          if (ph < 0.6) {
+            return easeInOut((ph - 0.4) / 0.2);
+          }
+          if (ph < 0.8) {
+            return 1 - easeInOut((ph - 0.6) / 0.2);
+          }
+          return easeInOut((ph - 0.8) / 0.2);
+        }
+        function drawEye(t) {
+          ctx.clearRect(0, 0, W, H);
+          ctx.save();
+          ctx.translate(W / 2, H / 2);
+          const rx = 234,
+            ry = 152; // 2x from previous
+          const open = blinkOpen(t);
+          const halo = ctx.createRadialGradient(0, 0, 8, 0, 0, rx + 18);
+          halo.addColorStop(0, 'rgba(255,122,0,0.18)');
+          halo.addColorStop(1, 'rgba(22,27,34,0)');
+          ctx.fillStyle = halo;
+          ctx.beginPath();
+          ctx.ellipse(0, 0, rx + 22, ry + 22, 0, 0, Math.PI * 2);
+          ctx.fill();
+
+          // Sclera as horizontal almond (lens)
+          ctx.fillStyle = SCLERA;
+          ctx.beginPath();
+          ctx.moveTo(-rx, 0);
+          ctx.bezierCurveTo(-rx * 0.4, -ry, rx * 0.4, -ry, rx, 0);
+          ctx.bezierCurveTo(rx * 0.4, ry, -rx * 0.4, ry, -rx, 0);
+          ctx.closePath();
+          ctx.fill();
+          // Iris + pupil (clipped to almond)
+          const irisR = Math.max(ry - 6, 10);
+          const drift = Math.sin(t * 0.0023) * 2.5;
+          ctx.save();
+          ctx.beginPath();
+          ctx.moveTo(-rx, 0);
+          ctx.bezierCurveTo(-rx * 0.4, -ry, rx * 0.4, -ry, rx, 0);
+          ctx.bezierCurveTo(rx * 0.4, ry, -rx * 0.4, ry, -rx, 0);
+          ctx.closePath();
+          ctx.clip();
+          ctx.save();
+          ctx.translate(drift, 0);
+          ctx.fillStyle = IRIS;
+          ctx.beginPath();
+          ctx.arc(0, 0, irisR, 0, Math.PI * 2);
+          ctx.fill();
+          // Almond pupil (pointed tips via cubic Béziers)
+          const aw = Math.max(irisR * 0.34, 8);
+          const ah = Math.max(irisR * 0.9, 14);
+          ctx.fillStyle = PUPIL;
+          ctx.beginPath();
+          ctx.moveTo(0, -ah / 2);
+          ctx.bezierCurveTo(+aw * 0.7, -ah * 0.4, +aw * 0.7, +ah * 0.4, 0, +ah / 2);
+          ctx.bezierCurveTo(-aw * 0.7, +ah * 0.4, -aw * 0.7, -ah * 0.4, 0, -ah / 2);
+          ctx.closePath();
+          ctx.fill();
+          ctx.restore();
+          // Stationary highlight (still clipped)
+          ctx.fillStyle = 'rgba(255,255,255,0.9)';
+          ctx.beginPath();
+          ctx.arc(
+            -Math.min(irisR * 0.3, 7),
+            -Math.min(irisR * 0.3, 7),
+            Math.max(irisR * 0.12, 2.2),
+            0,
+            Math.PI * 2,
+          );
+          ctx.fill();
+          ctx.restore();
+          // Lids (mask with background color) — meet at center when closed
+          const openH = Math.max(0, ry * open);
+          const gap = openH * 2;
+          const coverH = Math.max(0, H / 2 - gap / 2);
+          ctx.fillStyle = BG;
+          // Top lid
+          ctx.fillRect(-W, -H / 2, W * 2, coverH);
+          // Bottom lid
+          ctx.fillRect(-W, gap / 2, W * 2, coverH);
+          // Eyelid outline as almond (fox black rim)
+          ctx.strokeStyle = '#000000';
+          ctx.lineWidth = 10;
+          ctx.beginPath();
+          ctx.moveTo(-rx, 0);
+          ctx.bezierCurveTo(-rx * 0.4, -ry, rx * 0.4, -ry, rx, 0);
+          ctx.bezierCurveTo(rx * 0.4, ry, -rx * 0.4, ry, -rx, 0);
+          ctx.closePath();
+          ctx.stroke();
+          ctx.restore();
+        }
+        function loop(now) {
+          drawEye(now - t0);
+          rafId = requestAnimationFrame(loop);
+        }
+        rafId = requestAnimationFrame(loop);
+        // Hide when app ready
+        const hide = () => {
+          const ov = d.getElementById('preloader-overlay');
+          if (!ov) {
+            return;
+          }
+          const cv = ov.querySelector('canvas');
+          const ed = d.getElementById('editor-container');
+          if (cv) {
+            cv.style.transition = 'opacity .15s ease';
+            cv.style.opacity = '0';
+          }
+          setTimeout(() => {
+            ov.remove();
+            cancelAnimationFrame(rafId);
+            if (ed) {
+              ed.style.transition = 'opacity .12s ease';
+              ed.style.opacity = '1';
+            }
+            try {
+              document.documentElement.classList.remove('preloading');
+            } catch {}
+          }, 180);
+        };
+        let tries = 0;
+        const timer = setInterval(() => {
+          if (w.__APP_READY) {
+            clearInterval(timer);
+            hide();
+          }
+          if (++tries > 600) {
+            clearInterval(timer);
+          }
+        }, 25);
+        // Fallback hide after 5s
+        setTimeout(hide, 5000);
+      })();
+    </script>
+    <div class="header">
+      <h1>
+        <span class="wordmark">lrv</span>
+        <span class="project-info" id="project-info"></span>
+        <span class="review-time" id="review-time"></span>
+      </h1>
+      <div class="header-actions">
+        <span class="public-banner" id="public-banner" style="display: none">PUBLIC MODE</span>
+        <span class="old-missing-banner" id="old-missing-banner" style="display: none"
+          >Old content unavailable</span
+        >
+        <span class="nav-indicator" id="nav-indicator" style="display: none"></span>
+        <span class="comment-badge"><span id="comment-count">0</span> comments</span>
+        <button id="help-btn" class="help-btn" title="Keyboard Shortcuts">?</button>
+        <button id="settings-btn" class="settings-btn">Settings</button>
+        <button id="toggle-view">Inline/Side-by-Side</button>
+        <button id="toggle-stacked">Stacked</button>
+        <button id="submit-review">Submit Review</button>
+      </div>
+    </div>
+    <div id="skill-banner" class="skill-banner" style="display: none">
+      <span
+        >Claude Code skill is missing or outdated — lrv won't work correctly as a slash
+        command.</span
+      >
+      <button id="skill-install-btn" class="skill-install-btn">Install/update skill</button>
+      <button id="skill-dismiss-btn" class="skill-dismiss-btn" aria-label="Dismiss">✕</button>
+    </div>
+    <div class="main">
+      <div class="sidebar" id="sidebar">
+        <div id="commit-strip" style="display: none"></div>
+        <div id="commit-strip-resizer" class="commit-strip-resizer" style="display: none"></div>
+        <div class="sidebar-section">
+          <div class="sidebar-header">
+            <h2>Files</h2>
+            <button
+              id="sidebar-collapse-btn"
+              class="sidebar-collapse-btn"
+              type="button"
+              aria-label="Collapse sidebar"
+              title="Collapse sidebar"
+            >
+              ‹
+            </button>
+          </div>
+          <div class="stats" id="stats"></div>
+          <div class="file-list-toolbar">
+            <input
+              id="file-list-filter"
+              class="file-list-filter"
+              type="text"
+              placeholder="Filter paths..."
+              aria-label="Filter files"
+            />
+            <div class="file-list-toolbar-actions">
+              <button id="collapse-all-dirs" class="btn-secondary" type="button">
+                Collapse All
+              </button>
+              <button id="expand-all-dirs" class="btn-secondary" type="button">Expand All</button>
+            </div>
+          </div>
+          <div class="file-list-summary" id="file-list-summary"></div>
+          <div class="file-list-scroll" id="file-list-scroll">
+            <ul class="file-list" id="file-list"></ul>
+          </div>
+        </div>
+        <div class="sidebar-resizer" id="sidebar-resizer"></div>
+      </div>
+      <div class="content">
+        <div id="editor-container"></div>
+        <div id="stacked-container" style="display: none"></div>
+      </div>
+    </div>
+
+    <!-- Monaco AMD loader and external app script -->
+    <script src="/assets/vendor/monaco/min/vs/loader.js"></script>
+    <script type="module" src="/assets/app/main.js"></script>
+  </body>
+</html>

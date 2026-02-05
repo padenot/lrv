@@ -1,0 +1,18 @@
+/target
+
+# macOS
+.DS_Store
+
+# Editor temp files
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+
+# Generated bench outputs
+bench-results/
+ 
+# Node
+node_modules/
