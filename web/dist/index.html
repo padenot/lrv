@@ -1,0 +1,1185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LocalReview - Monaco Editor</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #1e1e1e;
+      color: #d4d4d4;
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .header {
+      background: #252526;
+      padding: 8px 16px;
+      border-bottom: 1px solid #3e3e42;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      z-index: 100;
+      flex-shrink: 0;
+    }
+
+    .header h1 {
+      font-size: 14px;
+      font-weight: 500;
+    }
+
+    .header-actions {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .comment-badge {
+      background: #3e3e42;
+      color: #d4d4d4;
+      padding: 4px 10px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 500;
+    }
+
+
+    .header button {
+      background: #0e639c;
+      color: white;
+      border: none;
+      padding: 6px 12px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    .header button:hover {
+      background: #1177bb;
+    }
+
+    .header button:disabled {
+      background: #555;
+      cursor: not-allowed;
+    }
+
+    .main {
+      display: flex;
+      flex: 1;
+      min-height: 0;
+    }
+
+    .sidebar {
+      width: 280px;
+      min-width: 150px;
+      max-width: 600px;
+      background: #252526;
+      border-right: 1px solid #3e3e42;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+    }
+
+    .sidebar-resizer {
+      position: absolute;
+      top: 0;
+      right: 0;
+      width: 4px;
+      height: 100%;
+      cursor: ew-resize;
+      background: transparent;
+      z-index: 10;
+    }
+
+    .sidebar-resizer:hover,
+    .sidebar-resizer.dragging {
+      background: #0e639c;
+    }
+
+    .sidebar-section {
+      padding: 16px;
+    }
+
+    .sidebar-section h2 {
+      font-size: 13px;
+      text-transform: uppercase;
+      color: #888;
+      margin-bottom: 12px;
+      font-weight: 600;
+    }
+
+    .stats {
+      font-size: 12px;
+      color: #888;
+      margin-bottom: 16px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid #3e3e42;
+    }
+
+    .file-list {
+      list-style: none;
+    }
+
+    .file-list li {
+      padding: 8px 12px;
+      cursor: pointer;
+      border-radius: 4px;
+      font-size: 13px;
+      margin-bottom: 2px;
+      transition: background 0.1s;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .file-list li:hover {
+      background: #2a2d2e;
+    }
+
+    .file-list li.active {
+      background: #094771;
+      color: #ffffff;
+    }
+
+    .file-status {
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 3px;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+
+    .file-status.modified { background: #1a7f37; color: white; }
+    .file-status.added { background: #1a7f37; color: white; }
+    .file-status.deleted { background: #cf222e; color: white; }
+    .file-status.renamed { background: #bf8700; color: white; }
+
+    .content {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      position: relative;
+      min-height: 0;
+    }
+
+    .file-header {
+      background: #252526;
+      padding: 8px 16px;
+      border-bottom: 1px solid #3e3e42;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-shrink: 0;
+    }
+
+    .file-header h2 {
+      font-size: 13px;
+      font-weight: 500;
+      margin: 0;
+    }
+
+    #editor-container {
+      flex: 1;
+      position: relative;
+      overflow: visible;
+    }
+
+
+    .inline-comment-box {
+      background: #2d2d30;
+      border: 1px solid #3e3e42;
+      border-radius: 4px;
+      padding: 12px;
+      width: 500px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+      margin: 8px 0;
+    }
+
+    .inline-comment-box h3 {
+      margin-bottom: 8px;
+      font-size: 12px;
+      font-weight: 500;
+      color: #888;
+    }
+
+    .comment-textarea {
+      width: 100%;
+      min-height: 80px;
+      padding: 10px;
+      background: #1e1e1e;
+      border: 1px solid #3e3e42;
+      border-radius: 4px;
+      color: #d4d4d4;
+      font-family: inherit;
+      font-size: 13px;
+      resize: vertical;
+      line-height: 1.4;
+    }
+
+    .comment-textarea:focus {
+      outline: none;
+      border-color: #0e639c;
+    }
+
+    .comment-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin-top: 12px;
+    }
+
+    .shortcut-hint {
+      color: #888;
+      font-size: 11px;
+      margin-right: auto;
+    }
+
+    .comment-actions button {
+      padding: 6px 14px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    .btn-primary {
+      background: #0e639c;
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: #1177bb;
+    }
+
+    .btn-secondary {
+      background: #3e3e42;
+      color: #d4d4d4;
+    }
+
+    .btn-secondary:hover {
+      background: #505050;
+    }
+
+    .btn-danger {
+      background: #c42b1c;
+      color: white;
+    }
+
+    .btn-danger:hover {
+      background: #e81123;
+    }
+
+    #expand-top-container {
+      position: sticky;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 100;
+      background: #1e1e1e;
+      pointer-events: auto;
+      display: none;
+    }
+
+    #expand-bottom-container {
+      position: sticky;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      z-index: 100;
+      background: #1e1e1e;
+      pointer-events: auto;
+      display: none;
+    }
+
+    #editor-container {
+      flex: 1;
+      position: relative;
+      overflow: visible;
+    }
+
+    .expand-controls {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      padding: 8px 20px;
+      background: #1e1e1e;
+      border: 1px solid #3e3e42;
+    }
+
+    .expand-btn {
+      background: #3e3e42;
+      color: #d4d4d4;
+      border: none;
+      padding: 4px 12px;
+      border-radius: 3px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    .expand-btn:hover {
+      background: #505050;
+    }
+
+    .expand-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .expand-line {
+      flex: 1;
+      height: 1px;
+      background: #3e3e42;
+    }
+
+    .line-comment-marker {
+      background: #0e639c;
+      width: 4px;
+      margin-left: 2px;
+    }
+
+    .empty-state {
+      padding: 32px;
+      text-align: center;
+      color: #888;
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>LocalReview</h1>
+    <div class="header-actions">
+      <span class="comment-badge"><span id="comment-count">0</span> comments</span>
+      <button id="toggle-view">Inline/Side-by-Side</button>
+      <button id="submit-review">Submit Review</button>
+    </div>
+  </div>
+  <div class="main">
+    <div class="sidebar" id="sidebar">
+      <div class="sidebar-section">
+        <h2>Files</h2>
+        <div class="stats" id="stats"></div>
+        <ul class="file-list" id="file-list"></ul>
+      </div>
+      <div class="sidebar-resizer" id="sidebar-resizer"></div>
+    </div>
+    <div class="content">
+      <div class="file-header">
+        <h2 id="current-file">No file selected</h2>
+        <button id="show-full-file" class="btn-secondary" style="display:none;">Show Full File</button>
+      </div>
+      <div id="expand-top-container"></div>
+      <div id="editor-container"></div>
+      <div id="expand-bottom-container"></div>
+    </div>
+  </div>
+
+  <!-- Load Monaco Editor from CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.js"></script>
+
+  <script>
+    // Mock diff data
+    // Comment Manager
+    class CommentManager {
+      constructor() {
+        this.comments = [];
+        this.listeners = [];
+      }
+
+      addComment(comment) {
+        this.comments.push(comment);
+        this.notifyListeners();
+      }
+
+      removeComment(index) {
+        this.comments.splice(index, 1);
+        this.notifyListeners();
+      }
+
+      findComment(file, line, side) {
+        return this.comments.findIndex(c =>
+          c.file === file && c.start_line === line && c.side === side
+        );
+      }
+
+      updateComment(index, newBody) {
+        if (index >= 0 && index < this.comments.length) {
+          this.comments[index].body = newBody;
+          this.notifyListeners();
+        }
+      }
+
+      getComments() {
+        return [...this.comments];
+      }
+
+      getCommentsForFile(file) {
+        return this.comments.filter(c => c.file === file);
+      }
+
+      onChange(listener) {
+        this.listeners.push(listener);
+      }
+
+      notifyListeners() {
+        this.listeners.forEach(l => l());
+      }
+    }
+
+    // Monaco App
+    class MonacoApp {
+      constructor() {
+        this.commentManager = new CommentManager();
+        this.currentFileIndex = 0;
+        this.editor = null;
+        this.isInline = false;
+        this.modifiedDecorations = [];
+        this.originalDecorations = [];
+        this.currentWidget = null;
+        this.diff = null;
+        this.fileRanges = {}; // Track visible ranges per file
+
+        this.commentManager.onChange(() => this.updateUI());
+      }
+
+      async init() {
+        // Load diff data from API
+        const diffResponse = await fetch('/api/diff');
+        const diffData = await diffResponse.json();
+        this.diff = await this.convertHunksToDiff(diffData);
+
+        require.config({ paths: { vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs' } });
+
+        return new Promise((resolve) => {
+          require(['vs/editor/editor.main'], () => {
+            this.setupUI();
+            this.renderFileList();
+            this.loadFile(0);
+            resolve();
+          });
+        });
+      }
+
+      async convertHunksToDiff(diffData) {
+        // Convert hunk-based diff to full file content format for Monaco
+        const files = await Promise.all(diffData.files.map(async (file) => {
+          // Get the actual file content to properly pad and align
+          const [oldResponse, newResponse] = await Promise.all([
+            fetch(`/api/file?path=${encodeURIComponent(file.path)}&side=old`),
+            fetch(`/api/file?path=${encodeURIComponent(file.path)}&side=new`)
+          ]);
+
+          const oldData = await oldResponse.json();
+          const newData = await newResponse.json();
+
+          const oldAllLines = oldData.content.split('\n');
+          const newAllLines = newData.content.split('\n');
+
+          // Find the range covered by hunks
+          let oldLineStart = Infinity;
+          let oldLineEnd = 0;
+          let newLineStart = Infinity;
+          let newLineEnd = 0;
+
+          file.hunks.forEach(hunk => {
+            hunk.lines.forEach(line => {
+              if (line.old_line) {
+                oldLineStart = Math.min(oldLineStart, line.old_line);
+                oldLineEnd = Math.max(oldLineEnd, line.old_line);
+              }
+              if (line.new_line) {
+                newLineStart = Math.min(newLineStart, line.new_line);
+                newLineEnd = Math.max(newLineEnd, line.new_line);
+              }
+            });
+          });
+
+          // Extract just the visible range from the actual files
+          const oldContent = oldAllLines.slice(oldLineStart - 1, oldLineEnd).join('\n');
+          const newContent = newAllLines.slice(newLineStart - 1, newLineEnd).join('\n');
+
+          // Track the visible range for this file
+          this.fileRanges[file.path] = {
+            old: { start: oldLineStart, end: oldLineEnd },
+            new: { start: newLineStart, end: newLineEnd },
+            hasFullContent: false,
+            totalOldLines: oldAllLines.length,
+            totalNewLines: newAllLines.length
+          };
+
+          return {
+            path: file.path,
+            old_path: file.old_path,
+            status: file.status,
+            old_content: oldContent,
+            new_content: newContent
+          };
+        }));
+
+        return {
+          files,
+          stats: diffData.stats
+        };
+      }
+
+      setupUI() {
+        // File list clicks
+        document.getElementById('file-list').addEventListener('click', (e) => {
+          const li = e.target.closest('li');
+          if (li) {
+            const index = parseInt(li.dataset.index);
+            this.loadFile(index);
+          }
+        });
+
+        // Submit button
+        document.getElementById('submit-review').addEventListener('click', async () => {
+          const comments = this.commentManager.getComments();
+
+          try {
+            await fetch('/api/complete', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ comments })
+            });
+            alert(`Review submitted with ${comments.length} comments. Check the terminal for output.`);
+            document.getElementById('submit-review').disabled = true;
+            document.getElementById('submit-review').textContent = 'Review Submitted';
+          } catch (error) {
+            alert(`Failed to submit review: ${error}`);
+          }
+        });
+
+        // Toggle view
+        document.getElementById('toggle-view').addEventListener('click', () => {
+          this.isInline = !this.isInline;
+          this.loadFile(this.currentFileIndex);
+        });
+
+        // Stats
+        document.getElementById('stats').textContent =
+          `${this.diff.stats.files_changed} files, +${this.diff.stats.additions} -${this.diff.stats.deletions}`;
+
+        // Sidebar resizer
+        this.setupSidebarResizer();
+      }
+
+      setupSidebarResizer() {
+        const sidebar = document.getElementById('sidebar');
+        const resizer = document.getElementById('sidebar-resizer');
+        let isResizing = false;
+
+        resizer.addEventListener('mousedown', (e) => {
+          isResizing = true;
+          resizer.classList.add('dragging');
+          document.body.style.cursor = 'ew-resize';
+          document.body.style.userSelect = 'none';
+          e.preventDefault();
+        });
+
+        document.addEventListener('mousemove', (e) => {
+          if (!isResizing) return;
+          const newWidth = e.clientX;
+          if (newWidth >= 150 && newWidth <= 600) {
+            sidebar.style.width = newWidth + 'px';
+          }
+        });
+
+        document.addEventListener('mouseup', () => {
+          if (isResizing) {
+            isResizing = false;
+            resizer.classList.remove('dragging');
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+          }
+        });
+      }
+
+      renderFileList() {
+        const list = document.getElementById('file-list');
+        list.innerHTML = '';
+
+        this.diff.files.forEach((file, index) => {
+          const li = document.createElement('li');
+          li.dataset.index = index;
+          li.className = index === this.currentFileIndex ? 'active' : '';
+
+          const name = document.createElement('span');
+          name.textContent = file.path;
+
+          const status = document.createElement('span');
+          status.className = `file-status ${file.status}`;
+          status.textContent = file.status[0].toUpperCase();
+
+          li.appendChild(name);
+          li.appendChild(status);
+          list.appendChild(li);
+        });
+      }
+
+      loadFile(index) {
+        this.currentFileIndex = index;
+        const file = this.diff.files[index];
+
+        // Update UI
+        document.getElementById('current-file').textContent = file.path;
+
+        // Update show full file button
+        const showFullBtn = document.getElementById('show-full-file');
+        const range = this.fileRanges[file.path];
+        if (range && range.hasFullContent) {
+          showFullBtn.style.display = 'none';
+        } else {
+          showFullBtn.style.display = 'block';
+          showFullBtn.disabled = false;
+          showFullBtn.textContent = 'Show Full File';
+          showFullBtn.onclick = () => this.loadFullFile(index);
+        }
+
+        this.renderFileList();
+        this.renderExpandControls();
+
+        // Dispose old editor
+        if (this.editor) {
+          this.editor.dispose();
+        }
+
+        // Determine language from file extension
+        const extension = file.path.split('.').pop();
+        const languageMap = {
+          'rs': 'rust',
+          'js': 'javascript',
+          'ts': 'typescript',
+          'py': 'python',
+          'md': 'markdown',
+          'json': 'json',
+          'html': 'html',
+          'css': 'css'
+        };
+        const language = languageMap[extension] || 'plaintext';
+
+        // Create diff editor
+        const container = document.getElementById('editor-container');
+        this.editor = monaco.editor.createDiffEditor(container, {
+          theme: 'vs-dark',
+          renderSideBySide: !this.isInline,
+          readOnly: true,
+          originalEditable: false,
+          automaticLayout: true,
+          scrollBeyondLastLine: false,
+          minimap: { enabled: true },
+          fontSize: 13,
+          lineNumbers: 'on',
+          renderOverviewRuler: true,
+          scrollbar: {
+            vertical: 'visible',
+            horizontal: 'visible'
+          }
+        });
+
+        const originalModel = monaco.editor.createModel(file.old_content, language);
+        const modifiedModel = monaco.editor.createModel(file.new_content, language);
+
+        this.editor.setModel({
+          original: originalModel,
+          modified: modifiedModel
+        });
+
+        // Set custom line numbers to show actual file line numbers
+        const modifiedEditor = this.editor.getModifiedEditor();
+        const originalEditor = this.editor.getOriginalEditor();
+
+        let newOffset = 0;
+        let oldOffset = 0;
+
+        if (range && !range.hasFullContent) {
+          newOffset = range.new.start - 1;
+          oldOffset = range.old.start - 1;
+
+          modifiedEditor.updateOptions({
+            lineNumbers: (lineNumber) => (lineNumber + newOffset).toString(),
+            lineNumbersMinChars: 4
+          });
+
+          originalEditor.updateOptions({
+            lineNumbers: (lineNumber) => (lineNumber + oldOffset).toString(),
+            lineNumbersMinChars: 4
+          });
+        } else {
+          modifiedEditor.updateOptions({ lineNumbers: 'on' });
+          originalEditor.updateOptions({ lineNumbers: 'on' });
+        }
+
+        // Add click handler for comments on BOTH sides
+        modifiedEditor.onMouseDown((e) => {
+          if (e.target.type === monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS) {
+            const monacoLine = e.target.position.lineNumber;
+            const fileLineNumber = monacoLine + newOffset;
+            this.showCommentDialog(file.path, fileLineNumber, monacoLine, 'new');
+          }
+        });
+
+        originalEditor.onMouseDown((e) => {
+          if (e.target.type === monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS) {
+            const monacoLine = e.target.position.lineNumber;
+            const fileLineNumber = monacoLine + oldOffset;
+            this.showCommentDialog(file.path, fileLineNumber, monacoLine, 'old');
+          }
+        });
+
+        // Update decorations for existing comments
+        this.updateDecorations();
+
+        // Setup scroll listener to show/hide bottom expand control
+        this.setupScrollListener();
+      }
+
+      updateDecorations() {
+        if (!this.editor) return;
+
+        const file = this.diff.files[this.currentFileIndex];
+        const comments = this.commentManager.getCommentsForFile(file.path);
+        const modifiedEditor = this.editor.getModifiedEditor();
+        const originalEditor = this.editor.getOriginalEditor();
+
+        // Decorations for modified (new) side
+        const modifiedDecorations = comments
+          .filter(c => c.side === 'new')
+          .map(comment => ({
+            range: new monaco.Range(comment.start_line, 1, comment.start_line, 1),
+            options: {
+              isWholeLine: true,
+              className: 'line-comment-marker',
+              glyphMarginClassName: 'line-comment-marker',
+              glyphMarginHoverMessage: { value: comment.body }
+            }
+          }));
+
+        // Decorations for original (old) side
+        const originalDecorations = comments
+          .filter(c => c.side === 'old')
+          .map(comment => ({
+            range: new monaco.Range(comment.start_line, 1, comment.start_line, 1),
+            options: {
+              isWholeLine: true,
+              className: 'line-comment-marker',
+              glyphMarginClassName: 'line-comment-marker',
+              glyphMarginHoverMessage: { value: comment.body }
+            }
+          }));
+
+        this.modifiedDecorations = modifiedEditor.deltaDecorations(this.modifiedDecorations || [], modifiedDecorations);
+        this.originalDecorations = originalEditor.deltaDecorations(this.originalDecorations || [], originalDecorations);
+      }
+
+      showCommentDialog(file, fileLineNumber, monacoLineNumber, side) {
+        const targetEditor = side === 'new'
+          ? this.editor.getModifiedEditor()
+          : this.editor.getOriginalEditor();
+
+        // Remove any existing widget
+        if (this.currentWidget) {
+          if (this.currentWidgetEditor) {
+            this.currentWidgetEditor.removeContentWidget(this.currentWidget);
+          }
+          this.currentWidget = null;
+          this.currentWidgetEditor = null;
+        }
+
+        const sideLabel = side === 'new' ? 'Modified' : 'Original';
+
+        // Check for existing comment
+        const existingIndex = this.commentManager.findComment(file, fileLineNumber, side);
+        const existingComment = existingIndex >= 0 ? this.commentManager.comments[existingIndex] : null;
+
+        // Create the widget
+        const domNode = document.createElement('div');
+        domNode.className = 'inline-comment-box';
+        const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+        const modKey = isMac ? '⌘' : 'Ctrl';
+        const deleteBtnHtml = existingComment ? '<button class="btn-danger delete-btn">Delete</button>' : '';
+        domNode.innerHTML = `
+          <h3>Line ${fileLineNumber} (${sideLabel})${existingComment ? ' - Edit' : ''}</h3>
+          <textarea class="comment-textarea" placeholder="Add your comment..." autofocus>${existingComment ? existingComment.body : ''}</textarea>
+          <div class="comment-actions">
+            <span class="shortcut-hint">${modKey}+Enter to save</span>
+            ${deleteBtnHtml}
+            <button class="btn-secondary cancel-btn">Cancel</button>
+            <button class="btn-primary save-btn">Save</button>
+          </div>
+        `;
+
+        const widget = {
+          getId: () => 'inline.comment.widget',
+          getDomNode: () => domNode,
+          getPosition: () => ({
+            position: {
+              lineNumber: monacoLineNumber,
+              column: 1
+            },
+            preference: [
+              monaco.editor.ContentWidgetPositionPreference.BELOW
+            ]
+          })
+        };
+
+        targetEditor.addContentWidget(widget);
+        this.currentWidget = widget;
+        this.currentWidgetEditor = targetEditor;
+
+        const saveBtn = domNode.querySelector('.save-btn');
+        const cancelBtn = domNode.querySelector('.cancel-btn');
+        const textarea = domNode.querySelector('.comment-textarea');
+
+        // Keyboard shortcuts
+        const handleKeydown = (e) => {
+          if (e.key === 'Escape') {
+            cleanup();
+          } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+            e.preventDefault();
+            saveComment();
+          }
+        };
+        document.addEventListener('keydown', handleKeydown);
+
+        const cleanup = () => {
+          targetEditor.removeContentWidget(widget);
+          this.currentWidget = null;
+          document.removeEventListener('keydown', handleKeydown);
+        };
+
+        const saveComment = () => {
+          if (!textarea.value.trim()) {
+            textarea.focus();
+            return;
+          }
+
+          if (existingIndex >= 0) {
+            this.commentManager.updateComment(existingIndex, textarea.value);
+          } else {
+            const comment = {
+              file,
+              start_line: fileLineNumber,
+              end_line: fileLineNumber,
+              side,
+              body: textarea.value,
+              severity: 'comment',
+            };
+            this.commentManager.addComment(comment);
+          }
+          this.updateDecorations();
+          cleanup();
+        };
+
+        saveBtn.onclick = saveComment;
+        cancelBtn.onclick = cleanup;
+
+        // Delete button (only present for existing comments)
+        const deleteBtnEl = domNode.querySelector('.delete-btn');
+        if (deleteBtnEl) {
+          deleteBtnEl.onclick = () => {
+            this.commentManager.removeComment(existingIndex);
+            this.updateDecorations();
+            cleanup();
+          };
+        }
+
+        // Focus after a brief delay to let Monaco position the widget
+        setTimeout(() => textarea.focus(), 100);
+      }
+
+      async loadFullFile(index) {
+        const file = this.diff.files[index];
+
+        // Fetch full file content for both sides
+        const [oldResponse, newResponse] = await Promise.all([
+          fetch(`/api/file?path=${encodeURIComponent(file.path)}&side=old`),
+          fetch(`/api/file?path=${encodeURIComponent(file.path)}&side=new`)
+        ]);
+
+        const oldData = await oldResponse.json();
+        const newData = await newResponse.json();
+
+        // Update the file object with full content
+        this.diff.files[index].old_content = oldData.content;
+        this.diff.files[index].new_content = newData.content;
+        this.diff.files[index].is_full = true;
+
+        // Update tracking BEFORE reloading
+        const range = this.fileRanges[file.path];
+        range.hasFullContent = true;
+        range.old.start = 1;
+        range.old.end = range.totalOldLines;
+        range.new.start = 1;
+        range.new.end = range.totalNewLines;
+
+        // Reload the editor with full content
+        this.loadFile(index);
+
+        // Update button
+        const showFullBtn = document.getElementById('show-full-file');
+        showFullBtn.style.display = 'none';
+      }
+
+      async renderExpandControls() {
+        // Remove existing controls
+        document.querySelectorAll('.expand-controls').forEach(el => el.remove());
+
+        const file = this.diff.files[this.currentFileIndex];
+        const range = this.fileRanges[file.path];
+
+        console.log(`renderExpandControls for ${file.path}`);
+        console.log(`Range:`, range);
+
+        if (!range || range.hasFullContent) {
+          console.log(`Skipping: ${!range ? 'no range' : 'has full content'}`);
+          return;
+        }
+
+        // Fetch total line counts if we don't have them
+        if (range.totalOldLines === null || range.totalNewLines === null) {
+          await this.fetchFileLengths(file.path);
+        }
+
+        console.log(`Total lines: old=${range.totalOldLines}, new=${range.totalNewLines}`);
+        console.log(`Current range: old ${range.old.start}-${range.old.end}, new ${range.new.start}-${range.new.end}`);
+
+        const topContainer = document.getElementById('expand-top-container');
+        const bottomContainer = document.getElementById('expand-bottom-container');
+
+        // Calculate available lines above and below current view
+        // Use the maximum of old/new sides since they may have different lengths
+        const availableAboveOld = Math.max(0, range.old.start - 1);
+        const availableAboveNew = Math.max(0, range.new.start - 1);
+        const availableAbove = Math.max(availableAboveOld, availableAboveNew);
+
+        const availableBelowOld = Math.max(0, range.totalOldLines - range.old.end);
+        const availableBelowNew = Math.max(0, range.totalNewLines - range.new.end);
+        const availableBelow = Math.max(availableBelowOld, availableBelowNew);
+
+        // If showing full content on both sides, mark as such and hide controls
+        if (availableAbove === 0 && availableBelow === 0) {
+          range.hasFullContent = true;
+          document.getElementById('show-full-file').style.display = 'none';
+          topContainer.innerHTML = '';
+          bottomContainer.innerHTML = '';
+          bottomContainer.style.display = 'none';
+          console.log(`Already showing full file`);
+          return;
+        }
+
+        console.log(`Available: above=${availableAbove} (old=${availableAboveOld}, new=${availableAboveNew}), below=${availableBelow} (old=${availableBelowOld}, new=${availableBelowNew})`);
+
+        // Clear previous controls
+        topContainer.innerHTML = '';
+        bottomContainer.innerHTML = '';
+
+        // Add expand controls
+        if (availableAbove > 0) {
+          console.log(`Adding top control`);
+          const topControl = this.createExpandControl('top', file.path, availableAbove);
+          topContainer.appendChild(topControl);
+          // Will be shown/hidden by scroll listener
+        } else {
+          topContainer.style.display = 'none';
+        }
+
+        if (availableBelow > 0) {
+          console.log(`Adding bottom control`);
+          const bottomControl = this.createExpandControl('bottom', file.path, availableBelow);
+          bottomContainer.appendChild(bottomControl);
+          // Will be shown/hidden by scroll listener
+        } else {
+          console.log(`NOT adding bottom control - availableBelow=${availableBelow}`);
+          bottomContainer.style.display = 'none';
+        }
+      }
+
+      setupScrollListener() {
+        if (!this.editor) return;
+
+        const modifiedEditor = this.editor.getModifiedEditor();
+
+        // Listen for scroll changes
+        modifiedEditor.onDidScrollChange(() => {
+          this.checkExpandVisibility();
+        });
+
+        // Initial check
+        setTimeout(() => this.checkExpandVisibility(), 100);
+      }
+
+      checkExpandVisibility() {
+        if (!this.editor) return;
+
+        const modifiedEditor = this.editor.getModifiedEditor();
+        const visibleRanges = modifiedEditor.getVisibleRanges();
+
+        if (visibleRanges.length === 0) return;
+
+        const firstVisibleLine = visibleRanges[0].startLineNumber;
+        const lastVisibleLine = visibleRanges[visibleRanges.length - 1].endLineNumber;
+        const totalLines = modifiedEditor.getModel().getLineCount();
+
+        // Show top expand button when within 3 lines of top
+        const topContainer = document.getElementById('expand-top-container');
+        if (topContainer && topContainer.querySelector('.expand-controls')) {
+          const nearTop = firstVisibleLine <= 4;
+          topContainer.style.display = nearTop ? 'block' : 'none';
+        }
+
+        // Show bottom expand button when within 3 lines of bottom
+        const bottomContainer = document.getElementById('expand-bottom-container');
+        if (bottomContainer && bottomContainer.querySelector('.expand-controls')) {
+          const nearBottom = lastVisibleLine >= totalLines - 3;
+          bottomContainer.style.display = nearBottom ? 'block' : 'none';
+        }
+      }
+
+      async fetchFileLengths(filePath) {
+        const range = this.fileRanges[filePath];
+
+        const [oldResponse, newResponse] = await Promise.all([
+          fetch(`/api/file?path=${encodeURIComponent(filePath)}&side=old`),
+          fetch(`/api/file?path=${encodeURIComponent(filePath)}&side=new`)
+        ]);
+
+        const oldData = await oldResponse.json();
+        const newData = await newResponse.json();
+
+        range.totalOldLines = oldData.content.split('\n').length;
+        range.totalNewLines = newData.content.split('\n').length;
+      }
+
+      createExpandControl(position, filePath, availableLines) {
+        const expandAmount = Math.min(20, availableLines);
+        const control = document.createElement('div');
+        control.className = `expand-controls ${position}`;
+        control.innerHTML = `
+          <div class="expand-line"></div>
+          <button class="expand-btn" data-position="${position}" data-file="${filePath}">
+            ↕ Expand ${position === 'top' ? 'Above' : 'Below'} (+${expandAmount} line${expandAmount === 1 ? '' : 's'})
+          </button>
+          <div class="expand-line"></div>
+        `;
+
+        const btn = control.querySelector('.expand-btn');
+        btn.onclick = () => this.expandLines(position, filePath);
+
+        return control;
+      }
+
+      async expandLines(position, filePath) {
+        const range = this.fileRanges[filePath];
+        const file = this.diff.files.find(f => f.path === filePath);
+        if (!file) return;
+
+        console.log(`Expanding ${position} for ${filePath}`);
+        console.log(`Current range: old ${range.old.start}-${range.old.end}, new ${range.new.start}-${range.new.end}`);
+
+        // Fetch the full file content
+        const [oldResponse, newResponse] = await Promise.all([
+          fetch(`/api/file?path=${encodeURIComponent(filePath)}&side=old`),
+          fetch(`/api/file?path=${encodeURIComponent(filePath)}&side=new`)
+        ]);
+
+        const oldData = await oldResponse.json();
+        const newData = await newResponse.json();
+
+        const oldLines = oldData.content.split('\n');
+        const newLines = newData.content.split('\n');
+
+        console.log(`File lengths: old ${oldLines.length}, new ${newLines.length}`);
+
+        // Calculate new range
+        const expandAmount = 20;
+        let newOldStart = range.old.start;
+        let newOldEnd = range.old.end;
+        let newNewStart = range.new.start;
+        let newNewEnd = range.new.end;
+
+        if (position === 'top') {
+          newOldStart = Math.max(1, range.old.start - expandAmount);
+          newNewStart = Math.max(1, range.new.start - expandAmount);
+        } else {
+          // Expand below, but don't exceed file length
+          newOldEnd = Math.min(oldLines.length, range.old.end + expandAmount);
+          newNewEnd = Math.min(newLines.length, range.new.end + expandAmount);
+        }
+
+        console.log(`New range: old ${newOldStart}-${newOldEnd}, new ${newNewStart}-${newNewEnd}`);
+
+        // Extract the lines we need (0-indexed slice from 1-indexed line numbers)
+        file.old_content = oldLines.slice(newOldStart - 1, newOldEnd).join('\n');
+        file.new_content = newLines.slice(newNewStart - 1, newNewEnd).join('\n');
+
+        console.log(`Extracted content lengths: old ${file.old_content.split('\n').length}, new ${file.new_content.split('\n').length}`);
+
+        // Update range
+        range.old.start = newOldStart;
+        range.old.end = newOldEnd;
+        range.new.start = newNewStart;
+        range.new.end = newNewEnd;
+
+        // Update total line counts if not set
+        if (range.totalOldLines === null) range.totalOldLines = oldLines.length;
+        if (range.totalNewLines === null) range.totalNewLines = newLines.length;
+
+        // Save scroll position before reloading
+        let scrollLineNumber = null;
+        if (this.editor) {
+          const modifiedEditor = this.editor.getModifiedEditor();
+          const visibleRanges = modifiedEditor.getVisibleRanges();
+          if (visibleRanges.length > 0) {
+            scrollLineNumber = visibleRanges[0].startLineNumber;
+          }
+        }
+
+        // Calculate how many lines were actually added at top
+        const oldNewStart = range.new.start;
+
+        // Reload editor
+        this.loadFile(this.currentFileIndex);
+
+        // Restore scroll position after a brief delay for editor to initialize
+        if (scrollLineNumber !== null) {
+          setTimeout(() => {
+            if (this.editor) {
+              const modifiedEditor = this.editor.getModifiedEditor();
+              // If we expanded at top, adjust scroll by actual lines added
+              const linesAddedAtTop = position === 'top' ? (oldNewStart - newNewStart) : 0;
+              const adjustedLine = scrollLineNumber + linesAddedAtTop;
+              modifiedEditor.revealLineInCenter(adjustedLine);
+            }
+          }, 50);
+        }
+      }
+
+      updateUI() {
+        const count = this.commentManager.getComments().length;
+        document.getElementById('comment-count').textContent = count.toString();
+      }
+    }
+
+    // Initialize app
+    const app = new MonacoApp();
+    app.init().then(() => {
+      console.log('Monaco Editor initialized');
+    });
+  </script>
+</body>
+</html>
