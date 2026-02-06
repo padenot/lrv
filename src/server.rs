@@ -8,6 +8,7 @@ use axum::{
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 use serde::Deserialize;
+use crate::config::UserConfig;
 use crate::types::*;
 
 #[derive(Deserialize)]
@@ -21,12 +22,16 @@ pub struct AppState {
     pub diff: Arc<DiffResponse>,
     pub comments: Arc<Mutex<Vec<Comment>>>,
     pub shutdown_tx: Arc<Mutex<Option<mpsc::Sender<()>>>>,
+    pub config: Arc<Mutex<UserConfig>>,
+    pub context: Arc<ProjectContext>,
 }
 
 pub fn create_router(state: AppState) -> Router {
     Router::new()
         .route("/", get(serve_index))
         .route("/api/diff", get(get_diff))
+        .route("/api/context", get(get_context))
+        .route("/api/config", get(get_config).put(update_config))
         .route("/api/file", get(get_file_content))
         .route("/api/comment", post(add_comment))
         .route("/api/complete", post(complete_review))
@@ -41,14 +46,23 @@ async fn get_diff(State(state): State<AppState>) -> Json<DiffResponse> {
     Json((*state.diff).clone())
 }
 
+async fn get_context(State(state): State<AppState>) -> Json<ProjectContext> {
+    Json((*state.context).clone())
+}
+
 async fn get_file_content(
+    State(state): State<AppState>,
     Query(query): Query<FileQuery>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
+    // Get the working directory from context
+    let base_path = std::path::Path::new(&state.context.working_directory);
+
     // Try to read the file from disk
     let content = match query.side.as_str() {
         "new" => {
             // For new side, try to read current file
-            std::fs::read_to_string(&query.path)
+            let file_path = base_path.join(&query.path);
+            std::fs::read_to_string(&file_path)
                 .unwrap_or_else(|_| String::new())
         }
         "old" => {
@@ -92,4 +106,23 @@ async fn complete_review(
     }
 
     StatusCode::OK
+}
+
+async fn get_config(State(state): State<AppState>) -> Json<UserConfig> {
+    let config = state.config.lock().await;
+    Json(config.clone())
+}
+
+async fn update_config(
+    State(state): State<AppState>,
+    Json(new_config): Json<UserConfig>,
+) -> Result<StatusCode, StatusCode> {
+    let mut config = state.config.lock().await;
+    *config = new_config.clone();
+
+    // Persist to disk
+    crate::config::save_config(&new_config)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(StatusCode::OK)
 }

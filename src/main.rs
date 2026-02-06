@@ -1,3 +1,4 @@
+mod config;
 mod diff;
 mod output;
 mod server;
@@ -13,6 +14,51 @@ use tracing_subscriber;
 
 use crate::output::OutputFormat;
 use crate::server::{create_router, AppState};
+use crate::types::ProjectContext;
+
+fn get_project_context() -> ProjectContext {
+    // Get git repository root as working directory
+    let working_directory = Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .output()
+        .ok()
+        .and_then(|output| {
+            if output.status.success() {
+                String::from_utf8(output.stdout)
+                    .ok()
+                    .map(|s| s.trim().to_string())
+            } else {
+                None
+            }
+        })
+        .or_else(|| {
+            // Fallback to current directory if not in a git repo
+            std::env::current_dir()
+                .ok()
+                .and_then(|p| p.to_str().map(String::from))
+        })
+        .unwrap_or_else(|| String::from("unknown"));
+
+    // Try to get git branch
+    let git_branch = Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .output()
+        .ok()
+        .and_then(|output| {
+            if output.status.success() {
+                String::from_utf8(output.stdout)
+                    .ok()
+                    .map(|s| s.trim().to_string())
+            } else {
+                None
+            }
+        });
+
+    ProjectContext {
+        working_directory,
+        git_branch,
+    }
+}
 
 fn get_network_interfaces() -> Vec<String> {
     let mut interfaces = Vec::new();
@@ -61,7 +107,7 @@ fn get_network_interfaces() -> Vec<String> {
 }
 
 #[derive(Parser, Debug)]
-#[command(name = "localreview")]
+#[command(name = "lrv")]
 #[command(about = "Local code review tool for LLM agents", long_about = None)]
 struct Args {
     /// Command to run to get diff (e.g., "git diff", "jj diff")
@@ -137,6 +183,16 @@ async fn main() -> Result<()> {
     let output_format: OutputFormat = args.format.parse()
         .context("Invalid output format")?;
 
+    // Load user config
+    let user_config = config::load_config()
+        .unwrap_or_else(|e| {
+            eprintln!("Warning: Failed to load config, using defaults: {}", e);
+            config::UserConfig::default()
+        });
+
+    // Get project context
+    let project_context = get_project_context();
+
     // Setup shutdown channel
     let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
 
@@ -145,6 +201,8 @@ async fn main() -> Result<()> {
         diff: Arc::new(diff),
         comments: Arc::new(Mutex::new(Vec::new())),
         shutdown_tx: Arc::new(Mutex::new(Some(shutdown_tx))),
+        config: Arc::new(Mutex::new(user_config)),
+        context: Arc::new(project_context),
     };
 
     // Create router

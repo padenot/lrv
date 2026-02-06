@@ -14,7 +14,7 @@ pub struct FileDiff {
     pub hunks: Vec<Hunk>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum FileStatus {
     Modified,
@@ -91,4 +91,10 @@ pub struct ReviewOutput {
     pub status: String,
     pub comments: Vec<Comment>,
     pub summary: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectContext {
+    pub working_directory: String,
+    pub git_branch: Option<String>,
 }

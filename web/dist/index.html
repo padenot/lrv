@@ -3,8 +3,26 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>LocalReview - Monaco Editor</title>
+  <title>lrv - local review</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Geist+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>
+    /* Dynamic theme variables - set by JavaScript based on Monaco editor theme */
+    :root {
+      --bg-primary: #1e1e1e;
+      --bg-secondary: #252526;
+      --bg-elevated: #2d2d30;
+      --border-color: #3e3e42;
+      --text-primary: #cccccc;
+      --text-secondary: #858585;
+      --accent-color: #007acc;
+      --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      --font-mono: 'JetBrains Mono', 'Monaco', 'Menlo', 'Consolas', monospace;
+      --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
+      --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
+    }
+
     * {
       margin: 0;
       padding: 0;
@@ -12,9 +30,9 @@
     }
 
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: #1e1e1e;
-      color: #d4d4d4;
+      font-family: var(--font-sans);
+      background: var(--bg-primary);
+      color: var(--text-primary);
       height: 100vh;
       overflow: hidden;
       display: flex;
@@ -22,9 +40,9 @@
     }
 
     .header {
-      background: #252526;
+      background: var(--bg-secondary);
       padding: 8px 16px;
-      border-bottom: 1px solid #3e3e42;
+      border-bottom: 1px solid var(--border-color);
       display: flex;
       justify-content: space-between;
       align-items: center;
@@ -41,9 +59,29 @@
     }
 
     .review-time {
-      color: #888;
+      color: var(--text-secondary);
       font-size: 12px;
       font-weight: 400;
+    }
+
+    .project-info {
+      color: var(--text-tertiary);
+      font-size: 12px;
+      font-weight: 400;
+    }
+
+    .project-info-value {
+      color: var(--text-secondary);
+      font-family: var(--font-mono);
+    }
+
+    .git-branch {
+      color: var(--accent-color);
+    }
+
+    .project-info-separator {
+      margin: 0 8px;
+      color: var(--border-color);
     }
 
     .header-actions {
@@ -52,33 +90,44 @@
       align-items: center;
     }
 
+    .settings-btn {
+      background: var(--bg-elevated);
+      color: var(--text-primary);
+      padding: 6px 10px;
+    }
+
+    .settings-btn:hover {
+      background: var(--border-color);
+    }
+
     .comment-badge {
-      background: #3e3e42;
-      color: #d4d4d4;
+      background: var(--bg-elevated);
+      color: var(--text-primary);
       padding: 4px 10px;
-      border-radius: 12px;
+      border-radius: 0px;
       font-size: 11px;
       font-weight: 500;
     }
 
 
     .header button {
-      background: #0e639c;
+      background: var(--accent-color);
       color: white;
       border: none;
       padding: 6px 12px;
-      border-radius: 4px;
+      border-radius: 0px;
       cursor: pointer;
       font-size: 12px;
       font-weight: 500;
+      transition: background 0.15s ease;
     }
 
     .header button:hover {
-      background: #1177bb;
+      opacity: 0.8;
     }
 
     .header button:disabled {
-      background: #555;
+      background: var(--text-tertiary);
       cursor: not-allowed;
     }
 
@@ -92,8 +141,8 @@
       width: 280px;
       min-width: 150px;
       max-width: 600px;
-      background: #252526;
-      border-right: 1px solid #3e3e42;
+      background: var(--bg-secondary);
+      border-right: 1px solid var(--border-color);
       overflow-y: auto;
       display: flex;
       flex-direction: column;
@@ -113,7 +162,7 @@
 
     .sidebar-resizer:hover,
     .sidebar-resizer.dragging {
-      background: #0e639c;
+      background: var(--accent-color);
     }
 
     .sidebar-section {
@@ -123,17 +172,19 @@
     .sidebar-section h2 {
       font-size: 13px;
       text-transform: uppercase;
-      color: #888;
+      color: var(--text-secondary);
       margin-bottom: 12px;
       font-weight: 600;
+      letter-spacing: 0.5px;
     }
 
     .stats {
       font-size: 12px;
-      color: #888;
+      color: var(--text-secondary);
       margin-bottom: 16px;
       padding-bottom: 12px;
-      border-bottom: 1px solid #3e3e42;
+      border-bottom: 1px solid var(--border-color);
+      font-family: var(--font-mono);
     }
 
     .file-list {
@@ -143,22 +194,55 @@
     .file-list li {
       padding: 8px 12px;
       cursor: pointer;
-      border-radius: 4px;
+      border-radius: 0px;
       font-size: 13px;
       margin-bottom: 2px;
-      transition: background 0.1s;
+      transition: all 0.15s ease;
       display: flex;
       justify-content: space-between;
       align-items: center;
+      font-family: var(--font-mono);
+      border-left: 3px solid transparent;
     }
 
     .file-list li:hover {
-      background: #2a2d2e;
+      background: var(--bg-elevated);
     }
 
     .file-list li.active {
-      background: #094771;
-      color: #ffffff;
+      background: var(--bg-elevated);
+      border-left-color: var(--accent-color);
+      color: var(--text-primary);
+    }
+
+    .file-list-actions {
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px solid var(--border-color);
+    }
+
+    .file-action-btn {
+      width: 100%;
+      padding: 8px 12px;
+      background: var(--bg-elevated);
+      color: var(--text-primary);
+      border: none;
+      border-radius: 0px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 500;
+      transition: all 0.15s ease;
+      text-align: left;
+    }
+
+    .file-action-btn:hover {
+      background: var(--bg-elevated);
+      color: var(--text-primary);
+    }
+
+    .file-action-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
     }
 
     .file-status {
@@ -184,19 +268,7 @@
     }
 
     .file-header {
-      background: #252526;
-      padding: 8px 16px;
-      border-bottom: 1px solid #3e3e42;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      flex-shrink: 0;
-    }
-
-    .file-header h2 {
-      font-size: 13px;
-      font-weight: 500;
-      margin: 0;
+      display: none;
     }
 
     #editor-container {
@@ -207,12 +279,12 @@
 
 
     .inline-comment-box {
-      background: #2d2d30;
-      border: 1px solid #3e3e42;
-      border-radius: 4px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-color);
+      border-radius: 0px;
       padding: 12px;
       width: 500px;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+      box-shadow: var(--shadow-md);
       margin: 8px 0;
     }
 
@@ -220,26 +292,27 @@
       margin-bottom: 8px;
       font-size: 12px;
       font-weight: 500;
-      color: #888;
+      color: var(--text-secondary);
     }
 
     .comment-textarea {
       width: 100%;
       min-height: 80px;
       padding: 10px;
-      background: #1e1e1e;
-      border: 1px solid #3e3e42;
-      border-radius: 4px;
-      color: #d4d4d4;
-      font-family: inherit;
+      background: var(--bg-primary);
+      border: 1px solid var(--border-color);
+      border-radius: 0px;
+      color: var(--text-primary);
+      font-family: var(--font-sans);
       font-size: 13px;
       resize: vertical;
       line-height: 1.4;
+      transition: border-color 0.15s ease;
     }
 
     .comment-textarea:focus {
       outline: none;
-      border-color: #0e639c;
+      border-color: var(--accent-color);
     }
 
     .comment-actions {
@@ -250,36 +323,38 @@
     }
 
     .shortcut-hint {
-      color: #888;
+      color: var(--text-secondary);
       font-size: 11px;
       margin-right: auto;
+      font-family: var(--font-mono);
     }
 
     .comment-actions button {
       padding: 6px 14px;
       border: none;
-      border-radius: 4px;
+      border-radius: 0px;
       cursor: pointer;
       font-size: 12px;
       font-weight: 500;
+      transition: all 0.15s ease;
     }
 
     .btn-primary {
-      background: #0e639c;
+      background: var(--accent-color);
       color: white;
     }
 
     .btn-primary:hover {
-      background: #1177bb;
+      opacity: 0.8;
     }
 
     .btn-secondary {
-      background: #3e3e42;
-      color: #d4d4d4;
+      background: var(--bg-elevated);
+      color: var(--text-primary);
     }
 
     .btn-secondary:hover {
-      background: #505050;
+      background: var(--border-color);
     }
 
     .btn-danger {
@@ -297,7 +372,7 @@
       left: 0;
       right: 0;
       z-index: 100;
-      background: #1e1e1e;
+      background: var(--bg-primary);
       pointer-events: auto;
       display: none;
     }
@@ -308,7 +383,7 @@
       left: 0;
       right: 0;
       z-index: 100;
-      background: #1e1e1e;
+      background: var(--bg-primary);
       pointer-events: auto;
       display: none;
     }
@@ -324,23 +399,25 @@
       gap: 8px;
       align-items: center;
       padding: 8px 20px;
-      background: #1e1e1e;
-      border: 1px solid #3e3e42;
+      background: var(--bg-primary);
+      border: 1px solid var(--border-color);
     }
 
     .expand-btn {
-      background: #3e3e42;
-      color: #d4d4d4;
+      background: var(--bg-elevated);
+      color: var(--text-primary);
       border: none;
       padding: 4px 12px;
       border-radius: 3px;
       cursor: pointer;
       font-size: 12px;
       font-weight: 500;
+      transition: all 0.15s ease;
     }
 
     .expand-btn:hover {
-      background: #505050;
+      background: var(--bg-elevated);
+      color: var(--text-primary);
     }
 
     .expand-btn:disabled {
@@ -351,19 +428,23 @@
     .expand-line {
       flex: 1;
       height: 1px;
-      background: #3e3e42;
+      background: var(--border-color);
     }
 
     .line-comment-marker {
-      background: #0e639c;
+      background: var(--accent-color);
       width: 4px;
       margin-left: 2px;
+    }
+
+    .focused-hunk-line {
+      border-left: 3px solid var(--accent-color);
     }
 
     .empty-state {
       padding: 32px;
       text-align: center;
-      color: #888;
+      color: var(--text-secondary);
       font-size: 13px;
     }
 
@@ -379,23 +460,24 @@
       align-items: center;
       justify-content: center;
       padding: 20px;
+      backdrop-filter: blur(4px);
     }
 
     .submit-modal {
-      background: #2d2d30;
-      border: 1px solid #3e3e42;
-      border-radius: 6px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-color);
+      border-radius: 0px;
       max-width: 900px;
       max-height: 80vh;
       width: 100%;
       display: flex;
       flex-direction: column;
-      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.7);
+      box-shadow: var(--shadow-md);
     }
 
     .submit-modal-header {
       padding: 16px 20px;
-      border-bottom: 1px solid #3e3e42;
+      border-bottom: 1px solid var(--border-color);
       display: flex;
       justify-content: space-between;
       align-items: center;
@@ -410,7 +492,7 @@
     .submit-modal-close {
       background: transparent;
       border: none;
-      color: #888;
+      color: var(--text-secondary);
       cursor: pointer;
       font-size: 20px;
       padding: 0;
@@ -419,12 +501,13 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      border-radius: 4px;
+      border-radius: 0px;
+      transition: all 0.15s ease;
     }
 
     .submit-modal-close:hover {
-      background: #3e3e42;
-      color: #d4d4d4;
+      background: var(--bg-elevated);
+      color: var(--accent-color);
     }
 
     .submit-modal-body {
@@ -434,26 +517,27 @@
     }
 
     .comment-preview {
-      background: #1e1e1e;
-      border: 1px solid #3e3e42;
-      border-radius: 4px;
+      background: var(--bg-primary);
+      border: 1px solid var(--border-color);
+      border-radius: 0px;
       padding: 16px;
       margin-bottom: 16px;
     }
 
     .comment-preview-header {
       font-size: 12px;
-      color: #888;
+      color: var(--text-secondary);
       margin-bottom: 12px;
       font-weight: 500;
+      font-family: var(--font-mono);
     }
 
     .comment-preview-code {
-      background: #252526;
-      border: 1px solid #3e3e42;
-      border-radius: 3px;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-color);
+      border-radius: 0px;
       padding: 10px;
-      font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+      font-family: var(--font-mono);
       font-size: 12px;
       margin-bottom: 10px;
       overflow-x: auto;
@@ -465,22 +549,23 @@
     }
 
     .comment-preview-code-line.target {
-      background: #094771;
+      background: var(--bg-elevated);
       margin: 0 -10px;
       padding: 0 10px;
+      border-left: 3px solid var(--accent-color);
     }
 
     .comment-preview-text {
       font-size: 13px;
       line-height: 1.5;
-      color: #d4d4d4;
+      color: var(--text-primary);
       white-space: pre-wrap;
       word-break: break-word;
     }
 
     .submit-modal-footer {
       padding: 16px 20px;
-      border-top: 1px solid #3e3e42;
+      border-top: 1px solid var(--border-color);
       display: flex;
       justify-content: flex-end;
       gap: 12px;
@@ -499,16 +584,17 @@
     .shortcuts-table th {
       text-align: left;
       padding: 8px 12px;
-      border-bottom: 1px solid #3e3e42;
+      border-bottom: 1px solid var(--border-color);
       font-size: 11px;
       text-transform: uppercase;
-      color: #888;
+      color: var(--text-secondary);
       font-weight: 600;
+      letter-spacing: 0.5px;
     }
 
     .shortcuts-table td {
       padding: 10px 12px;
-      border-bottom: 1px solid #3e3e42;
+      border-bottom: 1px solid var(--border-color);
       font-size: 13px;
     }
 
@@ -523,29 +609,88 @@
     }
 
     .key {
-      background: #3e3e42;
-      color: #d4d4d4;
+      background: var(--bg-elevated);
+      color: var(--text-primary);
       padding: 3px 8px;
-      border-radius: 3px;
-      font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+      border-radius: 0px;
+      font-family: var(--font-mono);
       font-size: 11px;
       font-weight: 500;
-      border: 1px solid #555;
-      box-shadow: 0 1px 0 #555;
+      border: 1px solid var(--border-color);
+      box-shadow: var(--shadow-sm);
     }
 
     .key-or {
-      color: #888;
+      color: var(--text-secondary);
       font-size: 11px;
       align-self: center;
+    }
+
+    .settings-form {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      padding: 10px 0;
+    }
+
+    .settings-field {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .settings-field label {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-primary);
+    }
+
+    .settings-field select,
+    .settings-field input[type="text"] {
+      background: var(--bg-primary);
+      border: 1px solid var(--border-color);
+      border-radius: 0px;
+      color: var(--text-primary);
+      padding: 8px 12px;
+      font-size: 13px;
+      font-family: var(--font-sans);
+      transition: border-color 0.15s ease;
+    }
+
+    .settings-field select:focus,
+    .settings-field input[type="text"]:focus {
+      outline: none;
+      border-color: var(--accent-color);
+    }
+
+    .settings-field input[type="checkbox"] {
+      width: 18px;
+      height: 18px;
+      cursor: pointer;
+      accent-color: var(--accent-color);
+    }
+
+    .checkbox-wrapper {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .checkbox-wrapper span {
+      color: var(--text-secondary);
     }
   </style>
 </head>
 <body>
   <div class="header">
-    <h1>LocalReview <span class="review-time" id="review-time"></span></h1>
+    <h1>
+      lrv
+      <span class="project-info" id="project-info"></span>
+      <span class="review-time" id="review-time"></span>
+    </h1>
     <div class="header-actions">
       <span class="comment-badge"><span id="comment-count">0</span> comments</span>
+      <button id="settings-btn" class="settings-btn">Settings</button>
       <button id="toggle-view">Inline/Side-by-Side</button>
       <button id="submit-review">Submit Review</button>
     </div>
@@ -556,14 +701,13 @@
         <h2>Files</h2>
         <div class="stats" id="stats"></div>
         <ul class="file-list" id="file-list"></ul>
+        <div class="file-list-actions">
+          <button id="show-full-file" class="file-action-btn" style="display:none;">📄 Show Full File</button>
+        </div>
       </div>
       <div class="sidebar-resizer" id="sidebar-resizer"></div>
     </div>
     <div class="content">
-      <div class="file-header">
-        <h2 id="current-file">No file selected</h2>
-        <button id="show-full-file" class="btn-secondary" style="display:none;">Show Full File</button>
-      </div>
       <div id="expand-top-container"></div>
       <div id="editor-container"></div>
       <div id="expand-bottom-container"></div>
@@ -642,30 +786,46 @@
         this.isInline = false;
         this.modifiedDecorations = [];
         this.originalDecorations = [];
+        this.focusedHunkDecorations = [];
         this.currentWidget = null;
         this.diff = null;
         this.fileRanges = {}; // Track visible ranges per file
         this.fileHunks = {}; // Track hunk start lines per file: { [path]: number[] }
         this.currentHunkIndex = {}; // Track current hunk index per file
+        this.config = null; // User config from server
 
         this.commentManager.onChange(() => this.updateUI());
       }
 
       async init() {
-        // Load diff data from API
-        const diffResponse = await fetch('/api/diff');
+        // Load config, context, and diff data from API
+        const [configResponse, contextResponse, diffResponse] = await Promise.all([
+          fetch('/api/config'),
+          fetch('/api/context'),
+          fetch('/api/diff')
+        ]);
+
+        this.config = await configResponse.json();
+        this.context = await contextResponse.json();
         const diffData = await diffResponse.json();
         this.diff = await this.convertHunksToDiff(diffData);
+
+        // Apply split view setting from config
+        this.isInline = !this.config.split_view;
 
         require.config({ paths: { vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs' } });
 
         return new Promise((resolve) => {
           require(['vs/editor/editor.main'], () => {
+            this.defineCustomThemes();
+            this.applyThemeToUI(this.config.color_scheme || 'vs-dark');
             this.setupUI();
             this.renderFileList();
             this.loadFile(0);
             // Set review timestamp
             document.getElementById('review-time').textContent = new Date().toLocaleString();
+            // Set project info
+            this.renderProjectInfo();
             resolve();
           });
         });
@@ -692,14 +852,17 @@
           let newLineStart = Infinity;
           let newLineEnd = 0;
 
-          // Track hunk start lines for keyboard navigation
-          const hunkStarts = [];
+          // Track hunk ranges for keyboard navigation
+          const hunkRanges = [];
 
           file.hunks.forEach(hunk => {
-            // Store the first new-side line of this hunk
-            const firstNewLine = hunk.lines.find(l => l.new_line)?.new_line;
-            if (firstNewLine) {
-              hunkStarts.push(firstNewLine);
+            // Store the first and last new-side lines of this hunk
+            const newLines = hunk.lines.filter(l => l.new_line).map(l => l.new_line);
+            if (newLines.length > 0) {
+              hunkRanges.push({
+                start: Math.min(...newLines),
+                end: Math.max(...newLines)
+              });
             }
 
             hunk.lines.forEach(line => {
@@ -714,8 +877,8 @@
             });
           });
 
-          // Store hunk positions
-          this.fileHunks[file.path] = hunkStarts;
+          // Store hunk ranges
+          this.fileHunks[file.path] = hunkRanges;
           this.currentHunkIndex[file.path] = 0;
 
           // Extract just the visible range from the actual files
@@ -746,6 +909,263 @@
         };
       }
 
+      applyThemeToUI(themeName) {
+        // Extract colors from Monaco theme and apply to UI
+        const isDark = !themeName.includes('light') && themeName !== 'vs';
+
+        let bgPrimary, bgSecondary, bgElevated, borderColor, textPrimary, textSecondary, accentColor;
+
+        if (isDark) {
+          // Dark theme colors
+          if (themeName === 'github-dark') {
+            bgPrimary = '#0d1117';
+            bgSecondary = '#161b22';
+            bgElevated = '#21262d';
+            borderColor = '#30363d';
+            textPrimary = '#c9d1d9';
+            textSecondary = '#8b949e';
+            accentColor = '#58a6ff';
+          } else if (themeName === 'firefox-devtools-dark') {
+            bgPrimary = '#0c0c0d';
+            bgSecondary = '#1c1b22';
+            bgElevated = '#2b2a33';
+            borderColor = '#38373f';
+            textPrimary = '#b1b1b3';
+            textSecondary = '#8f8f9d';
+            accentColor = '#ff9400';
+          } else if (themeName === 'solarized-dark') {
+            bgPrimary = '#002b36';
+            bgSecondary = '#073642';
+            bgElevated = '#0d4552';
+            borderColor = '#11505d';
+            textPrimary = '#839496';
+            textSecondary = '#586e75';
+            accentColor = '#268bd2';
+          } else {
+            // Default dark (vs-dark, hc-black)
+            bgPrimary = '#1e1e1e';
+            bgSecondary = '#252526';
+            bgElevated = '#2d2d30';
+            borderColor = '#3e3e42';
+            textPrimary = '#cccccc';
+            textSecondary = '#858585';
+            accentColor = '#007acc';
+          }
+        } else {
+          // Light theme colors
+          if (themeName === 'github-light') {
+            bgPrimary = '#ffffff';
+            bgSecondary = '#f6f8fa';
+            bgElevated = '#ffffff';
+            borderColor = '#d0d7de';
+            textPrimary = '#24292f';
+            textSecondary = '#57606a';
+            accentColor = '#0969da';
+          } else if (themeName === 'firefox-devtools-light') {
+            bgPrimary = '#ffffff';
+            bgSecondary = '#f5f5f5';
+            bgElevated = '#ffffff';
+            borderColor = '#e0e0e0';
+            textPrimary = '#222222';
+            textSecondary = '#737373';
+            accentColor = '#0074e8';
+          } else if (themeName === 'solarized-light') {
+            bgPrimary = '#fdf6e3';
+            bgSecondary = '#eee8d5';
+            bgElevated = '#fdf6e3';
+            borderColor = '#d9d2c2';
+            textPrimary = '#657b83';
+            textSecondary = '#93a1a1';
+            accentColor = '#268bd2';
+          } else {
+            // Default light (vs, hc-light)
+            bgPrimary = '#ffffff';
+            bgSecondary = '#f3f3f3';
+            bgElevated = '#ffffff';
+            borderColor = '#cccccc';
+            textPrimary = '#000000';
+            textSecondary = '#6e6e6e';
+            accentColor = '#007acc';
+          }
+        }
+
+        // Apply CSS variables
+        document.documentElement.style.setProperty('--bg-primary', bgPrimary);
+        document.documentElement.style.setProperty('--bg-secondary', bgSecondary);
+        document.documentElement.style.setProperty('--bg-elevated', bgElevated);
+        document.documentElement.style.setProperty('--border-color', borderColor);
+        document.documentElement.style.setProperty('--text-primary', textPrimary);
+        document.documentElement.style.setProperty('--text-secondary', textSecondary);
+        document.documentElement.style.setProperty('--accent-color', accentColor);
+      }
+
+      defineCustomThemes() {
+        // Solarized Dark
+        monaco.editor.defineTheme('solarized-dark', {
+          base: 'vs-dark',
+          inherit: true,
+          rules: [
+            { token: 'comment', foreground: '586e75', fontStyle: 'italic' },
+            { token: 'keyword', foreground: '859900' },
+            { token: 'number', foreground: 'd33682' },
+            { token: 'string', foreground: '2aa198' },
+            { token: 'type', foreground: 'b58900' },
+            { token: 'class', foreground: 'b58900' },
+            { token: 'function', foreground: '268bd2' },
+            { token: 'variable', foreground: '268bd2' },
+            { token: 'constant', foreground: 'd33682' },
+          ],
+          colors: {
+            'editor.background': '#002b36',
+            'editor.foreground': '#839496',
+            'editor.lineHighlightBackground': '#073642',
+            'editorCursor.foreground': '#839496',
+            'editor.selectionBackground': '#073642',
+            'editor.inactiveSelectionBackground': '#073642',
+          }
+        });
+
+        // Solarized Light
+        monaco.editor.defineTheme('solarized-light', {
+          base: 'vs',
+          inherit: true,
+          rules: [
+            { token: 'comment', foreground: '93a1a1', fontStyle: 'italic' },
+            { token: 'keyword', foreground: '859900' },
+            { token: 'number', foreground: 'd33682' },
+            { token: 'string', foreground: '2aa198' },
+            { token: 'type', foreground: 'b58900' },
+            { token: 'class', foreground: 'b58900' },
+            { token: 'function', foreground: '268bd2' },
+            { token: 'variable', foreground: '268bd2' },
+            { token: 'constant', foreground: 'd33682' },
+          ],
+          colors: {
+            'editor.background': '#fdf6e3',
+            'editor.foreground': '#657b83',
+            'editor.lineHighlightBackground': '#eee8d5',
+            'editorCursor.foreground': '#657b83',
+            'editor.selectionBackground': '#eee8d5',
+            'editor.inactiveSelectionBackground': '#eee8d5',
+          }
+        });
+
+        // Firefox DevTools Dark
+        monaco.editor.defineTheme('firefox-devtools-dark', {
+          base: 'vs-dark',
+          inherit: true,
+          rules: [
+            { token: 'comment', foreground: '5c6773', fontStyle: 'italic' },
+            { token: 'keyword', foreground: 'ff7de9' },
+            { token: 'number', foreground: '75bfff' },
+            { token: 'string', foreground: '86de74' },
+            { token: 'type', foreground: '75bfff' },
+            { token: 'class', foreground: 'ff9400' },
+            { token: 'function', foreground: 'ff9400' },
+            { token: 'variable', foreground: 'b1b1b3' },
+            { token: 'constant', foreground: '75bfff' },
+          ],
+          colors: {
+            'editor.background': '#0c0c0d',
+            'editor.foreground': '#b1b1b3',
+            'editor.lineHighlightBackground': '#1c1b22',
+            'editorCursor.foreground': '#b1b1b3',
+            'editor.selectionBackground': '#2b2a33',
+            'editor.inactiveSelectionBackground': '#1c1b22',
+          }
+        });
+
+        // Firefox DevTools Light
+        monaco.editor.defineTheme('firefox-devtools-light', {
+          base: 'vs',
+          inherit: true,
+          rules: [
+            { token: 'comment', foreground: '737373', fontStyle: 'italic' },
+            { token: 'keyword', foreground: 'd92bb4' },
+            { token: 'number', foreground: '0074e8' },
+            { token: 'string', foreground: '058b00' },
+            { token: 'type', foreground: '0074e8' },
+            { token: 'class', foreground: 'c43500' },
+            { token: 'function', foreground: 'c43500' },
+            { token: 'variable', foreground: '222222' },
+            { token: 'constant', foreground: '0074e8' },
+          ],
+          colors: {
+            'editor.background': '#ffffff',
+            'editor.foreground': '#222222',
+            'editor.lineHighlightBackground': '#f5f5f5',
+            'editorCursor.foreground': '#222222',
+            'editor.selectionBackground': '#e6e6e6',
+            'editor.inactiveSelectionBackground': '#f0f0f0',
+          }
+        });
+
+        // GitHub Dark
+        monaco.editor.defineTheme('github-dark', {
+          base: 'vs-dark',
+          inherit: true,
+          rules: [
+            { token: 'comment', foreground: '8b949e', fontStyle: 'italic' },
+            { token: 'keyword', foreground: 'ff7b72' },
+            { token: 'number', foreground: '79c0ff' },
+            { token: 'string', foreground: 'a5d6ff' },
+            { token: 'type', foreground: 'ffa657' },
+            { token: 'class', foreground: 'ffa657' },
+            { token: 'function', foreground: 'd2a8ff' },
+            { token: 'variable', foreground: 'ffa657' },
+            { token: 'constant', foreground: '79c0ff' },
+          ],
+          colors: {
+            'editor.background': '#0d1117',
+            'editor.foreground': '#c9d1d9',
+            'editor.lineHighlightBackground': '#161b22',
+            'editorCursor.foreground': '#c9d1d9',
+            'editor.selectionBackground': '#1f6feb',
+            'editor.inactiveSelectionBackground': '#1f6feb40',
+          }
+        });
+
+        // GitHub Light
+        monaco.editor.defineTheme('github-light', {
+          base: 'vs',
+          inherit: true,
+          rules: [
+            { token: 'comment', foreground: '6e7781', fontStyle: 'italic' },
+            { token: 'keyword', foreground: 'cf222e' },
+            { token: 'number', foreground: '0550ae' },
+            { token: 'string', foreground: '0a3069' },
+            { token: 'type', foreground: '8250df' },
+            { token: 'class', foreground: '8250df' },
+            { token: 'function', foreground: '8250df' },
+            { token: 'variable', foreground: '953800' },
+            { token: 'constant', foreground: '0550ae' },
+          ],
+          colors: {
+            'editor.background': '#ffffff',
+            'editor.foreground': '#24292f',
+            'editor.lineHighlightBackground': '#f6f8fa',
+            'editorCursor.foreground': '#24292f',
+            'editor.selectionBackground': '#0969da30',
+            'editor.inactiveSelectionBackground': '#0969da20',
+          }
+        });
+      }
+
+      renderProjectInfo() {
+        const projectInfo = document.getElementById('project-info');
+
+        // Get just the directory name from the full path
+        const dirName = this.context.working_directory.split('/').pop() || this.context.working_directory;
+
+        let html = `<span class="project-info-separator">·</span><span class="project-info-value" title="${this.context.working_directory}">${dirName}</span>`;
+
+        if (this.context.git_branch) {
+          html += ` <span class="project-info-separator">·</span> <span class="project-info-value git-branch">${this.context.git_branch}</span>`;
+        }
+
+        projectInfo.innerHTML = html;
+      }
+
       setupUI() {
         // File list clicks
         document.getElementById('file-list').addEventListener('click', (e) => {
@@ -754,6 +1174,11 @@
             const index = parseInt(li.dataset.index);
             this.loadFile(index);
           }
+        });
+
+        // Settings button
+        document.getElementById('settings-btn').addEventListener('click', () => {
+          this.showSettingsModal();
         });
 
         // Submit button
@@ -907,13 +1332,41 @@
         const hunks = this.fileHunks[file.path];
         if (!hunks || hunkIndex >= hunks.length) return;
 
-        const fileLineNumber = hunks[hunkIndex];
+        const hunkRange = hunks[hunkIndex];
         const range = this.fileRanges[file.path];
         const offset = range && !range.hasFullContent ? range.new.start - 1 : 0;
-        const monacoLine = fileLineNumber - offset;
+        const monacoStartLine = hunkRange.start - offset;
+        const monacoEndLine = hunkRange.end - offset;
 
         const modifiedEditor = this.editor.getModifiedEditor();
-        modifiedEditor.revealLineInCenter(monacoLine);
+        modifiedEditor.revealLineInCenter(monacoStartLine);
+
+        // Highlight the focused hunk
+        this.highlightFocusedHunk(monacoStartLine, monacoEndLine);
+      }
+
+      highlightFocusedHunk(startLine, endLine) {
+        if (!this.editor) return;
+
+        const modifiedEditor = this.editor.getModifiedEditor();
+
+        // Create decorations for the focused hunk
+        const decorations = [];
+        for (let line = startLine; line <= endLine; line++) {
+          decorations.push({
+            range: new monaco.Range(line, 1, line, 1),
+            options: {
+              isWholeLine: true,
+              className: 'focused-hunk-line'
+            }
+          });
+        }
+
+        // Update decorations
+        this.focusedHunkDecorations = modifiedEditor.deltaDecorations(
+          this.focusedHunkDecorations || [],
+          decorations
+        );
       }
 
       openCommentOnCurrentHunk() {
@@ -924,7 +1377,8 @@
         if (!hunks || hunks.length === 0) return;
 
         const currentIdx = this.currentHunkIndex[file.path] || 0;
-        const fileLineNumber = hunks[currentIdx];
+        const hunkRange = hunks[currentIdx];
+        const fileLineNumber = hunkRange.start;
         const range = this.fileRanges[file.path];
         const offset = range && !range.hasFullContent ? range.new.start - 1 : 0;
         const monacoLine = fileLineNumber - offset;
@@ -973,7 +1427,12 @@
           li.className = index === this.currentFileIndex ? 'active' : '';
 
           const name = document.createElement('span');
-          name.textContent = file.path;
+          // Display renames clearly as "old.txt → new.txt"
+          if (file.status === 'renamed' && file.old_path) {
+            name.textContent = `${file.old_path} → ${file.path}`;
+          } else {
+            name.textContent = file.path;
+          }
 
           const status = document.createElement('span');
           status.className = `file-status ${file.status}`;
@@ -989,9 +1448,6 @@
         this.currentFileIndex = index;
         const file = this.diff.files[index];
 
-        // Update UI
-        document.getElementById('current-file').textContent = file.path;
-
         // Update show full file button
         const showFullBtn = document.getElementById('show-full-file');
         const range = this.fileRanges[file.path];
@@ -1000,7 +1456,7 @@
         } else {
           showFullBtn.style.display = 'block';
           showFullBtn.disabled = false;
-          showFullBtn.textContent = 'Show Full File';
+          showFullBtn.textContent = `Show Full File`;
           showFullBtn.onclick = () => this.loadFullFile(index);
         }
 
@@ -1026,10 +1482,13 @@
         };
         const language = languageMap[extension] || 'plaintext';
 
+        // Use the configured Monaco theme directly
+        const theme = this.config.color_scheme || 'vs-dark';
+
         // Create diff editor
         const container = document.getElementById('editor-container');
         this.editor = monaco.editor.createDiffEditor(container, {
-          theme: 'vs-dark',
+          theme: theme,
           renderSideBySide: !this.isInline,
           readOnly: true,
           originalEditable: false,
@@ -1037,6 +1496,7 @@
           scrollBeyondLastLine: false,
           minimap: { enabled: true },
           fontSize: 13,
+          fontFamily: this.config.font,
           lineNumbers: 'on',
           renderOverviewRuler: true,
           scrollbar: {
@@ -1100,6 +1560,13 @@
 
         // Setup scroll listener to show/hide bottom expand control
         this.setupScrollListener();
+
+        // Highlight the current hunk (first hunk by default)
+        const hunks = this.fileHunks[file.path];
+        if (hunks && hunks.length > 0) {
+          const currentIdx = this.currentHunkIndex[file.path] || 0;
+          setTimeout(() => this.jumpToHunk(currentIdx), 100);
+        }
       }
 
       updateDecorations() {
@@ -1656,13 +2123,183 @@
         document.addEventListener('keydown', handleClose);
       }
 
+      showSettingsModal() {
+        const overlay = document.createElement('div');
+        overlay.className = 'submit-modal-overlay';
+
+        const modal = document.createElement('div');
+        modal.className = 'submit-modal help-modal';
+
+        // Header
+        const header = document.createElement('div');
+        header.className = 'submit-modal-header';
+        header.innerHTML = `
+          <h2>Settings</h2>
+          <button class="submit-modal-close">&times;</button>
+        `;
+
+        // Body
+        const body = document.createElement('div');
+        body.className = 'submit-modal-body';
+
+        const form = document.createElement('form');
+        form.className = 'settings-form';
+
+        // Migrate old color scheme names to new ones
+        let currentColorScheme = this.config.color_scheme || 'vs-dark';
+        const legacyThemeMap = {
+          'dark': 'vs-dark',
+          'light': 'vs',
+          'high-contrast': 'hc-black'
+        };
+        if (legacyThemeMap[currentColorScheme]) {
+          currentColorScheme = legacyThemeMap[currentColorScheme];
+        }
+
+        const currentFont = this.config.font || 'JetBrains Mono';
+        const currentSplitView = this.config.split_view !== undefined ? this.config.split_view : true;
+        const currentAutoCloseTab = this.config.auto_close_tab !== undefined ? this.config.auto_close_tab : true;
+
+        console.log('Settings modal - current values:', { currentColorScheme, currentFont, currentSplitView, currentAutoCloseTab });
+
+        form.innerHTML = `
+          <div class="settings-field">
+            <label for="color-scheme">Theme</label>
+            <select id="color-scheme" name="color_scheme">
+              <optgroup label="Standard">
+                <option value="vs-dark">VS Dark</option>
+                <option value="vs">VS Light</option>
+                <option value="hc-black">High Contrast Dark</option>
+                <option value="hc-light">High Contrast Light</option>
+              </optgroup>
+              <optgroup label="GitHub">
+                <option value="github-dark">GitHub Dark</option>
+                <option value="github-light">GitHub Light</option>
+              </optgroup>
+              <optgroup label="Firefox DevTools">
+                <option value="firefox-devtools-dark">Firefox DevTools Dark</option>
+                <option value="firefox-devtools-light">Firefox DevTools Light</option>
+              </optgroup>
+              <optgroup label="Solarized">
+                <option value="solarized-dark">Solarized Dark</option>
+                <option value="solarized-light">Solarized Light</option>
+              </optgroup>
+            </select>
+          </div>
+
+          <div class="settings-field">
+            <label for="font">Editor Font</label>
+            <input type="text" id="font" name="font" value="${currentFont}" placeholder="JetBrains Mono">
+          </div>
+
+          <div class="settings-field">
+            <label for="split-view">Split View</label>
+            <div class="checkbox-wrapper">
+              <input type="checkbox" id="split-view" name="split_view" ${currentSplitView ? 'checked' : ''}>
+              <span>Show original and modified side-by-side</span>
+            </div>
+          </div>
+
+          <div class="settings-field">
+            <label for="auto-close-tab">Auto-Close Tab</label>
+            <div class="checkbox-wrapper">
+              <input type="checkbox" id="auto-close-tab" name="auto_close_tab" ${currentAutoCloseTab ? 'checked' : ''}>
+              <span>Automatically close tab after submitting review</span>
+            </div>
+          </div>
+        `;
+
+        body.appendChild(form);
+
+        // Set dropdown values after adding to DOM
+        form.querySelector('#color-scheme').value = currentColorScheme;
+
+        // Footer
+        const footer = document.createElement('div');
+        footer.className = 'submit-modal-footer';
+        footer.innerHTML = `
+          <button class="btn-secondary cancel-btn">Cancel</button>
+          <button class="btn-primary save-btn">Save</button>
+        `;
+
+        modal.appendChild(header);
+        modal.appendChild(body);
+        modal.appendChild(footer);
+        overlay.appendChild(modal);
+        document.body.appendChild(overlay);
+
+        // Event handlers
+        const close = () => {
+          overlay.remove();
+        };
+
+        const save = async () => {
+          const saveBtn = footer.querySelector('.save-btn');
+          saveBtn.disabled = true;
+          saveBtn.textContent = 'Saving...';
+
+          const formData = new FormData(form);
+          const newConfig = {
+            color_scheme: formData.get('color_scheme'),
+            font: formData.get('font'),
+            split_view: formData.get('split_view') === 'on',
+            auto_close_tab: formData.get('auto_close_tab') === 'on'
+          };
+
+          try {
+            const response = await fetch('/api/config', {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(newConfig)
+            });
+
+            if (response.ok) {
+              this.config = newConfig;
+              this.isInline = !this.config.split_view;
+              // Apply theme to UI
+              this.applyThemeToUI(this.config.color_scheme);
+              saveBtn.textContent = 'Saved!';
+
+              setTimeout(() => {
+                close();
+                // Reload editor to apply new settings
+                this.loadFile(this.currentFileIndex);
+              }, 500);
+            } else {
+              alert('Failed to save settings');
+              saveBtn.disabled = false;
+              saveBtn.textContent = 'Save';
+            }
+          } catch (error) {
+            alert(`Failed to save settings: ${error}`);
+            saveBtn.disabled = false;
+            saveBtn.textContent = 'Save';
+          }
+        };
+
+        header.querySelector('.submit-modal-close').onclick = close;
+        footer.querySelector('.cancel-btn').onclick = close;
+        footer.querySelector('.save-btn').onclick = save;
+
+        // Close on overlay click
+        overlay.addEventListener('click', (e) => {
+          if (e.target === overlay) {
+            close();
+          }
+        });
+
+        // Close on Escape key
+        const handleEscape = (e) => {
+          if (e.key === 'Escape') {
+            close();
+            document.removeEventListener('keydown', handleEscape);
+          }
+        };
+        document.addEventListener('keydown', handleEscape);
+      }
+
       async showSubmitConfirmation() {
         const comments = this.commentManager.getComments();
-
-        if (comments.length === 0) {
-          alert('No comments to submit.');
-          return;
-        }
 
         // Create overlay
         const overlay = document.createElement('div');
@@ -1675,13 +2312,22 @@
         const header = document.createElement('div');
         header.className = 'submit-modal-header';
         header.innerHTML = `
-          <h2>Review Comments (${comments.length})</h2>
+          <h2>${comments.length === 0 ? 'Submit Review' : `Review Comments (${comments.length})`}</h2>
           <button class="submit-modal-close">&times;</button>
         `;
 
         // Body
         const body = document.createElement('div');
         body.className = 'submit-modal-body';
+
+        if (comments.length === 0) {
+          const noCommentsMsg = document.createElement('p');
+          noCommentsMsg.textContent = 'No comments. Submit to approve this review.';
+          noCommentsMsg.style.padding = '20px';
+          noCommentsMsg.style.textAlign = 'center';
+          noCommentsMsg.style.color = 'var(--text-secondary)';
+          body.appendChild(noCommentsMsg);
+        }
 
         // Group comments by file
         const commentsByFile = {};
@@ -1788,6 +2434,10 @@
 
             setTimeout(() => {
               close();
+              // Auto-close tab if setting is enabled
+              if (this.config.auto_close_tab) {
+                window.close();
+              }
             }, 1000);
           } catch (error) {
             alert(`Failed to submit review: ${error}`);

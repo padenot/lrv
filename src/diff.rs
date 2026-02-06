@@ -14,6 +14,9 @@ pub fn parse_diff(diff_text: &str) -> Result<DiffResponse> {
     let mut hunk_header = String::new();
     let mut hunk_old_start = 0;
     let mut hunk_new_start = 0;
+    let mut old_path_temp: Option<String> = None;
+    let mut is_rename = false;
+    let mut rename_from: Option<String> = None;
 
     for line in diff_text.lines() {
         if line.starts_with("diff --git") {
@@ -28,28 +31,58 @@ pub fn parse_diff(diff_text: &str) -> Result<DiffResponse> {
                     });
                     current_lines = Vec::new();
                 }
-                files.push(FileDiff {
-                    path,
-                    old_path,
-                    status,
-                    hunks: current_hunks,
-                });
+                // Include renames even without hunks (100% similarity)
+                if !current_hunks.is_empty() || status == FileStatus::Renamed {
+                    files.push(FileDiff {
+                        path,
+                        old_path,
+                        status,
+                        hunks: current_hunks,
+                    });
+                }
                 current_hunks = Vec::new();
             }
+            // Reset state for new file
+            old_path_temp = None;
+            is_rename = false;
+            rename_from = None;
+        } else if line.starts_with("rename from ") {
+            is_rename = true;
+            rename_from = Some(line[12..].to_string());
+        } else if line.starts_with("rename to ") {
+            // For pure renames (100% similarity), there's no +++ line
+            // So we need to create the file entry here
+            let new_path = line[10..].to_string();
+            current_file = Some((new_path, rename_from.clone(), FileStatus::Renamed));
+        } else if line.starts_with("new file mode") {
+            // Mark as new file
+            old_path_temp = Some("/dev/null".to_string());
+        } else if line.starts_with("deleted file mode") {
+            // Mark as deleted file
         } else if line.starts_with("--- ") {
             // Old file path
+            let old_path = line[4..].trim_start_matches("a/").to_string();
+            old_path_temp = Some(old_path);
         } else if line.starts_with("+++ ") {
             // New file path
             let new_path = line[4..].trim_start_matches("b/").to_string();
 
-            // Try to determine status based on context
-            let status = if new_path == "/dev/null" {
-                FileStatus::Deleted
+            // Determine status based on collected information
+            let (final_path, final_old_path, status) = if is_rename {
+                // Renamed file
+                (new_path.clone(), rename_from.clone(), FileStatus::Renamed)
+            } else if new_path == "/dev/null" {
+                // Deleted file
+                (old_path_temp.clone().unwrap_or_else(|| "unknown".to_string()), None, FileStatus::Deleted)
+            } else if old_path_temp.as_deref() == Some("/dev/null") {
+                // New file
+                (new_path.clone(), None, FileStatus::Added)
             } else {
-                FileStatus::Modified  // Default to modified
+                // Modified file
+                (new_path.clone(), None, FileStatus::Modified)
             };
 
-            current_file = Some((new_path, None, status));
+            current_file = Some((final_path, final_old_path, status));
         } else if line.starts_with("@@") {
             // Save previous hunk
             if !current_lines.is_empty() {
@@ -110,7 +143,8 @@ pub fn parse_diff(diff_text: &str) -> Result<DiffResponse> {
                 lines: current_lines,
             });
         }
-        if !current_hunks.is_empty() {
+        // Include renames even without hunks (100% similarity)
+        if !current_hunks.is_empty() || status == FileStatus::Renamed {
             files.push(FileDiff {
                 path,
                 old_path,
