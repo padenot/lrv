@@ -65,6 +65,10 @@ localreview --file changes.patch
 5. Click "Submit Review" when done
 6. Comments are printed to stdout in JSON/text format
 
+## Keyboard Shortcuts
+
+Press `?` in the web UI to see all available keyboard shortcuts. Key bindings include navigation between files and hunks, adding comments, and submitting reviews.
+
 ## Output Format
 
 ### JSON (default)

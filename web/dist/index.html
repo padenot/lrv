@@ -35,6 +35,15 @@
     .header h1 {
       font-size: 14px;
       font-weight: 500;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .review-time {
+      color: #888;
+      font-size: 12px;
+      font-weight: 400;
     }
 
     .header-actions {
@@ -357,11 +366,184 @@
       color: #888;
       font-size: 13px;
     }
+
+    .submit-modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.8);
+      z-index: 1000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .submit-modal {
+      background: #2d2d30;
+      border: 1px solid #3e3e42;
+      border-radius: 6px;
+      max-width: 900px;
+      max-height: 80vh;
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.7);
+    }
+
+    .submit-modal-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid #3e3e42;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .submit-modal-header h2 {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 500;
+    }
+
+    .submit-modal-close {
+      background: transparent;
+      border: none;
+      color: #888;
+      cursor: pointer;
+      font-size: 20px;
+      padding: 0;
+      width: 28px;
+      height: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 4px;
+    }
+
+    .submit-modal-close:hover {
+      background: #3e3e42;
+      color: #d4d4d4;
+    }
+
+    .submit-modal-body {
+      padding: 20px;
+      overflow-y: auto;
+      flex: 1;
+    }
+
+    .comment-preview {
+      background: #1e1e1e;
+      border: 1px solid #3e3e42;
+      border-radius: 4px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+
+    .comment-preview-header {
+      font-size: 12px;
+      color: #888;
+      margin-bottom: 12px;
+      font-weight: 500;
+    }
+
+    .comment-preview-code {
+      background: #252526;
+      border: 1px solid #3e3e42;
+      border-radius: 3px;
+      padding: 10px;
+      font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+      font-size: 12px;
+      margin-bottom: 10px;
+      overflow-x: auto;
+    }
+
+    .comment-preview-code-line {
+      white-space: pre;
+      line-height: 1.5;
+    }
+
+    .comment-preview-code-line.target {
+      background: #094771;
+      margin: 0 -10px;
+      padding: 0 10px;
+    }
+
+    .comment-preview-text {
+      font-size: 13px;
+      line-height: 1.5;
+      color: #d4d4d4;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .submit-modal-footer {
+      padding: 16px 20px;
+      border-top: 1px solid #3e3e42;
+      display: flex;
+      justify-content: flex-end;
+      gap: 12px;
+    }
+
+    .help-modal {
+      max-width: 600px;
+    }
+
+    .shortcuts-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 16px;
+    }
+
+    .shortcuts-table th {
+      text-align: left;
+      padding: 8px 12px;
+      border-bottom: 1px solid #3e3e42;
+      font-size: 11px;
+      text-transform: uppercase;
+      color: #888;
+      font-weight: 600;
+    }
+
+    .shortcuts-table td {
+      padding: 10px 12px;
+      border-bottom: 1px solid #3e3e42;
+      font-size: 13px;
+    }
+
+    .shortcuts-table tr:last-child td {
+      border-bottom: none;
+    }
+
+    .key-combo {
+      display: inline-flex;
+      gap: 4px;
+      flex-wrap: wrap;
+    }
+
+    .key {
+      background: #3e3e42;
+      color: #d4d4d4;
+      padding: 3px 8px;
+      border-radius: 3px;
+      font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+      font-size: 11px;
+      font-weight: 500;
+      border: 1px solid #555;
+      box-shadow: 0 1px 0 #555;
+    }
+
+    .key-or {
+      color: #888;
+      font-size: 11px;
+      align-self: center;
+    }
   </style>
 </head>
 <body>
   <div class="header">
-    <h1>LocalReview</h1>
+    <h1>LocalReview <span class="review-time" id="review-time"></span></h1>
     <div class="header-actions">
       <span class="comment-badge"><span id="comment-count">0</span> comments</span>
       <button id="toggle-view">Inline/Side-by-Side</button>
@@ -440,6 +622,17 @@
       }
     }
 
+    // Keyboard shortcuts configuration
+    const KEYBOARD_SHORTCUTS = [
+      { keys: ['Shift+ArrowDown', 'Shift+J'], action: 'nextFile', description: 'Next file' },
+      { keys: ['Shift+ArrowUp', 'Shift+K'], action: 'previousFile', description: 'Previous file' },
+      { keys: ['ArrowDown', 'j'], action: 'nextHunk', description: 'Next hunk' },
+      { keys: ['ArrowUp', 'k'], action: 'previousHunk', description: 'Previous hunk' },
+      { keys: ['Enter'], action: 'openComment', description: 'Comment on current hunk' },
+      { keys: ['Mod+Shift+Enter'], action: 'submitReview', description: 'Submit review' },
+      { keys: ['?'], action: 'showHelp', description: 'Show keyboard shortcuts' }
+    ];
+
     // Monaco App
     class MonacoApp {
       constructor() {
@@ -452,6 +645,8 @@
         this.currentWidget = null;
         this.diff = null;
         this.fileRanges = {}; // Track visible ranges per file
+        this.fileHunks = {}; // Track hunk start lines per file: { [path]: number[] }
+        this.currentHunkIndex = {}; // Track current hunk index per file
 
         this.commentManager.onChange(() => this.updateUI());
       }
@@ -469,6 +664,8 @@
             this.setupUI();
             this.renderFileList();
             this.loadFile(0);
+            // Set review timestamp
+            document.getElementById('review-time').textContent = new Date().toLocaleString();
             resolve();
           });
         });
@@ -495,7 +692,16 @@
           let newLineStart = Infinity;
           let newLineEnd = 0;
 
+          // Track hunk start lines for keyboard navigation
+          const hunkStarts = [];
+
           file.hunks.forEach(hunk => {
+            // Store the first new-side line of this hunk
+            const firstNewLine = hunk.lines.find(l => l.new_line)?.new_line;
+            if (firstNewLine) {
+              hunkStarts.push(firstNewLine);
+            }
+
             hunk.lines.forEach(line => {
               if (line.old_line) {
                 oldLineStart = Math.min(oldLineStart, line.old_line);
@@ -507,6 +713,10 @@
               }
             });
           });
+
+          // Store hunk positions
+          this.fileHunks[file.path] = hunkStarts;
+          this.currentHunkIndex[file.path] = 0;
 
           // Extract just the visible range from the actual files
           const oldContent = oldAllLines.slice(oldLineStart - 1, oldLineEnd).join('\n');
@@ -548,20 +758,7 @@
 
         // Submit button
         document.getElementById('submit-review').addEventListener('click', async () => {
-          const comments = this.commentManager.getComments();
-
-          try {
-            await fetch('/api/complete', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ comments })
-            });
-            alert(`Review submitted with ${comments.length} comments. Check the terminal for output.`);
-            document.getElementById('submit-review').disabled = true;
-            document.getElementById('submit-review').textContent = 'Review Submitted';
-          } catch (error) {
-            alert(`Failed to submit review: ${error}`);
-          }
+          this.showSubmitConfirmation();
         });
 
         // Toggle view
@@ -576,6 +773,163 @@
 
         // Sidebar resizer
         this.setupSidebarResizer();
+
+        // Keyboard shortcuts
+        this.setupKeyboardShortcuts();
+      }
+
+      setupKeyboardShortcuts() {
+        document.addEventListener('keydown', (e) => {
+          // Only handle shortcuts when no comment dialog is open (except for help)
+          if (this.currentWidget !== null && e.key !== '?') return;
+
+          // Don't handle shortcuts when focused on text input (except for help)
+          const activeElement = document.activeElement;
+          if ((activeElement.tagName === 'TEXTAREA' || activeElement.tagName === 'INPUT') && e.key !== '?') return;
+
+          // Match key event to shortcut
+          const action = this.matchKeyboardShortcut(e);
+          if (!action) return;
+
+          e.preventDefault();
+
+          // Execute action
+          switch (action) {
+            case 'nextFile':
+              this.nextFile();
+              break;
+            case 'previousFile':
+              this.previousFile();
+              break;
+            case 'nextHunk':
+              this.nextHunk();
+              break;
+            case 'previousHunk':
+              this.previousHunk();
+              break;
+            case 'openComment':
+              this.openCommentOnCurrentHunk();
+              break;
+            case 'submitReview':
+              this.showSubmitConfirmation();
+              break;
+            case 'showHelp':
+              this.showKeyboardHelp();
+              break;
+          }
+        });
+      }
+
+      matchKeyboardShortcut(e) {
+        const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+        const modKey = isMac ? e.metaKey : e.ctrlKey;
+
+        for (const shortcut of KEYBOARD_SHORTCUTS) {
+          for (const keyCombo of shortcut.keys) {
+            if (this.matchesKeyCombo(e, keyCombo, modKey)) {
+              return shortcut.action;
+            }
+          }
+        }
+        return null;
+      }
+
+      matchesKeyCombo(e, combo, modKey) {
+        const parts = combo.split('+');
+        let needsMod = false;
+        let needsShift = false;
+        let key = '';
+
+        for (const part of parts) {
+          if (part === 'Mod') {
+            needsMod = true;
+          } else if (part === 'Shift') {
+            needsShift = true;
+          } else {
+            key = part;
+          }
+        }
+
+        // Check Mod key
+        if (needsMod !== modKey) return false;
+
+        // Special handling for characters that naturally require Shift (like ?)
+        // These should match regardless of Shift state
+        const specialChars = ['?', '!', '@', '#', '$', '%', '^', '&', '*', '(', ')'];
+        const isSpecialChar = specialChars.includes(key);
+
+        // Check Shift key (but ignore for special chars)
+        if (!isSpecialChar && needsShift !== e.shiftKey) return false;
+
+        // For letter keys with Shift, the key combo will have uppercase letter
+        // e.g., "Shift+J" means e.key="J" with shift, "j" means e.key="j" without shift
+        return e.key === key;
+      }
+
+      nextFile() {
+        if (this.currentFileIndex < this.diff.files.length - 1) {
+          this.loadFile(this.currentFileIndex + 1);
+        }
+      }
+
+      previousFile() {
+        if (this.currentFileIndex > 0) {
+          this.loadFile(this.currentFileIndex - 1);
+        }
+      }
+
+      nextHunk() {
+        const file = this.diff.files[this.currentFileIndex];
+        const hunks = this.fileHunks[file.path];
+        if (!hunks || hunks.length === 0) return;
+
+        const currentIdx = this.currentHunkIndex[file.path] || 0;
+        const nextIdx = Math.min(currentIdx + 1, hunks.length - 1);
+        this.currentHunkIndex[file.path] = nextIdx;
+        this.jumpToHunk(nextIdx);
+      }
+
+      previousHunk() {
+        const file = this.diff.files[this.currentFileIndex];
+        const hunks = this.fileHunks[file.path];
+        if (!hunks || hunks.length === 0) return;
+
+        const currentIdx = this.currentHunkIndex[file.path] || 0;
+        const prevIdx = Math.max(currentIdx - 1, 0);
+        this.currentHunkIndex[file.path] = prevIdx;
+        this.jumpToHunk(prevIdx);
+      }
+
+      jumpToHunk(hunkIndex) {
+        if (!this.editor) return;
+
+        const file = this.diff.files[this.currentFileIndex];
+        const hunks = this.fileHunks[file.path];
+        if (!hunks || hunkIndex >= hunks.length) return;
+
+        const fileLineNumber = hunks[hunkIndex];
+        const range = this.fileRanges[file.path];
+        const offset = range && !range.hasFullContent ? range.new.start - 1 : 0;
+        const monacoLine = fileLineNumber - offset;
+
+        const modifiedEditor = this.editor.getModifiedEditor();
+        modifiedEditor.revealLineInCenter(monacoLine);
+      }
+
+      openCommentOnCurrentHunk() {
+        if (!this.editor) return;
+
+        const file = this.diff.files[this.currentFileIndex];
+        const hunks = this.fileHunks[file.path];
+        if (!hunks || hunks.length === 0) return;
+
+        const currentIdx = this.currentHunkIndex[file.path] || 0;
+        const fileLineNumber = hunks[currentIdx];
+        const range = this.fileRanges[file.path];
+        const offset = range && !range.hasFullContent ? range.new.start - 1 : 0;
+        const monacoLine = fileLineNumber - offset;
+
+        this.showCommentDialog(file.path, fileLineNumber, monacoLine, 'new');
       }
 
       setupSidebarResizer() {
@@ -756,31 +1110,42 @@
         const modifiedEditor = this.editor.getModifiedEditor();
         const originalEditor = this.editor.getOriginalEditor();
 
+        // Get offsets for current file
+        const range = this.fileRanges[file.path];
+        const newOffset = range && !range.hasFullContent ? range.new.start - 1 : 0;
+        const oldOffset = range && !range.hasFullContent ? range.old.start - 1 : 0;
+
         // Decorations for modified (new) side
         const modifiedDecorations = comments
           .filter(c => c.side === 'new')
-          .map(comment => ({
-            range: new monaco.Range(comment.start_line, 1, comment.start_line, 1),
-            options: {
-              isWholeLine: true,
-              className: 'line-comment-marker',
-              glyphMarginClassName: 'line-comment-marker',
-              glyphMarginHoverMessage: { value: comment.body }
-            }
-          }));
+          .map(comment => {
+            const monacoLine = comment.start_line - newOffset;
+            return {
+              range: new monaco.Range(monacoLine, 1, monacoLine, 1),
+              options: {
+                isWholeLine: true,
+                className: 'line-comment-marker',
+                glyphMarginClassName: 'line-comment-marker',
+                glyphMarginHoverMessage: { value: comment.body }
+              }
+            };
+          });
 
         // Decorations for original (old) side
         const originalDecorations = comments
           .filter(c => c.side === 'old')
-          .map(comment => ({
-            range: new monaco.Range(comment.start_line, 1, comment.start_line, 1),
-            options: {
-              isWholeLine: true,
-              className: 'line-comment-marker',
-              glyphMarginClassName: 'line-comment-marker',
-              glyphMarginHoverMessage: { value: comment.body }
-            }
-          }));
+          .map(comment => {
+            const monacoLine = comment.start_line - oldOffset;
+            return {
+              range: new monaco.Range(monacoLine, 1, monacoLine, 1),
+              options: {
+                isWholeLine: true,
+                className: 'line-comment-marker',
+                glyphMarginClassName: 'line-comment-marker',
+                glyphMarginHoverMessage: { value: comment.body }
+              }
+            };
+          });
 
         this.modifiedDecorations = modifiedEditor.deltaDecorations(this.modifiedDecorations || [], modifiedDecorations);
         this.originalDecorations = originalEditor.deltaDecorations(this.originalDecorations || [], originalDecorations);
@@ -1172,6 +1537,284 @@
       updateUI() {
         const count = this.commentManager.getComments().length;
         document.getElementById('comment-count').textContent = count.toString();
+      }
+
+      showKeyboardHelp() {
+        const overlay = document.createElement('div');
+        overlay.className = 'submit-modal-overlay';
+
+        const modal = document.createElement('div');
+        modal.className = 'submit-modal help-modal';
+
+        const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+
+        // Header
+        const header = document.createElement('div');
+        header.className = 'submit-modal-header';
+        header.innerHTML = `
+          <h2>Keyboard Shortcuts</h2>
+          <button class="submit-modal-close">&times;</button>
+        `;
+
+        // Body
+        const body = document.createElement('div');
+        body.className = 'submit-modal-body';
+
+        const table = document.createElement('table');
+        table.className = 'shortcuts-table';
+        table.innerHTML = `
+          <thead>
+            <tr>
+              <th>Shortcut</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        `;
+
+        const tbody = table.querySelector('tbody');
+
+        KEYBOARD_SHORTCUTS.forEach(shortcut => {
+          const row = document.createElement('tr');
+
+          const keysCell = document.createElement('td');
+          const keyComboDiv = document.createElement('div');
+          keyComboDiv.className = 'key-combo';
+
+          shortcut.keys.forEach((combo, idx) => {
+            if (idx > 0) {
+              const orSpan = document.createElement('span');
+              orSpan.className = 'key-or';
+              orSpan.textContent = 'or';
+              keyComboDiv.appendChild(orSpan);
+            }
+
+            // Replace Mod with Cmd/Ctrl based on platform
+            const displayCombo = combo.replace('Mod', isMac ? 'Cmd' : 'Ctrl');
+            const parts = displayCombo.split('+');
+
+            parts.forEach((part, partIdx) => {
+              if (partIdx > 0) {
+                const plus = document.createElement('span');
+                plus.textContent = '+';
+                plus.style.margin = '0 2px';
+                plus.style.color = '#888';
+                keyComboDiv.appendChild(plus);
+              }
+
+              const key = document.createElement('span');
+              key.className = 'key';
+              // Format key names for display
+              const displayKey = part
+                .replace('ArrowDown', '↓')
+                .replace('ArrowUp', '↑')
+                .replace('Enter', '⏎');
+              key.textContent = displayKey;
+              keyComboDiv.appendChild(key);
+            });
+          });
+
+          keysCell.appendChild(keyComboDiv);
+
+          const actionCell = document.createElement('td');
+          actionCell.textContent = shortcut.description;
+
+          row.appendChild(keysCell);
+          row.appendChild(actionCell);
+          tbody.appendChild(row);
+        });
+
+        body.appendChild(table);
+
+        modal.appendChild(header);
+        modal.appendChild(body);
+        overlay.appendChild(modal);
+        document.body.appendChild(overlay);
+
+        // Event handlers
+        const close = () => {
+          overlay.remove();
+        };
+
+        header.querySelector('.submit-modal-close').onclick = close;
+
+        // Close on overlay click
+        overlay.addEventListener('click', (e) => {
+          if (e.target === overlay) {
+            close();
+          }
+        });
+
+        // Close on Escape or ?
+        const handleClose = (e) => {
+          if (e.key === 'Escape' || e.key === '?') {
+            e.preventDefault();
+            close();
+            document.removeEventListener('keydown', handleClose);
+          }
+        };
+        document.addEventListener('keydown', handleClose);
+      }
+
+      async showSubmitConfirmation() {
+        const comments = this.commentManager.getComments();
+
+        if (comments.length === 0) {
+          alert('No comments to submit.');
+          return;
+        }
+
+        // Create overlay
+        const overlay = document.createElement('div');
+        overlay.className = 'submit-modal-overlay';
+
+        const modal = document.createElement('div');
+        modal.className = 'submit-modal';
+
+        // Header
+        const header = document.createElement('div');
+        header.className = 'submit-modal-header';
+        header.innerHTML = `
+          <h2>Review Comments (${comments.length})</h2>
+          <button class="submit-modal-close">&times;</button>
+        `;
+
+        // Body
+        const body = document.createElement('div');
+        body.className = 'submit-modal-body';
+
+        // Group comments by file
+        const commentsByFile = {};
+        comments.forEach(comment => {
+          if (!commentsByFile[comment.file]) {
+            commentsByFile[comment.file] = [];
+          }
+          commentsByFile[comment.file].push(comment);
+        });
+
+        // Fetch file contents for all files
+        const fileContents = {};
+        await Promise.all(Object.keys(commentsByFile).map(async (filePath) => {
+          const fileComments = commentsByFile[filePath];
+          const sides = [...new Set(fileComments.map(c => c.side))];
+
+          for (const side of sides) {
+            const key = `${filePath}:${side}`;
+            try {
+              const response = await fetch(`/api/file?path=${encodeURIComponent(filePath)}&side=${side}`);
+              const data = await response.json();
+              fileContents[key] = data.content.split('\n');
+            } catch (err) {
+              console.error(`Failed to fetch ${key}:`, err);
+              fileContents[key] = [];
+            }
+          }
+        }));
+
+        // Render each comment
+        comments.forEach(comment => {
+          const preview = document.createElement('div');
+          preview.className = 'comment-preview';
+
+          const headerText = `${comment.file}:${comment.start_line} (${comment.side}) — ${comment.severity}`;
+          const previewHeader = document.createElement('div');
+          previewHeader.className = 'comment-preview-header';
+          previewHeader.textContent = headerText;
+
+          // Get code excerpt (line before, target line, line after)
+          const fileKey = `${comment.file}:${comment.side}`;
+          const lines = fileContents[fileKey] || [];
+          const lineIndex = comment.start_line - 1;
+          const startLine = Math.max(0, lineIndex - 1);
+          const endLine = Math.min(lines.length, lineIndex + 2);
+          const excerpt = lines.slice(startLine, endLine);
+
+          const codeBlock = document.createElement('div');
+          codeBlock.className = 'comment-preview-code';
+          excerpt.forEach((line, idx) => {
+            const lineDiv = document.createElement('div');
+            lineDiv.className = 'comment-preview-code-line';
+            if (startLine + idx === lineIndex) {
+              lineDiv.classList.add('target');
+            }
+            lineDiv.textContent = line || ' ';
+            codeBlock.appendChild(lineDiv);
+          });
+
+          const commentText = document.createElement('div');
+          commentText.className = 'comment-preview-text';
+          commentText.textContent = comment.body;
+
+          preview.appendChild(previewHeader);
+          preview.appendChild(codeBlock);
+          preview.appendChild(commentText);
+          body.appendChild(preview);
+        });
+
+        // Footer
+        const footer = document.createElement('div');
+        footer.className = 'submit-modal-footer';
+        footer.innerHTML = `
+          <button class="btn-secondary cancel-submit-btn">Cancel</button>
+          <button class="btn-primary confirm-submit-btn">Submit Review</button>
+        `;
+
+        modal.appendChild(header);
+        modal.appendChild(body);
+        modal.appendChild(footer);
+        overlay.appendChild(modal);
+        document.body.appendChild(overlay);
+
+        // Event handlers
+        const close = () => {
+          overlay.remove();
+        };
+
+        const submit = async () => {
+          const submitBtn = footer.querySelector('.confirm-submit-btn');
+          submitBtn.disabled = true;
+          submitBtn.textContent = 'Submitting...';
+
+          try {
+            await fetch('/api/complete', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ comments })
+            });
+
+            submitBtn.textContent = 'Submitted!';
+            document.getElementById('submit-review').disabled = true;
+            document.getElementById('submit-review').textContent = 'Review Submitted';
+
+            setTimeout(() => {
+              close();
+            }, 1000);
+          } catch (error) {
+            alert(`Failed to submit review: ${error}`);
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Submit Review';
+          }
+        };
+
+        header.querySelector('.submit-modal-close').onclick = close;
+        footer.querySelector('.cancel-submit-btn').onclick = close;
+        footer.querySelector('.confirm-submit-btn').onclick = submit;
+
+        // Close on overlay click (but not modal click)
+        overlay.addEventListener('click', (e) => {
+          if (e.target === overlay) {
+            close();
+          }
+        });
+
+        // Close on Escape key
+        const handleEscape = (e) => {
+          if (e.key === 'Escape') {
+            close();
+            document.removeEventListener('keydown', handleEscape);
+          }
+        };
+        document.addEventListener('keydown', handleEscape);
       }
     }
 
