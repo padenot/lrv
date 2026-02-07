@@ -466,11 +466,41 @@ test.describe('Review Workflow E2E', () => {
       const path = require('path');
       const outDir = path.resolve(__dirname, '../test-results');
       if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
-      const outPath = path.join(outDir, 'perf.json');
-      fs.writeFileSync(outPath, JSON.stringify(metrics || {}, null, 2));
+      const outPath = path.join(outDir, 'perf-switch.json');
+      const payload = { fileSwitch: (metrics && metrics.fileSwitch) || [] };
+      fs.writeFileSync(outPath, JSON.stringify(payload, null, 2));
       console.log(`[perf] wrote metrics to ${outPath}`);
     } catch (e) {
       console.log(`[perf] failed to write metrics: ${e}`);
+    }
+  });
+
+  test('should measure app init performance', async ({ page }) => {
+    await openApp(page);
+
+    // Pull perf metrics and report
+    const metrics = await page.evaluate(() => (window as any).Perf?.getMetrics?.());
+    if (metrics?.appInit?.length) {
+      const arr: number[] = metrics.appInit as number[];
+      const avg = arr.reduce((a, b) => a + b, 0) / arr.length;
+      const p95 = arr.slice().sort((a,b)=>a-b)[Math.floor(arr.length * 0.95) - 1] || avg;
+      console.log(`[perf-init] appInit count=${arr.length} avg=${avg.toFixed(2)}ms p95=${p95.toFixed(2)}ms`);
+    } else {
+      console.log('[perf-init] no appInit metrics captured');
+    }
+
+    // Persist init metrics to test-results/perf-init.json
+    try {
+      const fs = require('fs');
+      const path = require('path');
+      const outDir = path.resolve(__dirname, '../test-results');
+      if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
+      const outPath = path.join(outDir, 'perf-init.json');
+      const payload = { appInit: (metrics && metrics.appInit) || [] };
+      fs.writeFileSync(outPath, JSON.stringify(payload, null, 2));
+      console.log(`[perf-init] wrote metrics to ${outPath}`);
+    } catch (e) {
+      console.log(`[perf-init] failed to write init metrics: ${e}`);
     }
   });
 });

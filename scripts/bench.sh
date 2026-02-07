@@ -36,8 +36,24 @@ for c in "${COMMITS[@]}"; do
   echo "--- Bench at $c ---"
   git checkout -q "$c"
   just build
-  rm -f "$ROOT_DIR/e2e/test-results/perf.json"
+  rm -f "$ROOT_DIR/e2e/test-results/perf-init.json" "$ROOT_DIR/e2e/test-results/perf-switch.json"
+  # App init perf (single run)
+  (cd e2e && npx playwright test -g "app init performance" --reporter=line --workers=1)
+  # File switch perf
   (cd e2e && npx playwright test -g "rapid file switching" --reporter=line --workers=1)
+  # Merge results
+  node - <<'NODE'
+const fs = require('fs');
+const path = require('path');
+const root = process.argv[2];
+const initPath = path.join(root, 'e2e/test-results/perf-init.json');
+const switchPath = path.join(root, 'e2e/test-results/perf-switch.json');
+const out = { appInit: [], fileSwitch: [] };
+try { Object.assign(out, { appInit: JSON.parse(fs.readFileSync(initPath)).appInit || [] }); } catch {}
+try { Object.assign(out, { fileSwitch: JSON.parse(fs.readFileSync(switchPath)).fileSwitch || [] }); } catch {}
+fs.writeFileSync(path.join(root, 'e2e/test-results/perf.json'), JSON.stringify(out, null, 2));
+console.log('[bench] merged to e2e/test-results/perf.json');
+NODE
   if [ -f "$ROOT_DIR/e2e/test-results/perf.json" ]; then
     cp "$ROOT_DIR/e2e/test-results/perf.json" "$RESULTS_DIR/${c//\//_}.json"
     echo "Saved: $RESULTS_DIR/${c//\//_}.json"
