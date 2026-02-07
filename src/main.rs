@@ -9,7 +9,8 @@ use clap::Parser;
 use std::io::Read;
 use std::process::Command;
 use std::sync::Arc;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{mpsc, Mutex, Notify};
+use lrv::netutil;
 use tracing_subscriber;
 
 use crate::output::OutputFormat;
@@ -106,6 +107,40 @@ fn get_network_interfaces() -> Vec<String> {
     interfaces
 }
 
+// Parse a whitespace-separated list of IPs and return Tailscale IPv4s (100.64.0.0/10)
+fn get_tailscale_ipv4s() -> Vec<String> {
+    // Prefer `tailscale ip -4` if available
+    if let Ok(output) = Command::new("tailscale").args(["ip", "-4"]).output() {
+        if output.status.success() {
+            if let Ok(text) = String::from_utf8(output.stdout) {
+                let ips: Vec<String> = text
+                    .lines()
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_string())
+                    .collect();
+                if !ips.is_empty() {
+                    return ips;
+                }
+            }
+        }
+    }
+
+    // Fallback: parse hostname -I and filter 100.64/10
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(output) = Command::new("hostname").args(["-I"]).output() {
+            if let Ok(text) = String::from_utf8(output.stdout) {
+                let ips = netutil::filter_tailscale_ipv4s(&text);
+                if !ips.is_empty() {
+                    return ips;
+                }
+            }
+        }
+    }
+    Vec::new()
+}
+
 #[derive(Parser, Debug)]
 #[command(name = "lrv")]
 #[command(about = "Local code review tool for LLM agents", long_about = None)]
@@ -122,13 +157,17 @@ struct Args {
     #[arg(long)]
     port: Option<u16>,
 
-    /// Bind address (default: 127.0.0.1; use --public for 0.0.0.0)
+    /// Bind address(es). Can be passed multiple times. Default: 127.0.0.1
     #[arg(long)]
-    bind: Option<String>,
+    bind: Vec<String>,
 
     /// Shorthand to bind on all interfaces (equivalent to --bind 0.0.0.0)
     #[arg(long)]
     public: bool,
+
+    /// Also bind to the local Tailscale IPv4 address, if detected
+    #[arg(long)]
+    tailscale: bool,
 
     /// Don't auto-open browser
     #[arg(long)]
@@ -213,47 +252,81 @@ async fn main() -> Result<()> {
         context: Arc::new(project_context),
     };
 
-    // Create router
-    let app = create_router(state.clone());
+    // Create router (we'll clone per listener)
+    let _app_for_clone = create_router(state.clone());
 
-    // Determine bind address and port
-    let port = args.port.unwrap_or(0);
-    let bind_addr = if args.public {
-        "0.0.0.0".to_string()
+    // Determine bind addresses
+    let mut bind_addrs: Vec<String> = Vec::new();
+    if args.public {
+        bind_addrs.push("0.0.0.0".to_string());
+    } else if !args.bind.is_empty() {
+        bind_addrs.extend(args.bind.clone());
     } else {
-        args.bind.unwrap_or_else(|| "127.0.0.1".to_string())
-    };
+        bind_addrs.push("127.0.0.1".to_string());
+    }
 
-    // Bind to address
-    let listener = tokio::net::TcpListener::bind(format!("{}:{}", bind_addr, port))
-        .await
-        .context("Failed to bind to port")?;
+    if args.tailscale {
+        let ts = get_tailscale_ipv4s();
+        if ts.is_empty() {
+            eprintln!("Note: Tailscale IP not detected; is tailscale running?");
+        }
+        for ip in ts {
+            if !bind_addrs.contains(&ip) {
+                bind_addrs.push(ip);
+            }
+        }
+    }
 
-    let addr = listener.local_addr()?;
-    let port = addr.port();
-
-    if bind_addr == "0.0.0.0" {
+    if bind_addrs.iter().any(|a| a == "0.0.0.0") {
         eprintln!("Warning: running in public mode on 0.0.0.0 (no auth)");
     }
-    eprintln!("Server running on {}:{}", bind_addr, port);
-    eprintln!("Available at:");
 
-    // Show URLs depending on bind mode
-    if bind_addr == "0.0.0.0" {
-        for iface in get_network_interfaces() {
-            eprintln!("  http://{}:{}", iface, port);
+    // Bind listeners
+    let requested_port = args.port.unwrap_or(0);
+    let mut listeners: Vec<(String, tokio::net::TcpListener)> = Vec::new();
+    let actual_port: u16;
+    if requested_port == 0 {
+        // Bind the first address to an ephemeral port to pick a port
+        let first = &bind_addrs[0];
+        let first_listener = tokio::net::TcpListener::bind(format!("{}:{}", first, 0))
+            .await
+            .context("Failed to bind to ephemeral port")?;
+        let addr = first_listener.local_addr()?;
+        actual_port = addr.port();
+        listeners.push((first.clone(), first_listener));
+        for addr in bind_addrs.iter().skip(1) {
+            match tokio::net::TcpListener::bind(format!("{}:{}", addr, actual_port)).await {
+                Ok(l) => listeners.push((addr.clone(), l)),
+                Err(e) => eprintln!("Warning: failed to bind {}:{}: {}", addr, actual_port, e),
+            }
         }
     } else {
-        eprintln!("  http://{}:{}", bind_addr, port);
+        actual_port = requested_port;
+        for addr in &bind_addrs {
+            match tokio::net::TcpListener::bind(format!("{}:{}", addr, actual_port)).await {
+                Ok(l) => listeners.push((addr.clone(), l)),
+                Err(e) => eprintln!("Warning: failed to bind {}:{}: {}", addr, actual_port, e),
+            }
+        }
+        if listeners.is_empty() {
+            anyhow::bail!("Failed to bind to any provided addresses");
+        }
     }
 
-    // Determine URL to open in browser
-    let url = if bind_addr == "0.0.0.0" {
-        // Prefer loopback when publicly bound
-        format!("http://127.0.0.1:{}", port)
-    } else {
-        format!("http://{}:{}", bind_addr, port)
-    };
+    eprintln!("Server running on port {}", actual_port);
+    eprintln!("Available at:");
+    for (addr, _) in &listeners {
+        if addr == "0.0.0.0" {
+            for iface in get_network_interfaces() {
+                eprintln!("  http://{}:{}", iface, actual_port);
+            }
+        } else {
+            eprintln!("  http://{}:{}", addr, actual_port);
+        }
+    }
+
+    // Prefer loopback when opening browser
+    let url = format!("http://127.0.0.1:{}", actual_port);
 
     // Open browser
     if !args.no_open {
@@ -262,15 +335,33 @@ async fn main() -> Result<()> {
         }
     }
 
-    // Run server with shutdown signal
-    let server = axum::serve(listener, app);
+    // Run servers with graceful shutdown
+    let shutdown_notify = Arc::new(Notify::new());
+    let mut handles = Vec::new();
+    for (_, listener) in listeners.into_iter() {
+        let app_clone = create_router(state.clone());
+        let notify = shutdown_notify.clone();
+        let handle = tokio::spawn(async move {
+            axum::serve(listener, app_clone)
+                .with_graceful_shutdown(async move { notify.notified().await })
+                .await
+        });
+        handles.push(handle);
+    }
 
+    // Wait for either shutdown signal or server error
     tokio::select! {
-        result = server => {
-            result.context("Server error")?;
-        }
         _ = shutdown_rx.recv() => {
             eprintln!("Received shutdown signal");
+            shutdown_notify.notify_waiters();
+        }
+        result = async {
+            for h in handles {
+                if let Err(e) = h.await { return Err(anyhow::anyhow!("Server task join error: {}", e)); }
+            }
+            Ok(())
+        } => {
+            result.context("Server error")?;
         }
     }
 
