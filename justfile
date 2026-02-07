@@ -36,6 +36,10 @@ test-e2e-headed:
 test-e2e-ui:
     cd e2e && npm run test:ui
 
+# Run perf bench across commits
+bench +args="":
+    bash scripts/bench.sh {{args}}
+
  
 
 # Setup e2e test environment

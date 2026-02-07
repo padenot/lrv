@@ -755,6 +755,23 @@
   <script>
     // Toggle for optional debug logging
     window.DEBUG = false;
+    // Simple performance instrumentation
+    window.Perf = {
+      mark: (name) => { try { performance.mark(name); } catch (e) {} },
+      measure: (name, start, end) => { try { performance.measure(name, { start, end }); } catch (e) {} },
+      recordFileSwitchStart: () => { window.Perf.mark('fileSwitchStart'); },
+      recordFileSwitchEnd: () => { window.Perf.mark('fileSwitchEnd'); window.Perf.measure('fileSwitch', 'fileSwitchStart', 'fileSwitchEnd'); },
+      recordAppInitStart: () => { window.Perf.mark('appInitStart'); },
+      recordAppInitEnd: () => { window.Perf.mark('appInitEnd'); window.Perf.measure('appInit', 'appInitStart', 'appInitEnd'); },
+      getMetrics: () => {
+        const toDurations = (name) => (performance.getEntriesByName(name) || []).map(e => e.duration);
+        return {
+          fileSwitch: toDurations('fileSwitch'),
+          appInit: toDurations('appInit'),
+        };
+      },
+      clear: () => { try { performance.clearMarks(); performance.clearMeasures(); } catch (e) {} }
+    };
     // Mock diff data
     // Comment Manager
     class CommentManager {
@@ -832,11 +849,13 @@
         this.config = null; // User config from server
         this.originalModel = null;
         this.modifiedModel = null;
+        this.scrollListenerDispose = null;
 
         this.commentManager.onChange(() => this.updateUI());
       }
 
       async init() {
+        window.Perf.recordAppInitStart();
         // Load config, context, and diff data from API
         const [configResponse, contextResponse, diffResponse] = await Promise.all([
           fetch('/api/config'),
@@ -865,6 +884,8 @@
             document.getElementById('review-time').textContent = new Date().toLocaleString();
             // Set project info
             this.renderProjectInfo();
+            // Wait for paint and record init end
+            requestAnimationFrame(() => requestAnimationFrame(() => window.Perf.recordAppInitEnd()));
             resolve();
           });
         });
@@ -1494,6 +1515,7 @@
       }
 
       loadFile(index) {
+        window.Perf.recordFileSwitchStart();
         this.currentFileIndex = index;
         const file = this.diff.files[index];
 
@@ -1512,11 +1534,7 @@
         this.renderFileList();
         this.renderExpandControls();
 
-        // Dispose old editor and models
-        if (this.editor) {
-          try { this.editor.dispose(); } catch (e) {}
-          this.editor = null;
-        }
+        // Dispose old models and widget; keep editor instance
         if (this.originalModel) { try { this.originalModel.dispose(); } catch (e) {} this.originalModel = null; }
         if (this.modifiedModel) { try { this.modifiedModel.dispose(); } catch (e) {} this.modifiedModel = null; }
         if (this.currentWidget && this.currentWidgetEditor) {
@@ -1542,25 +1560,29 @@
         // Use the configured Monaco theme directly
         const theme = this.config.color_scheme || 'vs-dark';
 
-        // Create diff editor
+        // Create diff editor on first run, reuse afterwards
         const container = document.getElementById('editor-container');
-        this.editor = monaco.editor.createDiffEditor(container, {
-          theme: theme,
-          renderSideBySide: !this.isInline,
-          readOnly: true,
-          originalEditable: false,
-          automaticLayout: true,
-          scrollBeyondLastLine: false,
-          minimap: { enabled: true },
-          fontSize: 13,
-          fontFamily: this.config.font,
-          lineNumbers: 'on',
-          renderOverviewRuler: true,
-          scrollbar: {
-            vertical: 'visible',
-            horizontal: 'visible'
-          }
-        });
+        if (!this.editor) {
+          this.editor = monaco.editor.createDiffEditor(container, {
+            theme: theme,
+            renderSideBySide: !this.isInline,
+            readOnly: true,
+            originalEditable: false,
+            automaticLayout: true,
+            scrollBeyondLastLine: false,
+            minimap: { enabled: true },
+            fontSize: 13,
+            fontFamily: this.config.font,
+            lineNumbers: 'on',
+            renderOverviewRuler: true,
+            scrollbar: {
+              vertical: 'visible',
+              horizontal: 'visible'
+            }
+          });
+        } else {
+          this.editor.updateOptions({ renderSideBySide: !this.isInline, theme: theme });
+        }
 
         this.originalModel = monaco.editor.createModel(file.old_content, language);
         this.modifiedModel = monaco.editor.createModel(file.new_content, language);
@@ -1569,6 +1591,9 @@
           original: this.originalModel,
           modified: this.modifiedModel
         });
+
+        // Record end after the new models are set and painted
+        requestAnimationFrame(() => requestAnimationFrame(() => window.Perf.recordFileSwitchEnd()));
 
         // Set custom line numbers to show actual file line numbers
         const modifiedEditor = this.editor.getModifiedEditor();
@@ -1903,8 +1928,14 @@
 
         const modifiedEditor = this.editor.getModifiedEditor();
 
+        // Remove previous listener if it exists
+        if (this.scrollListenerDispose && this.scrollListenerDispose.dispose) {
+          try { this.scrollListenerDispose.dispose(); } catch (e) {}
+          this.scrollListenerDispose = null;
+        }
+
         // Listen for scroll changes
-        modifiedEditor.onDidScrollChange(() => {
+        this.scrollListenerDispose = modifiedEditor.onDidScrollChange(() => {
           this.checkExpandVisibility();
         });
 

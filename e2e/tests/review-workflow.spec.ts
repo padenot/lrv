@@ -202,9 +202,6 @@ test.describe('Review Workflow E2E', () => {
     // Click on test.txt to view it
     await page.locator('#file-list li').filter({ hasText: 'test.txt' }).click();
 
-    // Wait a moment for the file to load
-    await page.waitForTimeout(500);
-
     // Check that diff content is visible (look for our modified line)
     await expect(page.locator('text=line 2 modified')).toBeVisible({ timeout: 5000 });
     await expect(page.locator('text=line 4 added')).toBeVisible();
@@ -276,19 +273,15 @@ test.describe('Review Workflow E2E', () => {
 
     // Press Shift+J to go to next file
     await page.keyboard.press('Shift+J');
-    await page.waitForTimeout(500);
-
-    // Verify a different file is now active
-    const secondActiveIndex = await page.locator('#file-list li.active').getAttribute('data-index');
-    expect(parseInt(secondActiveIndex!)).toBe(parseInt(firstActiveIndex!) + 1);
+    // Wait for active index to increment
+    await expect(page.locator('#file-list li.active'))
+      .toHaveAttribute('data-index', String(parseInt(firstActiveIndex!) + 1));
 
     // Press Shift+K to go back to previous file
     await page.keyboard.press('Shift+K');
-    await page.waitForTimeout(500);
-
-    // Should be back to first file
-    const thirdActiveIndex = await page.locator('#file-list li.active').getAttribute('data-index');
-    expect(parseInt(thirdActiveIndex!)).toBe(parseInt(firstActiveIndex!));
+    // Wait to return to first file
+    await expect(page.locator('#file-list li.active'))
+      .toHaveAttribute('data-index', String(parseInt(firstActiveIndex!)));
   });
 
   test('complete review workflow: add comment and submit', async ({ page }) => {
@@ -423,5 +416,61 @@ test.describe('Review Workflow E2E', () => {
 
     // Verify title appears in header project info
     await expect(page.locator('#project-info')).toContainText('E2E Review Title');
+  });
+
+  test('should handle rapid file switching without errors', async ({ page }) => {
+    await openApp(page);
+
+    // Fail on page errors
+    const errors: string[] = [];
+    page.on('pageerror', (err) => errors.push(String(err)));
+    page.on('console', (msg) => {
+      if (msg.type() === 'error') errors.push(msg.text());
+    });
+
+    // Prepare locators for files
+    const files = ['test.txt', 'file2.txt', 'file3.txt'];
+    const selectors: Record<string, string> = {
+      'test.txt': 'text=line 2 modified',
+      'file2.txt': "text=console.log('debug');",
+      'file3.txt': 'text=another',
+    };
+
+    // Clear metrics before measuring
+    await page.evaluate(() => window.Perf && window.Perf.clear());
+
+    // Cycle through files multiple times and await content visibility
+    for (let i = 0; i < 6; i++) {
+      const name = files[i % files.length];
+      await page.locator('#file-list li').filter({ hasText: name }).click();
+      await expect(page.locator(selectors[name])).toBeVisible();
+    }
+
+    // Assert no errors were captured
+    expect(errors, `Console/Page errors during rapid switching: ${errors.join('\n')}`).toEqual([]);
+
+    // Pull perf metrics and report
+    const metrics = await page.evaluate(() => (window as any).Perf?.getMetrics?.());
+    if (metrics?.fileSwitch?.length) {
+      const arr: number[] = metrics.fileSwitch as number[];
+      const avg = arr.reduce((a, b) => a + b, 0) / arr.length;
+      const p95 = arr.slice().sort((a,b)=>a-b)[Math.floor(arr.length * 0.95) - 1] || avg;
+      console.log(`[perf] fileSwitch count=${arr.length} avg=${avg.toFixed(2)}ms p95=${p95.toFixed(2)}ms`);
+    } else {
+      console.log('[perf] no fileSwitch metrics captured');
+    }
+
+    // Persist metrics to test-results/perf.json for bench scripts
+    try {
+      const fs = require('fs');
+      const path = require('path');
+      const outDir = path.resolve(__dirname, '../test-results');
+      if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
+      const outPath = path.join(outDir, 'perf.json');
+      fs.writeFileSync(outPath, JSON.stringify(metrics || {}, null, 2));
+      console.log(`[perf] wrote metrics to ${outPath}`);
+    } catch (e) {
+      console.log(`[perf] failed to write metrics: ${e}`);
+    }
   });
 });
