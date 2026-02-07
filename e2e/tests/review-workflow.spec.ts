@@ -476,12 +476,32 @@ test.describe('Review Workflow E2E', () => {
   });
 
   test('should measure app init performance', async ({ page }) => {
-    await openApp(page);
+    // Collect 10 app init samples by reloading the page and reading Perf metrics each time
+    const samples: number[] = [];
 
-    // Pull perf metrics and report
-    const metrics = await page.evaluate(() => (window as any).Perf?.getMetrics?.());
-    if (metrics?.appInit?.length) {
-      const arr: number[] = metrics.appInit as number[];
+    const collectOnce = async () => {
+      // Wait until appInit measure is recorded
+      await page.waitForFunction(() => {
+        const m = (window as any).Perf?.getMetrics?.();
+        return !!(m && m.appInit && m.appInit.length > 0);
+      });
+      const ms = await page.evaluate(() => (window as any).Perf?.getMetrics?.().appInit?.[0] ?? null);
+      if (typeof ms === 'number') samples.push(ms);
+    };
+
+    // First load
+    await openApp(page);
+    await collectOnce();
+
+    // Subsequent reloads
+    for (let i = 1; i < 10; i++) {
+      await page.reload();
+      await collectOnce();
+    }
+
+    // Report
+    if (samples.length > 0) {
+      const arr = samples.slice();
       const avg = arr.reduce((a, b) => a + b, 0) / arr.length;
       const p95 = arr.slice().sort((a,b)=>a-b)[Math.floor(arr.length * 0.95) - 1] || avg;
       console.log(`[perf-init] appInit count=${arr.length} avg=${avg.toFixed(2)}ms p95=${p95.toFixed(2)}ms`);
@@ -496,7 +516,7 @@ test.describe('Review Workflow E2E', () => {
       const outDir = path.resolve(__dirname, '../test-results');
       if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
       const outPath = path.join(outDir, 'perf-init.json');
-      const payload = { appInit: (metrics && metrics.appInit) || [] };
+      const payload = { appInit: samples };
       fs.writeFileSync(outPath, JSON.stringify(payload, null, 2));
       console.log(`[perf-init] wrote metrics to ${outPath}`);
     } catch (e) {
