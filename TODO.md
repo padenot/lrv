@@ -45,7 +45,7 @@ This list tracks prioritized tasks for making lrv secure, self‑contained, and 
 ## Diff Parsing & Rendering
 - Handle “no newline at end of file” markers gracefully.
 - Accept metadata-only changes (files with status but no hunks) for display.
-- Lazy-load file contents on selection instead of fetching all at init for large diffs.
+- [x] Lazy-load file contents on selection instead of fetching all at init for large diffs.
 
 ## Monaco Lifecycle & Performance
 - Dispose previous diff editor and models on file switch.
@@ -72,8 +72,8 @@ This list tracks prioritized tasks for making lrv secure, self‑contained, and 
 ## Tests & Tooling
 - [x] Unit tests for path traversal/canonicalization guards.
 - [ ] Integration tests for Git/JJ providers (trait-based; temp repos).
-- [ ] E2E: drop `pkill`; only kill the spawned server process.
-- [ ] E2E: random free port per run; set Playwright `baseURL` dynamically.
+- [x] E2E: drop `pkill`; only kill the spawned server process.
+- [x] E2E: random free port per run; set Playwright `baseURL` dynamically.
 - [x] Add an offline run to validate vendored assets (just check-offline).
 - [ ] CI: cache Cargo/npm; run unit then E2E; optionally run with network disabled.
 
