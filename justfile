@@ -53,6 +53,11 @@ vendor-monaco version="0.45.0":
 vendor-assets:
     just vendor-monaco
 
+# Vendor fonts into web/assets/fonts. Provide URLs or local paths via env vars or args.
+# Usage: just vendor-fonts inter_url=... geist_url=... jetbrains_url=...
+vendor-fonts inter_url="" geist_url="" jetbrains_url="":
+    bash scripts/vendor-fonts.sh {{inter_url}} {{geist_url}} {{jetbrains_url}}
+
 # Run lrv on current git changes
 review:
     git diff | cargo run -- --no-open
