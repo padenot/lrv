@@ -523,6 +523,7 @@ dependencies = [
  "axum",
  "clap",
  "dirs",
+ "mime_guess",
  "open",
  "rust-embed",
  "serde",

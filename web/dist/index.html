@@ -4,9 +4,30 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>lrv - local review</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Geist+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <!-- Local fonts via @font-face; provide system fallbacks if not present -->
+  <style>
+    @font-face {
+      font-family: 'Inter';
+      src: url('/assets/fonts/Inter-Variable.woff2') format('woff2');
+      font-weight: 100 900;
+      font-style: normal;
+      font-display: swap;
+    }
+    @font-face {
+      font-family: 'Geist Sans';
+      src: url('/assets/fonts/GeistSans-Variable.woff2') format('woff2');
+      font-weight: 100 900;
+      font-style: normal;
+      font-display: swap;
+    }
+    @font-face {
+      font-family: 'JetBrains Mono';
+      src: url('/assets/fonts/JetBrainsMono-Variable.woff2') format('woff2');
+      font-weight: 100 900;
+      font-style: normal;
+      font-display: swap;
+    }
+  </style>
   <style>
     /* Dynamic theme variables - set by JavaScript based on Monaco editor theme */
     :root {
@@ -714,8 +735,21 @@
     </div>
   </div>
 
-  <!-- Load Monaco Editor from CDN -->
-  <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.js"></script>
+  <!-- Prefer local Monaco; fall back to CDN if missing -->
+  <script>
+    window.MONACO_VS_BASE = '/assets/vendor/monaco/min/vs';
+    (function() {
+      var s = document.createElement('script');
+      s.src = window.MONACO_VS_BASE + '/loader.js';
+      s.onerror = function() {
+        window.MONACO_VS_BASE = 'https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs';
+        var cdn = document.createElement('script');
+        cdn.src = window.MONACO_VS_BASE + '/loader.js';
+        document.head.appendChild(cdn);
+      };
+      document.head.appendChild(s);
+    })();
+  </script>
 
   <script>
     // Mock diff data
@@ -813,7 +847,7 @@
         // Apply split view setting from config
         this.isInline = !this.config.split_view;
 
-        require.config({ paths: { vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs' } });
+        require.config({ paths: { vs: window.MONACO_VS_BASE || '/assets/vendor/monaco/min/vs' } });
 
         return new Promise((resolve) => {
           require(['vs/editor/editor.main'], () => {

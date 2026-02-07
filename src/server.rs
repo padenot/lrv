@@ -1,16 +1,18 @@
 use crate::config::UserConfig;
 use crate::types::*;
 use axum::{
-    extract::{Query, State},
-    http::StatusCode,
-    response::{Html, IntoResponse, Json},
+    extract::{Path as AxumPath, Query, State},
+    http::{header, StatusCode},
+    response::{Html, IntoResponse, Json, Response},
     routing::{get, post},
     Router,
 };
+use rust_embed::RustEmbed;
 use serde::Deserialize;
 use std::path::{Component, Path};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
+use mime_guess;
 
 #[derive(Deserialize)]
 struct FileQuery {
@@ -30,6 +32,7 @@ pub struct AppState {
 pub fn create_router(state: AppState) -> Router {
     Router::new()
         .route("/", get(serve_index))
+        .route("/assets/*path", get(serve_asset))
         .route("/api/diff", get(get_diff))
         .route("/api/context", get(get_context))
         .route("/api/config", get(get_config).put(update_config))
@@ -40,7 +43,35 @@ pub fn create_router(state: AppState) -> Router {
 }
 
 async fn serve_index() -> impl IntoResponse {
-    Html(include_str!("../web/dist/index.html"))
+    match WebAssets::get("dist/index.html") {
+        Some(content) => Html(String::from_utf8_lossy(content.data.as_ref()).to_string()).into_response(),
+        None => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "index.html not found in embedded assets",
+        )
+            .into_response(),
+    }
+}
+
+#[derive(RustEmbed)]
+#[folder = "web/"]
+struct WebAssets;
+
+async fn serve_asset(AxumPath(path): AxumPath<String>) -> Response {
+    let asset_path = format!("assets/{}", path);
+    if let Some(content) = WebAssets::get(&asset_path) {
+        let mime = mime_guess::from_path(&asset_path).first_or_octet_stream();
+        Response::builder()
+            .status(StatusCode::OK)
+            .header(header::CONTENT_TYPE, mime.as_ref())
+            .body(axum::body::Body::from(content.data))
+            .unwrap()
+    } else {
+        Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .body(axum::body::Body::from("Asset not found"))
+            .unwrap()
+    }
 }
 
 async fn get_diff(State(state): State<AppState>) -> Json<DiffResponse> {
