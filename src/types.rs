@@ -97,4 +97,5 @@ pub struct ReviewOutput {
 pub struct ProjectContext {
     pub working_directory: String,
     pub git_branch: Option<String>,
+    pub title: Option<String>,
 }

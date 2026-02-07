@@ -57,6 +57,7 @@ fn get_project_context() -> ProjectContext {
     ProjectContext {
         working_directory,
         git_branch,
+        title: None,
     }
 }
 
@@ -175,6 +176,10 @@ struct Args {
     /// Output format: json or text
     #[arg(long, default_value = "json")]
     format: String,
+
+    /// Optional title to display in the UI header (e.g., PR summary)
+    #[arg(long)]
+    title: Option<String>,
 }
 
 #[tokio::main]
@@ -232,8 +237,9 @@ async fn main() -> Result<()> {
         config::UserConfig::default()
     });
 
-    // Get project context
-    let project_context = get_project_context();
+    // Get project context and attach optional title
+    let mut project_context = get_project_context();
+    project_context.title = args.title.clone();
 
     // Setup shutdown channel
     let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);

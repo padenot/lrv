@@ -17,6 +17,7 @@ fn test_app_state_construction() {
     let context = lrv::types::ProjectContext {
         working_directory: "/tmp".to_string(),
         git_branch: Some("main".to_string()),
+        title: None,
     };
 
     let (shutdown_tx, _rx) = tokio::sync::mpsc::channel::<()>(1);
@@ -50,6 +51,7 @@ fn test_create_router() {
             .to_string_lossy()
             .to_string(),
         git_branch: None,
+        title: None,
     };
 
     let (shutdown_tx, _rx) = tokio::sync::mpsc::channel::<()>(1);

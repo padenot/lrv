@@ -8,6 +8,7 @@ fn test_appstate_has_context_for_file_reading() {
             .to_string_lossy()
             .to_string(),
         git_branch: None,
+        title: None,
     };
 
     // This test ensures context is available in AppState
@@ -33,6 +34,7 @@ fn test_appstate_required_fields() {
     let context = lrv::types::ProjectContext {
         working_directory: "/tmp".to_string(),
         git_branch: Some("main".to_string()),
+        title: None,
     };
 
     let (shutdown_tx, _rx) = tokio::sync::mpsc::channel(1);

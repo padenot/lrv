@@ -1198,7 +1198,11 @@
         // Get just the directory name from the full path
         const dirName = this.context.working_directory.split('/').pop() || this.context.working_directory;
 
-        let html = `<span class="project-info-separator">·</span><span class="project-info-value" title="${this.context.working_directory}">${dirName}</span>`;
+        let html = '';
+        if (this.context.title) {
+          html += `<span class="project-info-separator">·</span> <span class="project-info-value">${this.context.title}</span>`;
+        }
+        html += `<span class="project-info-separator">·</span><span class="project-info-value" title="${this.context.working_directory}">${dirName}</span>`;
 
         if (this.context.git_branch) {
           html += ` <span class="project-info-separator">·</span> <span class="project-info-value git-branch">${this.context.git_branch}</span>`;

@@ -46,6 +46,7 @@ fn test_project_context() {
     let context = lrv::types::ProjectContext {
         working_directory: "/home/user/project".to_string(),
         git_branch: Some("feature/test".to_string()),
+        title: None,
     };
 
     assert_eq!(context.working_directory, "/home/user/project");
