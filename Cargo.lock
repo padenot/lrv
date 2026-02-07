@@ -529,6 +529,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "toml",
+ "tower",
  "tower-http",
  "tracing",
  "tracing-subscriber",

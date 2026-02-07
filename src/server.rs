@@ -66,26 +66,24 @@ async fn get_file_content(
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    // Join and canonicalize; ensure it stays under project root
-    let joined = base_path.join(rel_path);
-    let file_path = std::fs::canonicalize(&joined)
-        .map_err(|_| StatusCode::NOT_FOUND)?;
-    if !file_path.starts_with(&base_canon) {
-        return Err(StatusCode::FORBIDDEN);
-    }
-
-    // Determine behavior based on side
+    // For the "new" side we require the file to exist on disk and stay under root.
+    // For the "old" side we allow looking up historical content even if the file
+    // doesn't exist locally; we still validate the provided relative path.
     let content = match query.side.as_str() {
         "new" => {
+            let joined = base_path.join(rel_path);
+            let file_path = std::fs::canonicalize(&joined)
+                .map_err(|_| StatusCode::NOT_FOUND)?;
+            if !file_path.starts_with(&base_canon) {
+                return Err(StatusCode::FORBIDDEN);
+            }
             std::fs::read_to_string(&file_path)
                 .map_err(|_| StatusCode::NOT_FOUND)?
         }
         "old" => {
-            // Derive path relative to repo root for VCS provider (git HEAD by default)
-            let rel_for_vcs = file_path
-                .strip_prefix(&base_canon)
-                .ok()
-                .and_then(|p| p.to_str())
+            // Use the validated relative path for VCS provider (git HEAD by default)
+            let rel_for_vcs = rel_path
+                .to_str()
                 .map(|s| s.replace(std::path::MAIN_SEPARATOR, "/"))
                 .unwrap_or_else(|| query.path.clone());
 
