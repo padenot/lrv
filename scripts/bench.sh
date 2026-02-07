@@ -42,7 +42,7 @@ for c in "${COMMITS[@]}"; do
   # File switch perf
   (cd e2e && npx playwright test -g "rapid file switching" --reporter=line --workers=1)
   # Merge results
-  node - <<'NODE'
+node - "$ROOT_DIR" <<'NODE'
 const fs = require('fs');
 const path = require('path');
 const root = process.argv[2];
