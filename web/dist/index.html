@@ -753,6 +753,8 @@
   </script>
 
   <script>
+    // Toggle for optional debug logging
+    window.DEBUG = false;
     // Mock diff data
     // Comment Manager
     class CommentManager {
@@ -828,6 +830,8 @@
         this.fileHunks = {}; // Track hunk start lines per file: { [path]: number[] }
         this.currentHunkIndex = {}; // Track current hunk index per file
         this.config = null; // User config from server
+        this.originalModel = null;
+        this.modifiedModel = null;
 
         this.commentManager.onChange(() => this.updateUI());
       }
@@ -1508,9 +1512,17 @@
         this.renderFileList();
         this.renderExpandControls();
 
-        // Dispose old editor
+        // Dispose old editor and models
         if (this.editor) {
-          this.editor.dispose();
+          try { this.editor.dispose(); } catch (e) {}
+          this.editor = null;
+        }
+        if (this.originalModel) { try { this.originalModel.dispose(); } catch (e) {} this.originalModel = null; }
+        if (this.modifiedModel) { try { this.modifiedModel.dispose(); } catch (e) {} this.modifiedModel = null; }
+        if (this.currentWidget && this.currentWidgetEditor) {
+          try { this.currentWidgetEditor.removeContentWidget(this.currentWidget); } catch (e) {}
+          this.currentWidget = null;
+          this.currentWidgetEditor = null;
         }
 
         // Determine language from file extension
@@ -1550,12 +1562,12 @@
           }
         });
 
-        const originalModel = monaco.editor.createModel(file.old_content, language);
-        const modifiedModel = monaco.editor.createModel(file.new_content, language);
+        this.originalModel = monaco.editor.createModel(file.old_content, language);
+        this.modifiedModel = monaco.editor.createModel(file.new_content, language);
 
         this.editor.setModel({
-          original: originalModel,
-          modified: modifiedModel
+          original: this.originalModel,
+          modified: this.modifiedModel
         });
 
         // Set custom line numbers to show actual file line numbers
@@ -1867,7 +1879,7 @@
 
         // Add expand controls
         if (availableAbove > 0) {
-          console.log(`Adding top control`);
+          if (window.DEBUG) console.log(`Adding top control`);
           const topControl = this.createExpandControl('top', file.path, availableAbove);
           topContainer.appendChild(topControl);
           // Will be shown/hidden by scroll listener
@@ -1876,12 +1888,12 @@
         }
 
         if (availableBelow > 0) {
-          console.log(`Adding bottom control`);
+          if (window.DEBUG) console.log(`Adding bottom control`);
           const bottomControl = this.createExpandControl('bottom', file.path, availableBelow);
           bottomContainer.appendChild(bottomControl);
           // Will be shown/hidden by scroll listener
         } else {
-          console.log(`NOT adding bottom control - availableBelow=${availableBelow}`);
+          if (window.DEBUG) console.log(`NOT adding bottom control - availableBelow=${availableBelow}`);
           bottomContainer.style.display = 'none';
         }
       }

@@ -48,9 +48,9 @@ This list tracks prioritized tasks for making lrv secure, self‑contained, and 
 - [x] Lazy-load file contents on selection instead of fetching all at init for large diffs.
 
 ## Monaco Lifecycle & Performance
-- Dispose previous diff editor and models on file switch.
-- Dispose content widgets on close.
-- Remove debug `console.log` or guard behind a DEBUG flag.
+- [x] Dispose previous diff editor and models on file switch.
+- [x] Dispose content widgets on close (also on file switch).
+- [x] Remove debug `console.log` or guard behind a DEBUG flag.
 
 ## UX & Accessibility
 - Modals: `role="dialog"`, `aria-modal="true"`, labeled headings, focus trap, restore focus on close.
