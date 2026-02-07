@@ -875,8 +875,14 @@
             fetch(`/api/file?path=${encodeURIComponent(file.path)}&side=new`)
           ]);
 
-          const oldData = await oldResponse.json();
-          const newData = await newResponse.json();
+          let oldData = { content: '' };
+          let newData = { content: '' };
+          try {
+            if (oldResponse.ok) oldData = await oldResponse.json();
+          } catch (e) { /* ignore */ }
+          try {
+            if (newResponse.ok) newData = await newResponse.json();
+          } catch (e) { /* ignore */ }
 
           const oldAllLines = oldData.content.split('\n');
           const newAllLines = newData.content.split('\n');

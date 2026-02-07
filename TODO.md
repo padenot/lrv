@@ -28,20 +28,19 @@ This list tracks prioritized tasks for making lrv secure, self‑contained, and 
 - Documentation: examples for piping diffs from any tool and selecting providers.
 
 ## Frontend Assets (Self-Contained)
-- Vendor Monaco under `web/vendor/monaco/` (pin version).
-- Vendor fonts (Inter, JetBrains Mono, Geist Sans) under `web/fonts/` and add `@font-face` rules.
-- Remove external CDNs and Google Fonts; update HTML/loader to local paths.
-- Add `THIRD_PARTY_NOTICES.md` with license references/links.
+- [x] Vendor Monaco under `web/assets/vendor/monaco/` (pin version).
+- [x] Vendor fonts (Inter, JetBrains Mono, Geist Sans) under `web/assets/fonts/` and add `@font-face` rules.
+- [x] Remove external CDNs and Google Fonts; update HTML/loader to local paths.
+- [ ] Add `THIRD_PARTY_NOTICES.md` with license references/links.
 
 ## Static Serving & Embedding
-- Use `rust-embed` to embed `web/dist` and vendor assets.
-- Serve `/` and `/assets/*` from embedded bytes with correct content types and cache headers.
-- Consider hashed filenames for long cache lifetimes.
+- [x] Use `rust-embed` to embed `web/dist` and vendor assets.
+- [x] Serve `/` and `/assets/*` from embedded bytes with correct content types.
+- [ ] Consider hashed filenames for long cache lifetimes.
 
 ## Content Security Policy
-- Add CSP for local assets only:
-  - `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:`
-- Later: move inline JS/CSS to files and remove `'unsafe-inline'`.
+- [x] Add CSP and security headers for local assets only (includes script 'unsafe-inline'/'unsafe-eval' for Monaco, and style 'unsafe-inline').
+- [ ] Later: move inline JS/CSS to files and remove `'unsafe-inline'`/`'unsafe-eval'`.
 
 ## Diff Parsing & Rendering
 - Handle “no newline at end of file” markers gracefully.
@@ -71,12 +70,12 @@ This list tracks prioritized tasks for making lrv secure, self‑contained, and 
 - [ ] Add development logging via `tower_http::trace` (disabled by default).
 
 ## Tests & Tooling
-- Unit tests for path traversal/canonicalization guards.
-- Integration tests for Git/JJ providers (trait-based; temp repos).
-- E2E: drop `pkill`; only kill the spawned server process.
-- E2E: random free port per run; set Playwright `baseURL` dynamically.
-- E2E: add an offline run to validate vendored assets.
-- CI: cache Cargo/npm; run unit then E2E; optionally run with network disabled.
+- [x] Unit tests for path traversal/canonicalization guards.
+- [ ] Integration tests for Git/JJ providers (trait-based; temp repos).
+- [ ] E2E: drop `pkill`; only kill the spawned server process.
+- [ ] E2E: random free port per run; set Playwright `baseURL` dynamically.
+- [x] Add an offline run to validate vendored assets (just check-offline).
+- [ ] CI: cache Cargo/npm; run unit then E2E; optionally run with network disabled.
 
 ## Code Hygiene
 - [x] Remove stray "Test comment" in `src/main.rs`.

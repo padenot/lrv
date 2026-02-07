@@ -2,7 +2,8 @@ use crate::config::UserConfig;
 use crate::types::*;
 use axum::{
     extract::{Path as AxumPath, Query, State},
-    http::{header, StatusCode},
+    http::{header, HeaderValue, StatusCode},
+    middleware,
     response::{Html, IntoResponse, Json, Response},
     routing::{get, post},
     Router,
@@ -39,12 +40,21 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/file", get(get_file_content))
         .route("/api/comment", post(add_comment))
         .route("/api/complete", post(complete_review))
+        .layer(middleware::from_fn(security_headers))
         .with_state(state)
 }
 
 async fn serve_index() -> impl IntoResponse {
     match WebAssets::get("dist/index.html") {
-        Some(content) => Html(String::from_utf8_lossy(content.data.as_ref()).to_string()).into_response(),
+        Some(content) => {
+            const CSP: &str = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'";
+            Response::builder()
+                .status(StatusCode::OK)
+                .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
+                .header(header::CONTENT_SECURITY_POLICY, CSP)
+                .body(axum::body::Body::from(content.data))
+                .unwrap()
+        }
         None => (
             StatusCode::INTERNAL_SERVER_ERROR,
             "index.html not found in embedded assets",
@@ -72,6 +82,28 @@ async fn serve_asset(AxumPath(path): AxumPath<String>) -> Response {
             .body(axum::body::Body::from("Asset not found"))
             .unwrap()
     }
+}
+
+// Middleware: add strict security headers (CSP, frame-ancestors, etc.)
+async fn security_headers(req: axum::http::Request<axum::body::Body>, next: middleware::Next) -> Response {
+    // Default CSP for non-HTML routes (allow inline for simplicity in this app)
+    const DEFAULT_CSP: &str = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'";
+
+    let mut res = next.run(req).await;
+    {
+        let headers = res.headers_mut();
+        if !headers.contains_key(header::CONTENT_SECURITY_POLICY) {
+            let _ = headers.insert(
+                header::CONTENT_SECURITY_POLICY,
+                HeaderValue::from_static(DEFAULT_CSP),
+            );
+        }
+        let _ = headers.insert(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
+        let _ = headers.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
+        let _ = headers.insert(header::REFERRER_POLICY, HeaderValue::from_static("no-referrer"));
+        // HSTS is omitted since we bind http locally; can be enabled behind TLS/terminator
+    }
+    res
 }
 
 async fn get_diff(State(state): State<AppState>) -> Json<DiffResponse> {
