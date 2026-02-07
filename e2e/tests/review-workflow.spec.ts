@@ -16,7 +16,7 @@ let serverLogPath: string | null = null;
 /**
  * Start the lrv server with a test diff
  */
-async function startServer(port: number = 0): Promise<void> {
+async function startServer(port: number = 0, options?: { title?: string }): Promise<void> {
   if (!testRepoPath) {
     throw new Error('Test repo not initialized');
   }
@@ -24,7 +24,8 @@ async function startServer(port: number = 0): Promise<void> {
   return new Promise((resolve, reject) => {
     // Run cargo from the main repo, but execute git diff from the test repo
     const cargoPath = path.resolve(__dirname, '../../target/debug/lrv');
-    const cmd = `cd "${testRepoPath}" && git diff HEAD | "${cargoPath}" --port ${port} --no-open`;
+    const extraFlags = options?.title ? ` --title \"${options.title}\"` : '';
+    const cmd = `cd "${testRepoPath}" && git diff HEAD | "${cargoPath}" --port ${port} --no-open${extraFlags}`;
 
     // Reset state for new instance
     serverUrl = null;
@@ -411,5 +412,16 @@ test.describe('Review Workflow E2E', () => {
 
     // Check that status badge shows "A" for added
     await expect(fileListItem.locator('.file-status.added')).toBeVisible();
+  });
+
+  test('should display provided title in header', async ({ page }) => {
+    // Restart server with a custom title
+    await stopServer();
+    await startServer(0, { title: 'E2E Review Title' });
+
+    await openApp(page);
+
+    // Verify title appears in header project info
+    await expect(page.locator('#project-info')).toContainText('E2E Review Title');
   });
 });
