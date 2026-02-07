@@ -42,9 +42,67 @@ download_or_copy() {
 
 RC=0
 
-download_or_copy "${INTER_SRC}" "${DEST_DIR}/Inter-Variable.woff2" || RC=1
-download_or_copy "${GEIST_SRC}" "${DEST_DIR}/GeistSans-Variable.woff2" || RC=1
-download_or_copy "${JBM_SRC}" "${DEST_DIR}/JetBrainsMono-Variable.woff2" || RC=1
+if [[ -n "${INTER_SRC}" ]]; then
+  download_or_copy "${INTER_SRC}" "${DEST_DIR}/Inter-Variable.woff2" || RC=1
+fi
+
+if [[ -n "${GEIST_SRC}" ]]; then
+  if [[ "${GEIST_SRC}" == *.zip ]]; then
+    TMP_DIR_G="$(mktemp -d)"; trap 'rm -rf "$TMP_DIR_G"' EXIT
+    ZIP_FILE_G="${TMP_DIR_G}/geist.zip"
+    echo "Downloading ${GEIST_SRC}"
+    curl -fSL --retry 3 --retry-delay 1 "${GEIST_SRC}" -o "$ZIP_FILE_G"
+    unzip -q "$ZIP_FILE_G" -d "$TMP_DIR_G/geist"
+    # Prefer variable Sans woff2 (Geist[wght].woff2), then any GeistSans Regular
+    CAND=$(rg -n --files "$TMP_DIR_G/geist" | rg -i 'Geist/webfonts/Geist\[wght\]\.woff2$' | head -n1 || true)
+    if [[ -z "${CAND:-}" ]]; then
+      CAND=$(rg -n --files "$TMP_DIR_G/geist" | rg -i 'Geist/webfonts/Geist-Regular\.woff2$' | head -n1 || true)
+    fi
+    if [[ -z "${CAND:-}" ]]; then
+      # Fallback: any Geist*.woff2
+      CAND=$(rg -n --files "$TMP_DIR_G/geist" | rg -i 'Geist/.+\.woff2$' | head -n1 || true)
+    fi
+    if [[ -n "${CAND:-}" ]]; then
+      cp -f "$CAND" "${DEST_DIR}/GeistSans-Variable.woff2"
+    else
+      echo "No WOFF2 found in Geist zip archive." >&2; RC=1
+    fi
+  else
+    download_or_copy "${GEIST_SRC}" "${DEST_DIR}/GeistSans-Variable.woff2" || RC=1
+  fi
+fi
+
+# JetBrains: accept zip and extract first WOFF2 if provided
+if [[ -n "${JBM_SRC}" ]]; then
+  if [[ "${JBM_SRC}" == *.zip ]]; then
+    TMP_DIR="$(mktemp -d)"; trap 'rm -rf "$TMP_DIR"' EXIT
+    ZIP_FILE="${TMP_DIR}/jbm.zip"
+    echo "Downloading ${JBM_SRC}"
+    curl -fSL --retry 3 --retry-delay 1 "${JBM_SRC}" -o "$ZIP_FILE"
+    unzip -q "$ZIP_FILE" -d "$TMP_DIR/jbm"
+    # Prefer Regular webfont woff2 (no var woff2 in this archive), then any woff2
+    CAND=$(rg -n --files "$TMP_DIR/jbm" | rg -i 'fonts/webfonts/JetBrainsMono-Regular\.woff2$' | head -n1 || true)
+    if [[ -z "${CAND:-}" ]]; then
+      CAND=$(rg -n --files "$TMP_DIR/jbm" | rg -i 'fonts/webfonts/.+\.woff2$' | head -n1 || true)
+    fi
+    if [[ -n "${CAND:-}" ]]; then
+      cp -f "$CAND" "${DEST_DIR}/JetBrainsMono-Variable.woff2"
+    else
+      echo "No WOFF2 found in zip archive. Trying TTF fallback..." >&2
+      TTF=$(rg -n --files "$TMP_DIR/jbm" | rg -i 'fonts/variable/JetBrainsMono\[wght\]\.ttf$' | head -n1 || true)
+      if [[ -z "${TTF:-}" ]]; then
+        TTF=$(rg -n --files "$TMP_DIR/jbm" | rg -i 'fonts/ttf/JetBrainsMono-Regular\.ttf$' | head -n1 || true)
+      fi
+      if [[ -n "${TTF:-}" ]]; then
+        cp -f "$TTF" "${DEST_DIR}/JetBrainsMono-Regular.ttf"
+      else
+        echo "No TTF found in zip archive." >&2; RC=1
+      fi
+    fi
+  else
+    download_or_copy "${JBM_SRC}" "${DEST_DIR}/JetBrainsMono-Variable.woff2" || RC=1
+  fi
+fi
 
 if [[ "${RC}" -ne 0 ]]; then
   cat >&2 <<'EOF'

@@ -18,7 +18,7 @@ done
 if [[ "$ASSETS_OK" -ne 1 ]]; then
   echo "[check-offline] Missing assets:" >&2
   for m in "${missing[@]}"; do echo "  - $m" >&2; done
-  echo "Use 'just vendor-assets' and 'just vendor-fonts' to install." >&2
+  echo "[check-offline] FAIL: All fonts and Monaco must be vendored." >&2
   exit 1
 fi
 
@@ -70,11 +70,10 @@ if ! curl -fsS "$URL/assets/vendor/monaco/min/vs/loader.js" >/dev/null; then
   code=1
 fi
 
-# Fetch fonts
+# Fetch fonts (optional). Don't fail if missing; just warn.
 for f in Inter-Variable.woff2 GeistSans-Variable.woff2 JetBrainsMono-Variable.woff2; do
   if ! curl -fsS "$URL/assets/fonts/$f" >/dev/null; then
-    echo "[check-offline] Failed to GET /assets/fonts/$f" >&2
-    code=1
+    echo "[check-offline] WARN: /assets/fonts/$f not served locally (using Google/system fallback)." >&2
   fi
 done
 
