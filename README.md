@@ -161,6 +161,8 @@ The web UI is embedded in the binary at compile time via `include_str!()`. After
 just build  # Rebuild to embed the updated HTML
 ```
 
+For vendored assets (Monaco + fonts) and how to update them, see `docs/VENDORED_ASSETS.md`.
+
 ## Credits
 
 ### Monaco Editor Themes
