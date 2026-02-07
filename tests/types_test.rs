@@ -2,14 +2,12 @@
 #[test]
 fn test_diff_response_structure() {
     let response = lrv::types::DiffResponse {
-        files: vec![
-            lrv::types::FileDiff {
-                path: "test.rs".to_string(),
-                old_path: None,
-                status: lrv::types::FileStatus::Modified,
-                hunks: vec![],
-            }
-        ],
+        files: vec![lrv::types::FileDiff {
+            path: "test.rs".to_string(),
+            old_path: None,
+            status: lrv::types::FileStatus::Modified,
+            hunks: vec![],
+        }],
         stats: lrv::types::DiffStats {
             files_changed: 1,
             additions: 10,
@@ -78,8 +76,7 @@ fn test_side_serde() {
         "side": "new"
     });
 
-    let side: lrv::types::Side =
-        serde_json::from_value(data["side"].clone()).unwrap();
+    let side: lrv::types::Side = serde_json::from_value(data["side"].clone()).unwrap();
 
     assert!(matches!(side, lrv::types::Side::New));
 }

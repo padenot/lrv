@@ -6,12 +6,11 @@ mod types;
 
 use anyhow::{Context, Result};
 use clap::Parser;
+use lrv::netutil;
 use std::io::Read;
 use std::process::Command;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex, Notify};
-use lrv::netutil;
-use tracing_subscriber;
 
 use crate::output::OutputFormat;
 use crate::server::{create_router, AppState};
@@ -190,22 +189,20 @@ async fn main() -> Result<()> {
             .context(format!("Failed to read file: {}", file_path))?
     } else if let Some(cmd) = args.cmd {
         let output = if cfg!(target_os = "windows") {
-            Command::new("cmd")
-                .args(["/C", &cmd])
-                .output()
+            Command::new("cmd").args(["/C", &cmd]).output()
         } else {
-            Command::new("sh")
-                .args(["-c", &cmd])
-                .output()
+            Command::new("sh").args(["-c", &cmd]).output()
         }
         .context("Failed to execute command")?;
 
         if !output.status.success() {
-            anyhow::bail!("Command failed: {}", String::from_utf8_lossy(&output.stderr));
+            anyhow::bail!(
+                "Command failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
         }
 
-        String::from_utf8(output.stdout)
-            .context("Command output is not valid UTF-8")?
+        String::from_utf8(output.stdout).context("Command output is not valid UTF-8")?
     } else {
         let mut buffer = String::new();
         std::io::stdin()
@@ -227,15 +224,13 @@ async fn main() -> Result<()> {
     }
 
     // Parse output format
-    let output_format: OutputFormat = args.format.parse()
-        .context("Invalid output format")?;
+    let output_format: OutputFormat = args.format.parse().context("Invalid output format")?;
 
     // Load user config
-    let user_config = config::load_config()
-        .unwrap_or_else(|e| {
-            eprintln!("Warning: Failed to load config, using defaults: {}", e);
-            config::UserConfig::default()
-        });
+    let user_config = config::load_config().unwrap_or_else(|e| {
+        eprintln!("Warning: Failed to load config, using defaults: {}", e);
+        config::UserConfig::default()
+    });
 
     // Get project context
     let project_context = get_project_context();

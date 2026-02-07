@@ -1,21 +1,21 @@
+use crate::config::UserConfig;
+use crate::types::*;
 use axum::{
-    extract::{State, Query},
+    extract::{Query, State},
     http::StatusCode,
     response::{Html, IntoResponse, Json},
     routing::{get, post},
     Router,
 };
+use serde::Deserialize;
+use std::path::{Component, Path};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
-use serde::Deserialize;
-use crate::config::UserConfig;
-use crate::types::*;
-use std::path::{Path, Component};
 
 #[derive(Deserialize)]
 struct FileQuery {
     path: String,
-    side: String,  // "old" or "new"
+    side: String, // "old" or "new"
 }
 
 #[derive(Clone)]
@@ -57,12 +57,16 @@ async fn get_file_content(
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     // Get and canonicalize the project root
     let base_path = Path::new(&state.context.working_directory);
-    let base_canon = std::fs::canonicalize(base_path)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let base_canon =
+        std::fs::canonicalize(base_path).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // Basic path validation on input path
     let rel_path = Path::new(&query.path);
-    if rel_path.is_absolute() || rel_path.components().any(|c| matches!(c, Component::ParentDir)) {
+    if rel_path.is_absolute()
+        || rel_path
+            .components()
+            .any(|c| matches!(c, Component::ParentDir))
+    {
         return Err(StatusCode::BAD_REQUEST);
     }
 
@@ -72,13 +76,11 @@ async fn get_file_content(
     let content = match query.side.as_str() {
         "new" => {
             let joined = base_path.join(rel_path);
-            let file_path = std::fs::canonicalize(&joined)
-                .map_err(|_| StatusCode::NOT_FOUND)?;
+            let file_path = std::fs::canonicalize(&joined).map_err(|_| StatusCode::NOT_FOUND)?;
             if !file_path.starts_with(&base_canon) {
                 return Err(StatusCode::FORBIDDEN);
             }
-            std::fs::read_to_string(&file_path)
-                .map_err(|_| StatusCode::NOT_FOUND)?
+            std::fs::read_to_string(&file_path).map_err(|_| StatusCode::NOT_FOUND)?
         }
         "old" => {
             // Use the validated relative path for VCS provider (git HEAD by default)
@@ -105,10 +107,7 @@ async fn get_file_content(
     Ok(Json(serde_json::json!({ "content": content })))
 }
 
-async fn add_comment(
-    State(state): State<AppState>,
-    Json(comment): Json<Comment>,
-) -> StatusCode {
+async fn add_comment(State(state): State<AppState>, Json(comment): Json<Comment>) -> StatusCode {
     let mut comments = state.comments.lock().await;
     comments.push(comment);
     StatusCode::OK
@@ -142,8 +141,7 @@ async fn update_config(
     *config = new_config.clone();
 
     // Persist to disk
-    crate::config::save_config(&new_config)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    crate::config::save_config(&new_config).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(StatusCode::OK)
 }

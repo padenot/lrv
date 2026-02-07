@@ -5,8 +5,8 @@ fn test_config_defaults() {
 
     assert_eq!(config.color_scheme, "vs-dark");
     assert_eq!(config.font, "JetBrains Mono");
-    assert_eq!(config.split_view, true);
-    assert_eq!(config.auto_close_tab, true);
+    assert!(config.split_view);
+    assert!(config.auto_close_tab);
 }
 
 /// Test config serialization/deserialization
@@ -28,8 +28,8 @@ fn test_config_serde() {
     let deserialized: lrv::config::UserConfig = toml::from_str(&toml_str).unwrap();
     assert_eq!(deserialized.color_scheme, "github-dark");
     assert_eq!(deserialized.font, "Monaco");
-    assert_eq!(deserialized.split_view, false);
-    assert_eq!(deserialized.auto_close_tab, false);
+    assert!(!deserialized.split_view);
+    assert!(!deserialized.auto_close_tab);
 }
 
 /// Test config with missing fields (should use defaults)
@@ -43,6 +43,6 @@ fn test_config_missing_fields() {
     assert_eq!(config.color_scheme, "github-light");
     // Should use defaults for missing fields
     assert_eq!(config.font, "JetBrains Mono");
-    assert_eq!(config.split_view, true);
-    assert_eq!(config.auto_close_tab, true);
+    assert!(config.split_view);
+    assert!(config.auto_close_tab);
 }

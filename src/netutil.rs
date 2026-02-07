@@ -5,4 +5,3 @@ pub fn filter_tailscale_ipv4s(input: &str) -> Vec<String> {
         .map(|s| s.to_string())
         .collect()
 }
-

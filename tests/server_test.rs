@@ -69,7 +69,7 @@ fn test_create_router() {
 /// Test that comments can be stored in AppState
 #[tokio::test]
 async fn test_comment_storage() {
-    let (shutdown_tx, _rx) = tokio::sync::mpsc::channel::<()>(1);
+    let (_shutdown_tx, _rx) = tokio::sync::mpsc::channel::<()>(1);
 
     let comments = Arc::new(Mutex::new(vec![]));
 
@@ -108,5 +108,5 @@ async fn test_config_mutation() {
     // Verify changes persisted
     let config_lock = config.lock().await;
     assert_eq!(config_lock.color_scheme, "github-dark");
-    assert_eq!(config_lock.split_view, false);
+    assert!(!config_lock.split_view);
 }

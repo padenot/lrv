@@ -13,6 +13,11 @@ This list tracks prioritized tasks for making lrv secure, self‑contained, and 
 - [ ] Optional: Auth token for `--public` mode (opt-in; header or cookie). Low priority for private mesh.
 - [ ] Optional: Limit `/api/context` exposure to basename by default; full path behind a debug flag.
 
+### Tailscale & Multi-bind
+- [x] Support multiple `--bind` addresses.
+- [x] Add `--tailscale` to bind on detected Tailscale IPv4 in addition to localhost.
+- [x] Run multiple listeners on a single port with graceful shutdown.
+
 ## VCS-Agnostic “Old” Content
 - Add `--vcs <git|jj|none>` and `--base <rev>`.
 - Abstract “old content” provider:

@@ -1,4 +1,5 @@
 use crate::types::{Comment, ReviewOutput};
+use std::fmt;
 use anyhow::Result;
 
 pub fn format_output(comments: Vec<Comment>, format: &OutputFormat) -> String {
@@ -14,7 +15,11 @@ fn format_json(comments: &[Comment]) -> String {
         comments.len(),
         if comments.len() == 1 { "" } else { "s" },
         count_unique_files(comments),
-        if count_unique_files(comments) == 1 { "" } else { "s" }
+        if count_unique_files(comments) == 1 {
+            ""
+        } else {
+            "s"
+        }
     );
 
     let output = ReviewOutput {
@@ -28,14 +33,18 @@ fn format_json(comments: &[Comment]) -> String {
 
 fn format_text(comments: &[Comment]) -> String {
     let mut output = String::new();
-    output.push_str(&format!("Review completed with {} comments:\n\n", comments.len()));
+    output.push_str(&format!(
+        "Review completed with {} comments:\n\n",
+        comments.len()
+    ));
 
     for comment in comments {
-        output.push_str(&format!("{}:{}-{} [{}] ({:?})\n",
+        output.push_str(&format!(
+            "{}:{}-{} [{}] ({:?})\n",
             comment.file,
             comment.start_line,
             comment.end_line,
-            comment.side.to_string(),
+            comment.side,
             comment.severity
         ));
         output.push_str(&format!("  {}\n\n", comment.body));
@@ -52,11 +61,11 @@ fn count_unique_files(comments: &[Comment]) -> usize {
     files.len()
 }
 
-impl ToString for crate::types::Side {
-    fn to_string(&self) -> String {
+impl fmt::Display for crate::types::Side {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            crate::types::Side::New => "new".to_string(),
-            crate::types::Side::Old => "old".to_string(),
+            crate::types::Side::New => write!(f, "new"),
+            crate::types::Side::Old => write!(f, "old"),
         }
     }
 }

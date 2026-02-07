@@ -1,7 +1,10 @@
-use axum::{http::{Request, StatusCode}, body::Body};
-use tower::util::ServiceExt; // for `oneshot`
-use std::{sync::Arc, fs, path::PathBuf};
+use axum::{
+    body::Body,
+    http::{Request, StatusCode},
+};
+use std::{fs, path::PathBuf, sync::Arc};
 use tokio::sync::{mpsc, Mutex};
+use tower::util::ServiceExt; // for `oneshot`
 
 fn make_temp_dir() -> PathBuf {
     let mut dir = std::env::temp_dir();
@@ -17,10 +20,17 @@ fn cleanup_dir(dir: &PathBuf) {
 fn make_state_with_root(root: &str) -> lrv::server::AppState {
     let diff_data = lrv::types::DiffResponse {
         files: vec![],
-        stats: lrv::types::DiffStats { files_changed: 0, additions: 0, deletions: 0 },
+        stats: lrv::types::DiffStats {
+            files_changed: 0,
+            additions: 0,
+            deletions: 0,
+        },
     };
     let config = lrv::config::UserConfig::default();
-    let context = lrv::types::ProjectContext { working_directory: root.to_string(), git_branch: None };
+    let context = lrv::types::ProjectContext {
+        working_directory: root.to_string(),
+        git_branch: None,
+    };
     let (shutdown_tx, _rx) = mpsc::channel::<()>(1);
     lrv::server::AppState {
         diff: Arc::new(diff_data),
@@ -49,7 +59,9 @@ async fn test_file_read_new_ok() {
         .unwrap();
 
     assert_eq!(res.status(), StatusCode::OK);
-    let bytes = axum::body::to_bytes(res.into_body(), 1_000_000).await.unwrap();
+    let bytes = axum::body::to_bytes(res.into_body(), 1_000_000)
+        .await
+        .unwrap();
     let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(v["content"].as_str().unwrap(), "hello world");
 
@@ -125,7 +137,9 @@ async fn test_file_read_old_side_without_git_repo_ok() {
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
-    let bytes = axum::body::to_bytes(res.into_body(), 1_000_000).await.unwrap();
+    let bytes = axum::body::to_bytes(res.into_body(), 1_000_000)
+        .await
+        .unwrap();
     let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     assert!(v["content"].as_str().is_some()); // empty string acceptable
 

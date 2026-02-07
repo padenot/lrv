@@ -1,5 +1,5 @@
-use anyhow::Result;
 use crate::types::*;
+use anyhow::Result;
 
 pub fn parse_diff(diff_text: &str) -> Result<DiffResponse> {
     let mut files = Vec::new();
@@ -46,26 +46,26 @@ pub fn parse_diff(diff_text: &str) -> Result<DiffResponse> {
             old_path_temp = None;
             is_rename = false;
             rename_from = None;
-        } else if line.starts_with("rename from ") {
+        } else if let Some(stripped) = line.strip_prefix("rename from ") {
             is_rename = true;
-            rename_from = Some(line[12..].to_string());
-        } else if line.starts_with("rename to ") {
+            rename_from = Some(stripped.to_string());
+        } else if let Some(stripped) = line.strip_prefix("rename to ") {
             // For pure renames (100% similarity), there's no +++ line
             // So we need to create the file entry here
-            let new_path = line[10..].to_string();
+            let new_path = stripped.to_string();
             current_file = Some((new_path, rename_from.clone(), FileStatus::Renamed));
         } else if line.starts_with("new file mode") {
             // Mark as new file
             old_path_temp = Some("/dev/null".to_string());
         } else if line.starts_with("deleted file mode") {
             // Mark as deleted file
-        } else if line.starts_with("--- ") {
+        } else if let Some(stripped) = line.strip_prefix("--- ") {
             // Old file path
-            let old_path = line[4..].trim_start_matches("a/").to_string();
+            let old_path = stripped.trim_start_matches("a/").to_string();
             old_path_temp = Some(old_path);
-        } else if line.starts_with("+++ ") {
+        } else if let Some(stripped) = line.strip_prefix("+++ ") {
             // New file path
-            let new_path = line[4..].trim_start_matches("b/").to_string();
+            let new_path = stripped.trim_start_matches("b/").to_string();
 
             // Determine status based on collected information
             let (final_path, final_old_path, status) = if is_rename {
@@ -73,7 +73,13 @@ pub fn parse_diff(diff_text: &str) -> Result<DiffResponse> {
                 (new_path.clone(), rename_from.clone(), FileStatus::Renamed)
             } else if new_path == "/dev/null" {
                 // Deleted file
-                (old_path_temp.clone().unwrap_or_else(|| "unknown".to_string()), None, FileStatus::Deleted)
+                (
+                    old_path_temp
+                        .clone()
+                        .unwrap_or_else(|| "unknown".to_string()),
+                    None,
+                    FileStatus::Deleted,
+                )
             } else if old_path_temp.as_deref() == Some("/dev/null") {
                 // New file
                 (new_path.clone(), None, FileStatus::Added)
@@ -103,28 +109,28 @@ pub fn parse_diff(diff_text: &str) -> Result<DiffResponse> {
                 hunk_old_start = captures.0;
                 hunk_new_start = captures.1;
             }
-        } else if line.starts_with("+") && !line.starts_with("+++") {
+        } else if line.starts_with('+') && !line.starts_with("+++") {
             total_additions += 1;
             current_lines.push(DiffLine {
                 line_type: LineType::Add,
-                content: line[1..].to_string(),
+                content: line.strip_prefix('+').unwrap_or("").to_string(),
                 old_line: None,
                 new_line: Some(new_line),
             });
             new_line += 1;
-        } else if line.starts_with("-") && !line.starts_with("---") {
+        } else if line.starts_with('-') && !line.starts_with("---") {
             total_deletions += 1;
             current_lines.push(DiffLine {
                 line_type: LineType::Delete,
-                content: line[1..].to_string(),
+                content: line.strip_prefix('-').unwrap_or("").to_string(),
                 old_line: Some(old_line),
                 new_line: None,
             });
             old_line += 1;
-        } else if line.starts_with(" ") {
+        } else if let Some(stripped) = line.strip_prefix(' ') {
             current_lines.push(DiffLine {
                 line_type: LineType::Context,
-                content: line[1..].to_string(),
+                content: stripped.to_string(),
                 old_line: Some(old_line),
                 new_line: Some(new_line),
             });

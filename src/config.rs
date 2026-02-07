@@ -47,8 +47,7 @@ fn get_config_path() -> Result<PathBuf> {
         .context("Could not determine config directory")?
         .join("lrv");
 
-    fs::create_dir_all(&config_dir)
-        .context("Failed to create config directory")?;
+    fs::create_dir_all(&config_dir).context("Failed to create config directory")?;
 
     Ok(config_dir.join("config.toml"))
 }
@@ -60,11 +59,9 @@ pub fn load_config() -> Result<UserConfig> {
         return Ok(UserConfig::default());
     }
 
-    let content = fs::read_to_string(&config_path)
-        .context("Failed to read config file")?;
+    let content = fs::read_to_string(&config_path).context("Failed to read config file")?;
 
-    let config: UserConfig = toml::from_str(&content)
-        .context("Failed to parse config file")?;
+    let config: UserConfig = toml::from_str(&content).context("Failed to parse config file")?;
 
     Ok(config)
 }
@@ -72,11 +69,9 @@ pub fn load_config() -> Result<UserConfig> {
 pub fn save_config(config: &UserConfig) -> Result<()> {
     let config_path = get_config_path()?;
 
-    let content = toml::to_string_pretty(config)
-        .context("Failed to serialize config")?;
+    let content = toml::to_string_pretty(config).context("Failed to serialize config")?;
 
-    fs::write(&config_path, content)
-        .context("Failed to write config file")?;
+    fs::write(&config_path, content).context("Failed to write config file")?;
 
     Ok(())
 }
