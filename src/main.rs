@@ -122,6 +122,14 @@ struct Args {
     #[arg(long)]
     port: Option<u16>,
 
+    /// Bind address (default: 127.0.0.1; use --public for 0.0.0.0)
+    #[arg(long)]
+    bind: Option<String>,
+
+    /// Shorthand to bind on all interfaces (equivalent to --bind 0.0.0.0)
+    #[arg(long)]
+    public: bool,
+
     /// Don't auto-open browser
     #[arg(long)]
     no_open: bool,
@@ -208,24 +216,44 @@ async fn main() -> Result<()> {
     // Create router
     let app = create_router(state.clone());
 
-    // Bind to port
+    // Determine bind address and port
     let port = args.port.unwrap_or(0);
-    let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port))
+    let bind_addr = if args.public {
+        "0.0.0.0".to_string()
+    } else {
+        args.bind.unwrap_or_else(|| "127.0.0.1".to_string())
+    };
+
+    // Bind to address
+    let listener = tokio::net::TcpListener::bind(format!("{}:{}", bind_addr, port))
         .await
         .context("Failed to bind to port")?;
 
     let addr = listener.local_addr()?;
     let port = addr.port();
 
-    eprintln!("Server running on port {}", port);
+    if bind_addr == "0.0.0.0" {
+        eprintln!("Warning: running in public mode on 0.0.0.0 (no auth)");
+    }
+    eprintln!("Server running on {}:{}", bind_addr, port);
     eprintln!("Available at:");
 
-    // Display all network interfaces
-    for iface in get_network_interfaces() {
-        eprintln!("  http://{}:{}", iface, port);
+    // Show URLs depending on bind mode
+    if bind_addr == "0.0.0.0" {
+        for iface in get_network_interfaces() {
+            eprintln!("  http://{}:{}", iface, port);
+        }
+    } else {
+        eprintln!("  http://{}:{}", bind_addr, port);
     }
 
-    let url = format!("http://127.0.0.1:{}", port);
+    // Determine URL to open in browser
+    let url = if bind_addr == "0.0.0.0" {
+        // Prefer loopback when publicly bound
+        format!("http://127.0.0.1:{}", port)
+    } else {
+        format!("http://{}:{}", bind_addr, port)
+    };
 
     // Open browser
     if !args.no_open {
@@ -253,4 +281,3 @@ async fn main() -> Result<()> {
 
     Ok(())
 }
-// Test comment

@@ -10,6 +10,7 @@ use tokio::sync::{mpsc, Mutex};
 use serde::Deserialize;
 use crate::config::UserConfig;
 use crate::types::*;
+use std::path::{Path, Component};
 
 #[derive(Deserialize)]
 struct FileQuery {
@@ -54,28 +55,50 @@ async fn get_file_content(
     State(state): State<AppState>,
     Query(query): Query<FileQuery>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    // Get the working directory from context
-    let base_path = std::path::Path::new(&state.context.working_directory);
+    // Get and canonicalize the project root
+    let base_path = Path::new(&state.context.working_directory);
+    let base_canon = std::fs::canonicalize(base_path)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    // Try to read the file from disk
+    // Basic path validation on input path
+    let rel_path = Path::new(&query.path);
+    if rel_path.is_absolute() || rel_path.components().any(|c| matches!(c, Component::ParentDir)) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    // Join and canonicalize; ensure it stays under project root
+    let joined = base_path.join(rel_path);
+    let file_path = std::fs::canonicalize(&joined)
+        .map_err(|_| StatusCode::NOT_FOUND)?;
+    if !file_path.starts_with(&base_canon) {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    // Determine behavior based on side
     let content = match query.side.as_str() {
         "new" => {
-            // For new side, try to read current file
-            let file_path = base_path.join(&query.path);
             std::fs::read_to_string(&file_path)
-                .unwrap_or_else(|_| String::new())
+                .map_err(|_| StatusCode::NOT_FOUND)?
         }
         "old" => {
-            // For old side, try to get from git
-            let output = std::process::Command::new("git")
-                .args(["show", &format!("HEAD:{}", query.path)])
-                .output();
+            // Derive path relative to repo root for VCS provider (git HEAD by default)
+            let rel_for_vcs = file_path
+                .strip_prefix(&base_canon)
+                .ok()
+                .and_then(|p| p.to_str())
+                .map(|s| s.replace(std::path::MAIN_SEPARATOR, "/"))
+                .unwrap_or_else(|| query.path.clone());
 
-            match output {
-                Ok(out) if out.status.success() => {
-                    String::from_utf8(out.stdout).unwrap_or_else(|_| String::new())
-                }
-                _ => String::new()
+            let output = std::process::Command::new("git")
+                .args(["show", &format!("HEAD:{}", rel_for_vcs)])
+                .output()
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+            if output.status.success() {
+                String::from_utf8(output.stdout).unwrap_or_default()
+            } else {
+                // Old content not available
+                String::new()
             }
         }
         _ => return Err(StatusCode::BAD_REQUEST),

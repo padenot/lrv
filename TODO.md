@@ -3,15 +3,15 @@
 This list tracks prioritized tasks for making lrv secure, self‑contained, and VCS‑agnostic for localhost and private mesh (e.g., Tailscale) usage.
 
 ## Security & Networking
-- Default bind to 127.0.0.1 (local only).
-- Add `--bind <ADDR>` and keep `--port <PORT>`.
-- Add `--public` flag as shorthand for `--bind 0.0.0.0` and show a banner when used.
-- Enforce path safety in `/api/file`:
-  - Reject absolute paths and any `..` components.
-  - Canonicalize and ensure the target remains under the project root; return 403 if not.
-- Gracefully handle missing VCS for the “old” side (return empty content with a clear message).
-- Optional: Auth token for `--public` mode (opt-in; header or cookie). Low priority for private mesh.
-- Optional: Limit `/api/context` exposure to basename by default; full path behind a debug flag.
+- [x] Default bind to 127.0.0.1 (local only).
+- [x] Add `--bind <ADDR>` and keep `--port <PORT>`.
+- [x] Add `--public` flag as shorthand for `--bind 0.0.0.0` and show a banner when used.
+- [x] Enforce path safety in `/api/file`:
+  - [x] Reject absolute paths and any `..` components.
+  - [x] Canonicalize and ensure the target remains under the project root; return 403 if not.
+- [ ] Gracefully handle missing VCS for the “old” side (return empty content with a clear message).
+- [ ] Optional: Auth token for `--public` mode (opt-in; header or cookie). Low priority for private mesh.
+- [ ] Optional: Limit `/api/context` exposure to basename by default; full path behind a debug flag.
 
 ## VCS-Agnostic “Old” Content
 - Add `--vcs <git|jj|none>` and `--base <rev>`.
@@ -60,8 +60,10 @@ This list tracks prioritized tasks for making lrv secure, self‑contained, and 
 - Document `--output`, `--no-open`, `--bind`, `--public` with examples.
 
 ## API Hardening & Behavior
-- Return 400 for invalid `side`, 403 for traversal, 404 for missing files.
-- Add development logging via `tower_http::trace` (disabled by default).
+- [x] Return 400 for invalid `side`.
+- [x] 403 for traversal.
+- [x] 404 for missing files (new-side reads).
+- [ ] Add development logging via `tower_http::trace` (disabled by default).
 
 ## Tests & Tooling
 - Unit tests for path traversal/canonicalization guards.
@@ -72,9 +74,9 @@ This list tracks prioritized tasks for making lrv secure, self‑contained, and 
 - CI: cache Cargo/npm; run unit then E2E; optionally run with network disabled.
 
 ## Code Hygiene
-- Remove stray "Test comment" in `src/main.rs`.
-- Prefer `tracing` over `eprintln!` for server logs, except user-facing.
-- Consistent status codes and error bodies for API failures (optional).
+- [x] Remove stray "Test comment" in `src/main.rs`.
+- [ ] Prefer `tracing` over `eprintln!` for server logs, except user-facing.
+- [ ] Consistent status codes and error bodies for API failures (optional).
 
 ## Documentation
 - README: update for bind/public behavior, VCS options, vendored assets, offline behavior.
@@ -86,4 +88,3 @@ This list tracks prioritized tasks for making lrv secure, self‑contained, and 
 - Render visible context purely from hunks when full file fetch isn’t possible.
 - `--out comments.json` to export review output.
 - Theming presets stored in config; theme switcher persists.
-
