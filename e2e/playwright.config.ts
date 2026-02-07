@@ -2,16 +2,19 @@ import { defineConfig, devices } from '@playwright/test';
 
 export default defineConfig({
   testDir: './tests',
-  fullyParallel: false, // Run tests sequentially since we're managing server lifecycle
+  fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
-  workers: 1, // Single worker since we manage server
-  reporter: 'html',
+  // Run with half of available CPUs by default
+  workers: '50%',
+  // Use a lightweight reporter to keep runs fast
+  reporter: 'line',
 
   use: {
     baseURL: 'http://localhost:9999',
-    trace: 'on-first-retry',
-    screenshot: 'only-on-failure',
+    // Disable tracing/screenshots by default to speed up local runs
+    trace: 'off',
+    screenshot: 'off',
     headless: true, // Always run headless by default
   },
 

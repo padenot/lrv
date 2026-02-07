@@ -23,9 +23,10 @@ test: test-unit test-e2e
 test-unit:
     cargo test
 
-# Run e2e tests with Playwright
+# Run e2e tests with Playwright (fast defaults)
 test-e2e:
-    cd e2e && npm test
+    just build
+    cd e2e && npm test --silent -- --reporter=line
 
 # Run e2e tests in headed mode (visible browser)
 test-e2e-headed:
@@ -34,6 +35,8 @@ test-e2e-headed:
 # Run e2e tests with UI (interactive)
 test-e2e-ui:
     cd e2e && npm run test:ui
+
+ 
 
 # Setup e2e test environment
 setup-e2e:
