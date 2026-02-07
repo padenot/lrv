@@ -44,6 +44,15 @@ build-web:
     @echo "Web assets are in web/dist/ - modify index.html directly, then rebuild"
     @echo "Run 'just build' after editing web/dist/index.html to embed changes"
 
+# Vendor Monaco editor assets into web/assets/vendor/monaco
+# Usage: just vendor-monaco [version]
+vendor-monaco version="0.45.0":
+    bash scripts/vendor-monaco.sh {{version}}
+
+# Convenience: vendor all assets we can automate (currently Monaco)
+vendor-assets:
+    just vendor-monaco
+
 # Run lrv on current git changes
 review:
     git diff | cargo run -- --no-open
