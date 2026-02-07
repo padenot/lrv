@@ -58,6 +58,10 @@ vendor-assets:
 vendor-fonts inter_url="" geist_url="" jetbrains_url="":
     bash scripts/vendor-fonts.sh {{inter_url}} {{geist_url}} {{jetbrains_url}}
 
+# Verify offline readiness: ensure vendored assets exist and are served locally
+check-offline:
+    bash scripts/check-offline.sh
+
 # Run lrv on current git changes
 review:
     git diff | cargo run -- --no-open
