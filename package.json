@@ -1,0 +1,13 @@
+{
+  "name": "lrv-root",
+  "private": true,
+  "version": "0.0.0",
+  "devDependencies": {
+    "eslint": "^10.0.0",
+    "eslint-plugin-html": "^8.1.1"
+  },
+  "scripts": {
+    "lint:web": "eslint --ext .ts,.js,.html web e2e scripts"
+  }
+}
+

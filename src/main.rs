@@ -58,6 +58,7 @@ fn get_project_context() -> ProjectContext {
         working_directory,
         git_branch,
         title: None,
+        is_public: false,
     }
 }
 
@@ -240,6 +241,9 @@ async fn main() -> Result<()> {
     // Get project context and attach optional title
     let mut project_context = get_project_context();
     project_context.title = args.title.clone();
+    // Precompute public flag from args
+    let is_public_flag = args.public || args.bind.iter().any(|a| a == "0.0.0.0");
+    project_context.is_public = is_public_flag;
 
     // Setup shutdown channel
     let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);

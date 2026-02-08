@@ -125,6 +125,13 @@ fmt:
 fmt-web:
     npx --yes prettier --config .prettierrc.json --ignore-path .prettierignore --write "web/**/*.{html,js,ts,css}" "e2e/**/*.{ts,js,json}" "scripts/**/*.sh"
 
+# Lint web and e2e sources with ESLint (enforces curly braces)
+lint-web:
+    npx --yes eslint --ext .ts,.js,.html web e2e
+
+lint-web-fix:
+    npx --yes eslint --fix --ext .ts,.js,.html web e2e
+
 # Check code without building
 check:
     cargo check
@@ -138,3 +145,8 @@ ci: fmt lint build test
 
 # Quick development cycle (build + unit tests)
 dev: build test-unit
+
+# Serve current diff in public mode (0.0.0.0) + tailscale
+serve-public title="Current Diff (public)":
+    just build-release
+    bash scripts/serve-public.sh "{{title}}"

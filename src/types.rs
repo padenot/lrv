@@ -98,4 +98,5 @@ pub struct ProjectContext {
     pub working_directory: String,
     pub git_branch: Option<String>,
     pub title: Option<String>,
+    pub is_public: bool,
 }
