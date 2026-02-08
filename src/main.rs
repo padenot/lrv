@@ -181,6 +181,10 @@ struct Args {
     /// Optional title to display in the UI header (e.g., PR summary)
     #[arg(long)]
     title: Option<String>,
+
+    /// Enable development HTTP tracing (tower_http::trace). Disabled by default.
+    #[arg(long)]
+    dev_log: bool,
 }
 
 #[tokio::main]
@@ -258,7 +262,7 @@ async fn main() -> Result<()> {
     };
 
     // Create router (we'll clone per listener)
-    let _app_for_clone = create_router(state.clone());
+    let _app_for_clone = create_router(state.clone(), args.dev_log);
 
     // Determine bind addresses
     let mut bind_addrs: Vec<String> = Vec::new();
@@ -344,7 +348,7 @@ async fn main() -> Result<()> {
     let shutdown_notify = Arc::new(Notify::new());
     let mut handles = Vec::new();
     for (_, listener) in listeners.into_iter() {
-        let app_clone = create_router(state.clone());
+        let app_clone = create_router(state.clone(), args.dev_log);
         let notify = shutdown_notify.clone();
         let handle = tokio::spawn(async move {
             axum::serve(listener, app_clone)
@@ -357,7 +361,7 @@ async fn main() -> Result<()> {
     // Wait for either shutdown signal or server error
     tokio::select! {
         _ = shutdown_rx.recv() => {
-            eprintln!("Received shutdown signal");
+            tracing::info!("Received shutdown signal");
             shutdown_notify.notify_waiters();
         }
         result = async {

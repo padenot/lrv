@@ -8,6 +8,7 @@ use axum::{
     routing::{get, post},
     Router,
 };
+use tower_http::trace::TraceLayer;
 use rust_embed::RustEmbed;
 use serde::Deserialize;
 use std::path::{Component, Path};
@@ -31,8 +32,8 @@ pub struct AppState {
     pub context: Arc<ProjectContext>,
 }
 
-pub fn create_router(state: AppState) -> Router {
-    Router::new()
+pub fn create_router(state: AppState, enable_trace: bool) -> Router {
+    let router = Router::new()
         .route("/", get(serve_index))
         .route("/assets/*path", get(serve_asset))
         .route("/api/diff", get(get_diff))
@@ -42,7 +43,13 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/comment", post(add_comment))
         .route("/api/complete", post(complete_review))
         .layer(middleware::from_fn(security_headers))
-        .with_state(state)
+        .with_state(state);
+
+    if enable_trace {
+        router.layer(TraceLayer::new_for_http())
+    } else {
+        router
+    }
 }
 
 async fn serve_index() -> impl IntoResponse {

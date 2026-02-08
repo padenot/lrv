@@ -14,9 +14,9 @@ This list tracks prioritized tasks for making lrv secure, self‑contained, and 
 - [ ] Optional: Limit `/api/context` exposure to basename by default; full path behind a debug flag.
 
 ### Immediate Hardening (Frontend)
-- [ ] Replace innerHTML in header title/project info with safe DOM construction (no HTML injection).
-- [ ] Avoid injecting comment body into textarea via template; set `.value` programmatically.
-- [ ] Check `fetch` responses (`response.ok`) and surface errors; add small helper.
+- [x] Replace innerHTML in header title/project info with safe DOM construction (no HTML injection).
+- [x] Avoid injecting comment body into textarea via template; set `.value` programmatically.
+- [x] Check `fetch` responses (`response.ok`) and surface errors; add small helper.
 
 ### Tailscale & Multi-bind
 - [x] Support multiple `--bind` addresses.
@@ -36,8 +36,8 @@ This list tracks prioritized tasks for making lrv secure, self‑contained, and 
 - [x] Vendor Monaco under `web/assets/vendor/monaco/` (pin version).
 - [x] Vendor fonts (Inter, JetBrains Mono, Geist Sans) under `web/assets/fonts/` and add `@font-face` rules.
 - [x] Remove external CDNs and Google Fonts; update HTML/loader to local paths.
-- [ ] Make preloader canvas responsive to viewport to avoid overflow on small screens.
-- [ ] Add `THIRD_PARTY_NOTICES.md` with license references/links.
+- [x] Make preloader canvas responsive to viewport to avoid overflow on small screens.
+- [x] Add `THIRD_PARTY_NOTICES.md` with license references/links.
 
 ## Static Serving & Embedding
 - [x] Use `rust-embed` to embed `web/dist` and vendor assets.
@@ -70,9 +70,9 @@ This list tracks prioritized tasks for making lrv secure, self‑contained, and 
 - Show clear UI when old content is unavailable.
 - [x] Default code font to monospace (JetBrains Mono) with user override.
 - [x] Project info truncation/tooltip for long title/paths.
-- [ ] Smooth, short CSS transitions for theme/background/text changes.
+- [x] Smooth, short CSS transitions for theme/background/text changes.
 - [ ] Keyboard: brace single-line conditionals; prefer layout-agnostic detection where applicable.
-- [ ] Ensure `.settings-btn` keeps neutral style in header (override generic button styles).
+- [x] Ensure `.settings-btn` keeps neutral style in header (override generic button styles).
 
 ## CLI & Output
 - Remove `--mode` from README or implement if desired.
@@ -83,7 +83,7 @@ This list tracks prioritized tasks for making lrv secure, self‑contained, and 
 - [x] Return 400 for invalid `side`.
 - [x] 403 for traversal.
 - [x] 404 for missing files (new-side reads).
-- [ ] Add development logging via `tower_http::trace` (disabled by default).
+- [x] Add development logging via `tower_http::trace` (disabled by default).
 
 ## Tests & Tooling
 - [x] Unit tests for path traversal/canonicalization guards.
