@@ -21,8 +21,9 @@ for c in "${COMMITS[@]}"; do
 done
 
 # Require clean working tree to avoid conflicts
-if [ -n "$(git status --porcelain)" ]; then
-  echo "Working tree is not clean. Please commit or stash changes before running the bench." >&2
+# Require no tracked modifications; allow untracked (results/exports)
+if ! git diff-index --quiet HEAD --; then
+  echo "Working tree has tracked modifications. Please commit or stash changes before running the bench." >&2
   exit 1
 fi
 
