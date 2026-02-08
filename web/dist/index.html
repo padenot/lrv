@@ -843,6 +843,9 @@
         this.focusedHunkDecorations = [];
         this.currentWidget = null;
         this.diff = null;
+        this.files = [];
+        this.stats = null;
+        this.fileCache = {};
         this.fileRanges = {}; // Track visible ranges per file
         this.fileHunks = {}; // Track hunk start lines per file: { [path]: number[] }
         this.currentHunkIndex = {}; // Track current hunk index per file
@@ -866,7 +869,8 @@
         this.config = await configResponse.json();
         this.context = await contextResponse.json();
         const diffData = await diffResponse.json();
-        this.diff = await this.convertHunksToDiff(diffData);
+        this.files = diffData.files;
+        this.stats = diffData.stats;
 
         // Apply split view setting from config
         this.isInline = !this.config.split_view;
@@ -1264,7 +1268,7 @@
 
         // Stats
         document.getElementById('stats').textContent =
-          `${this.diff.stats.files_changed} files, +${this.diff.stats.additions} -${this.diff.stats.deletions}`;
+          `${this.stats.files_changed} files, +${this.stats.additions} -${this.stats.deletions}`;
 
         // Sidebar resizer
         this.setupSidebarResizer();
@@ -1514,14 +1518,38 @@
         });
       }
 
-      loadFile(index) {
+      async loadFile(index) {
         window.Perf.recordFileSwitchStart();
         this.currentFileIndex = index;
-        const file = this.diff.files[index];
+        const file = this.files[index];
 
         // Update show full file button
         const showFullBtn = document.getElementById('show-full-file');
-        const range = this.fileRanges[file.path];
+        let range = this.fileRanges[file.path];
+        if (!range) {
+          // Initialize range and hunk ranges from metadata
+          let oldLineStart = Infinity, oldLineEnd = 0, newLineStart = Infinity, newLineEnd = 0;
+          const hunkRanges = [];
+          (file.hunks || []).forEach(hunk => {
+            const newLines = hunk.lines.filter(l => l.new_line).map(l => l.new_line);
+            if (newLines.length > 0) {
+              hunkRanges.push({ start: Math.min(...newLines), end: Math.max(...newLines) });
+            }
+            hunk.lines.forEach(line => {
+              if (line.old_line) { oldLineStart = Math.min(oldLineStart, line.old_line); oldLineEnd = Math.max(oldLineEnd, line.old_line); }
+              if (line.new_line) { newLineStart = Math.min(newLineStart, line.new_line); newLineEnd = Math.max(newLineEnd, line.new_line); }
+            });
+          });
+          this.fileHunks[file.path] = hunkRanges;
+          this.currentHunkIndex[file.path] = 0;
+          range = this.fileRanges[file.path] = {
+            old: { start: oldLineStart, end: oldLineEnd },
+            new: { start: newLineStart, end: newLineEnd },
+            hasFullContent: false,
+            totalOldLines: null,
+            totalNewLines: null
+          };
+        }
         if (range && range.hasFullContent) {
           showFullBtn.style.display = 'none';
         } else {
@@ -1584,8 +1612,25 @@
           this.editor.updateOptions({ renderSideBySide: !this.isInline, theme: theme });
         }
 
-        this.originalModel = monaco.editor.createModel(file.old_content, language);
-        this.modifiedModel = monaco.editor.createModel(file.new_content, language);
+        // Lazily fetch content and slice to visible range
+        if (!this.fileCache[file.path]) {
+          const [oldResponse, newResponse] = await Promise.all([
+            fetch(`/api/file?path=${encodeURIComponent(file.path)}&side=old`),
+            fetch(`/api/file?path=${encodeURIComponent(file.path)}&side=new`)
+          ]);
+          let oldData = { content: '' }, newData = { content: '' };
+          try { if (oldResponse.ok) oldData = await oldResponse.json(); } catch (e) {}
+          try { if (newResponse.ok) newData = await newResponse.json(); } catch (e) {}
+          this.fileCache[file.path] = { old: oldData.content, new: newData.content };
+        }
+        const oldAll = (this.fileCache[file.path].old || '').split('\n');
+        const newAll = (this.fileCache[file.path].new || '').split('\n');
+        if (range.totalOldLines == null) range.totalOldLines = oldAll.length;
+        if (range.totalNewLines == null) range.totalNewLines = newAll.length;
+        const oldContent = oldAll.slice(Math.max(0, range.old.start - 1), Math.max(range.old.start - 1, range.old.end)).join('\n');
+        const newContent = newAll.slice(Math.max(0, range.new.start - 1), Math.max(range.new.start - 1, range.new.end)).join('\n');
+        this.originalModel = monaco.editor.createModel(oldContent, language);
+        this.modifiedModel = monaco.editor.createModel(newContent, language);
 
         this.editor.setModel({
           original: this.originalModel,
@@ -1654,7 +1699,7 @@
       updateDecorations() {
         if (!this.editor) return;
 
-        const file = this.diff.files[this.currentFileIndex];
+        const file = this.files[this.currentFileIndex];
         const comments = this.commentManager.getCommentsForFile(file.path);
         const modifiedEditor = this.editor.getModifiedEditor();
         const originalEditor = this.editor.getOriginalEditor();
@@ -1817,32 +1862,29 @@
       }
 
       async loadFullFile(index) {
-        const file = this.diff.files[index];
+        const file = this.files[index];
 
-        // Fetch full file content for both sides
-        const [oldResponse, newResponse] = await Promise.all([
-          fetch(`/api/file?path=${encodeURIComponent(file.path)}&side=old`),
-          fetch(`/api/file?path=${encodeURIComponent(file.path)}&side=new`)
-        ]);
-
-        const oldData = await oldResponse.json();
-        const newData = await newResponse.json();
-
-        // Update the file object with full content
-        this.diff.files[index].old_content = oldData.content;
-        this.diff.files[index].new_content = newData.content;
-        this.diff.files[index].is_full = true;
+        // Ensure cache exists
+        if (!this.fileCache[file.path]) {
+          const [oldResponse, newResponse] = await Promise.all([
+            fetch(`/api/file?path=${encodeURIComponent(file.path)}&side=old`),
+            fetch(`/api/file?path=${encodeURIComponent(file.path)}&side=new`)
+          ]);
+          const oldData = await oldResponse.json();
+          const newData = await newResponse.json();
+          this.fileCache[file.path] = { old: oldData.content, new: newData.content };
+        }
 
         // Update tracking BEFORE reloading
         const range = this.fileRanges[file.path];
         range.hasFullContent = true;
         range.old.start = 1;
-        range.old.end = range.totalOldLines;
+        range.old.end = range.totalOldLines || (this.fileCache[file.path].old.split('\n').length);
         range.new.start = 1;
-        range.new.end = range.totalNewLines;
+        range.new.end = range.totalNewLines || (this.fileCache[file.path].new.split('\n').length);
 
-        // Reload the editor with full content
-        this.loadFile(index);
+        // Reload the editor with full content via loadFile
+        await this.loadFile(index);
 
         // Update button
         const showFullBtn = document.getElementById('show-full-file');
@@ -1853,14 +1895,13 @@
         // Remove existing controls
         document.querySelectorAll('.expand-controls').forEach(el => el.remove());
 
-        const file = this.diff.files[this.currentFileIndex];
+        const file = this.files[this.currentFileIndex];
         const range = this.fileRanges[file.path];
 
-        console.log(`renderExpandControls for ${file.path}`);
-        console.log(`Range:`, range);
+        if (window.DEBUG) { console.log(`renderExpandControls for ${file.path}`); console.log('Range:', range); }
 
         if (!range || range.hasFullContent) {
-          console.log(`Skipping: ${!range ? 'no range' : 'has full content'}`);
+          if (window.DEBUG) console.log(`Skipping: ${!range ? 'no range' : 'has full content'}`);
           return;
         }
 
@@ -1869,8 +1910,10 @@
           await this.fetchFileLengths(file.path);
         }
 
-        console.log(`Total lines: old=${range.totalOldLines}, new=${range.totalNewLines}`);
-        console.log(`Current range: old ${range.old.start}-${range.old.end}, new ${range.new.start}-${range.new.end}`);
+        if (window.DEBUG) {
+          console.log(`Total lines: old=${range.totalOldLines}, new=${range.totalNewLines}`);
+          console.log(`Current range: old ${range.old.start}-${range.old.end}, new ${range.new.start}-${range.new.end}`);
+        }
 
         const topContainer = document.getElementById('expand-top-container');
         const bottomContainer = document.getElementById('expand-bottom-container');
@@ -1896,7 +1939,7 @@
           return;
         }
 
-        console.log(`Available: above=${availableAbove} (old=${availableAboveOld}, new=${availableAboveNew}), below=${availableBelow} (old=${availableBelowOld}, new=${availableBelowNew})`);
+        if (window.DEBUG) console.log(`Available: above=${availableAbove} (old=${availableAboveOld}, new=${availableAboveNew}), below=${availableBelow} (old=${availableBelowOld}, new=${availableBelowNew})`);
 
         // Clear previous controls
         topContainer.innerHTML = '';
@@ -2005,7 +2048,7 @@
 
       async expandLines(position, filePath) {
         const range = this.fileRanges[filePath];
-        const file = this.diff.files.find(f => f.path === filePath);
+        const file = this.files.find(f => f.path === filePath);
         if (!file) return;
 
         console.log(`Expanding ${position} for ${filePath}`);

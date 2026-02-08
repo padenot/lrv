@@ -13,6 +13,7 @@ let serverUrl: string | null = null;
 let testRepoPath: string | null = null;
 let serverLogPath: string | null = null;
 const IS_BENCH = !!process.env.LRV_BENCH_DIFF;
+const IS_BENCH = !!process.env.LRV_BENCH_DIFF;
 
 /**
  * Start the lrv server with a test diff
@@ -24,7 +25,7 @@ async function startServer(port: number = 0, options?: { title?: string }): Prom
 
   return new Promise((resolve, reject) => {
     // Run cargo from the main repo, but execute git diff from the test repo
-    const cargoPath = path.resolve(__dirname, '../../target/debug/lrv');
+    const cargoPath = process.env.LRV_BIN || path.resolve(__dirname, '../../target/debug/lrv');
     const extraFlags = options?.title ? ` --title \"${options.title}\"` : '';
     const benchDiff = process.env.LRV_BENCH_DIFF;
     const cmd = benchDiff
