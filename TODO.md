@@ -10,8 +10,6 @@ This list tracks prioritized tasks for making lrv secure, self‑contained, and 
   - [x] Reject absolute paths and any `..` components.
   - [x] Canonicalize and ensure the target remains under the project root; return 403 if not.
 - [x] Gracefully handle missing VCS for the “old” side (return empty content; UI tolerant).
-- [ ] Optional: Auth token for `--public` mode (opt-in; header or cookie). Low priority for private mesh.
-- [ ] Optional: Limit `/api/context` exposure to basename by default; full path behind a debug flag.
 
 ### Immediate Hardening (Frontend)
 - [x] Replace innerHTML in header title/project info with safe DOM construction (no HTML injection).
@@ -42,7 +40,6 @@ This list tracks prioritized tasks for making lrv secure, self‑contained, and 
 ## Static Serving & Embedding
 - [x] Use `rust-embed` to embed `web/dist` and vendor assets.
 - [x] Serve `/` and `/assets/*` from embedded bytes with correct content types.
-- [ ] Consider hashed filenames for long cache lifetimes.
 
 ## Content Security Policy
 - [x] Add CSP and security headers for local assets only (includes script 'unsafe-inline'/'unsafe-eval' for Monaco, and style 'unsafe-inline').
@@ -66,8 +63,8 @@ This list tracks prioritized tasks for making lrv secure, self‑contained, and 
 ## UX & Accessibility
 - Modals: `role="dialog"`, `aria-modal="true"`, labeled headings, focus trap, restore focus on close.
 - Keyboard shortcuts shouldn’t interfere when inputs focused (mostly done; verify).
-- Show a visible banner when `--public` mode is active.
-- Show clear UI when old content is unavailable.
+- [x] Show a visible banner when `--public` mode is active.
+- [x] Show clear UI when old content is unavailable.
 - [x] Default code font to monospace (JetBrains Mono) with user override.
 - [x] Project info truncation/tooltip for long title/paths.
 - [x] Smooth, short CSS transitions for theme/background/text changes.
@@ -75,7 +72,7 @@ This list tracks prioritized tasks for making lrv secure, self‑contained, and 
 - [x] Ensure `.settings-btn` keeps neutral style in header (override generic button styles).
 
 ## CLI & Output
-- Remove `--mode` from README or implement if desired.
+- [x] Remove `--mode` from README or implement if desired.
 - Optional: `--timeout <sec>` for auto-shutdown after inactivity.
 - Document `--output`, `--no-open`, `--bind`, `--public` with examples.
 
@@ -108,11 +105,10 @@ This list tracks prioritized tasks for making lrv secure, self‑contained, and 
 ## Documentation
 - README: update for bind/public behavior, VCS options, vendored assets, offline behavior.
 - Security model: localhost/private mesh focus; optional token for `--public`.
-- Add licenses/links for Monaco and fonts.
+- [x] Add licenses/links for Monaco and fonts.
 - [x] Perf E2E quick guide (docs/perf-e2e.md) with scripts/usage.
 
-## Stretch Goals
-- `--base` revspec support for both Git and JJ.
-- Render visible context purely from hunks when full file fetch isn’t possible.
-- `--out comments.json` to export review output.
+## Misc
 - Theming presets stored in config; theme switcher persists.
+- [x] format everything
+- persist all settings change in the config file.

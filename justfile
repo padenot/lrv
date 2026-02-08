@@ -123,7 +123,16 @@ fmt:
 
 # Format web and e2e sources with Prettier (requires Node + Prettier)
 fmt-web:
-    npx --yes prettier --config .prettierrc.json --ignore-path .prettierignore --write "web/**/*.{html,js,ts,css}" "e2e/**/*.{ts,js,json}" "scripts/**/*.sh"
+    npx --yes prettier --config .prettierrc.json --ignore-path .prettierignore --ignore-unknown --write "web/**/*.{html,js,ts,css}" "e2e/**/*.{ts,js,json}" "scripts/**/*.sh"
+
+# Format everything (Rust + web). Uses local Prettier if available.
+fmt-all:
+    cargo fmt
+    if [ -x node_modules/.bin/prettier ]; then \
+      node_modules/.bin/prettier --config .prettierrc.json --ignore-path .prettierignore --ignore-unknown --write "web/**/*.{html,js,ts,css}" "e2e/**/*.{ts,js,json}" "scripts/**/*.sh"; \
+    else \
+      echo "[fmt-all] Prettier not found in node_modules. Install with: npm i -D prettier"; \
+    fi
 
 # Lint web and e2e sources with ESLint (enforces curly braces)
 lint-web:

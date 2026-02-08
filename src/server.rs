@@ -8,14 +8,14 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use tower_http::trace::TraceLayer;
+use mime_guess;
 use rust_embed::RustEmbed;
 use serde::Deserialize;
 use std::path::{Component, Path};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
-use mime_guess;
+use tower_http::trace::TraceLayer;
 
 #[derive(Deserialize)]
 struct FileQuery {
@@ -99,7 +99,9 @@ async fn serve_asset(AxumPath(path): AxumPath<String>) -> Response {
     let asset_path = format!("assets/{}", path);
     // Guard debugging-only assets from being served unless explicitly enabled
     // Set LRV_DEBUG_ASSETS=1 to allow accessing preloader demo files.
-    if (path.starts_with("preloader")) && std::env::var("LRV_DEBUG_ASSETS").unwrap_or_default() != "1" {
+    if (path.starts_with("preloader"))
+        && std::env::var("LRV_DEBUG_ASSETS").unwrap_or_default() != "1"
+    {
         return Response::builder()
             .status(StatusCode::NOT_FOUND)
             .body(axum::body::Body::from("Asset not found"))
@@ -121,7 +123,10 @@ async fn serve_asset(AxumPath(path): AxumPath<String>) -> Response {
 }
 
 // Middleware: add strict security headers (CSP, frame-ancestors, etc.)
-async fn security_headers(req: axum::http::Request<axum::body::Body>, next: middleware::Next) -> Response {
+async fn security_headers(
+    req: axum::http::Request<axum::body::Body>,
+    next: middleware::Next,
+) -> Response {
     // Default CSP for non-HTML routes (match index CSP)
     const DEFAULT_CSP: &str = "default-src 'self'; script-src 'self' 'unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'";
 
@@ -134,10 +139,19 @@ async fn security_headers(req: axum::http::Request<axum::body::Body>, next: midd
                 HeaderValue::from_static(DEFAULT_CSP),
             );
         }
-        let _ = headers.insert(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
+        let _ = headers.insert(
+            header::X_CONTENT_TYPE_OPTIONS,
+            HeaderValue::from_static("nosniff"),
+        );
         let _ = headers.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
-        let _ = headers.insert(header::REFERRER_POLICY, HeaderValue::from_static("no-referrer"));
-        let _ = headers.insert(header::HeaderName::from_static("cross-origin-resource-policy"), HeaderValue::from_static("same-origin"));
+        let _ = headers.insert(
+            header::REFERRER_POLICY,
+            HeaderValue::from_static("no-referrer"),
+        );
+        let _ = headers.insert(
+            header::HeaderName::from_static("cross-origin-resource-policy"),
+            HeaderValue::from_static("same-origin"),
+        );
         let _ = headers.insert(header::HeaderName::from_static("permissions-policy"), HeaderValue::from_static("camera=() , microphone=() , geolocation=() , payment=() , usb=() , xr-spatial-tracking=()"));
         // HSTS is omitted since we bind http locally; can be enabled behind TLS/terminator
     }

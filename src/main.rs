@@ -238,7 +238,7 @@ async fn main() -> Result<()> {
 
     // Load user config
     let user_config = config::load_config().unwrap_or_else(|e| {
-        eprintln!("Warning: Failed to load config, using defaults: {}", e);
+        tracing::warn!("Failed to load config, using defaults: {}", e);
         config::UserConfig::default()
     });
 
@@ -306,7 +306,7 @@ async fn main() -> Result<()> {
         for addr in bind_addrs.iter().skip(1) {
             match tokio::net::TcpListener::bind(format!("{}:{}", addr, actual_port)).await {
                 Ok(l) => listeners.push((addr.clone(), l)),
-                Err(e) => eprintln!("Warning: failed to bind {}:{}: {}", addr, actual_port, e),
+                Err(e) => tracing::warn!("failed to bind {}:{}: {}", addr, actual_port, e),
             }
         }
     } else {
@@ -314,7 +314,7 @@ async fn main() -> Result<()> {
         for addr in &bind_addrs {
             match tokio::net::TcpListener::bind(format!("{}:{}", addr, actual_port)).await {
                 Ok(l) => listeners.push((addr.clone(), l)),
-                Err(e) => eprintln!("Warning: failed to bind {}:{}: {}", addr, actual_port, e),
+                Err(e) => tracing::warn!("failed to bind {}:{}: {}", addr, actual_port, e),
             }
         }
         if listeners.is_empty() {

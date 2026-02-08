@@ -1,6 +1,6 @@
 use crate::types::{Comment, ReviewOutput};
-use std::fmt;
 use anyhow::Result;
+use std::fmt;
 
 pub fn format_output(comments: Vec<Comment>, format: &OutputFormat) -> String {
     match format {
@@ -41,11 +41,7 @@ fn format_text(comments: &[Comment]) -> String {
     for comment in comments {
         output.push_str(&format!(
             "{}:{}-{} [{}] ({:?})\n",
-            comment.file,
-            comment.start_line,
-            comment.end_line,
-            comment.side,
-            comment.severity
+            comment.file, comment.start_line, comment.end_line, comment.side, comment.severity
         ));
         output.push_str(&format!("  {}\n\n", comment.body));
     }

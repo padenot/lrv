@@ -130,6 +130,15 @@ body {
   font-weight: 600;
 }
 
+.old-missing-banner {
+  background: #6a737d;
+  color: #fff;
+  padding: 4px 8px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
 .project-info-separator {
   margin: 0 8px;
   color: var(--border-color);
@@ -212,7 +221,8 @@ body {
   .btn-primary,
   .btn-secondary,
   .btn-danger {
-    transition: background-color var(--ui-transition) ease,
+    transition:
+      background-color var(--ui-transition) ease,
       color var(--ui-transition) ease,
       border-color var(--ui-transition) ease;
   }
@@ -302,8 +312,12 @@ body {
   display: inline-flex;
   gap: 4px;
 }
-.file-delta .delta-add { color: #22c55e; }
-.file-delta .delta-del { color: #ef4444; }
+.file-delta .delta-add {
+  color: #22c55e;
+}
+.file-delta .delta-del {
+  color: #ef4444;
+}
 
 .file-list li:hover,
 .file-list li.active {
@@ -389,8 +403,12 @@ body {
   z-index: 10000; /* above Monaco layers and scrollbars */
   pointer-events: none; /* re-enable on inner control */
 }
-#expand-top-container { top: 0; }
-#expand-bottom-container { bottom: 0; }
+#expand-top-container {
+  top: 0;
+}
+#expand-bottom-container {
+  bottom: 0;
+}
 
 .expand-controls {
   display: flex;
@@ -404,8 +422,12 @@ body {
   position: relative;
   z-index: 10001;
 }
-.expand-controls.top { border-bottom: 1px solid var(--border-color); }
-.expand-controls.bottom { border-top: 1px solid var(--border-color); }
+.expand-controls.top {
+  border-bottom: 1px solid var(--border-color);
+}
+.expand-controls.bottom {
+  border-top: 1px solid var(--border-color);
+}
 
 .expand-line {
   height: 1px;
@@ -647,7 +669,7 @@ body {
   font-size: 12px;
   margin-bottom: 6px;
 }
-.settings-form input[type="text"],
+.settings-form input[type='text'],
 .settings-form select {
   width: 100%;
   padding: 8px 10px;

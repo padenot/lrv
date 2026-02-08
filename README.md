@@ -88,9 +88,13 @@ lrv --file changes.patch
 --cmd <COMMAND>         Command to run to get diff (e.g., "git diff")
 --file <FILE>           Read diff from file instead of stdin
 --port <PORT>           Specific port (default: random available port)
+--bind <ADDR>           Bind address (can be passed multiple times; default: 127.0.0.1)
+--public                Shorthand for --bind 0.0.0.0 (shows a banner in UI)
+--tailscale             Also bind on detected Tailscale IPv4 (in addition to localhost)
 --no-open               Don't auto-open browser
---mode <MODE>           Review mode: batch (default) or immediate
 --format <FORMAT>       Output format: json (default) or text
+--title <TITLE>         Optional title to display in the UI header
+--dev-log               Enable development HTTP tracing (tower_http::trace)
 ```
 
 ## Review Workflow
