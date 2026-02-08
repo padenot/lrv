@@ -46,6 +46,10 @@ html:not([data-ui-ready='1']) body {
   visibility: hidden;
 }
 
+html.preloading body {
+  overflow: hidden !important;
+}
+
 * {
   margin: 0;
   padding: 0;
@@ -304,6 +308,8 @@ body {
 
 #editor-container {
   height: calc(100vh - 48px);
+  opacity: 0;
+  transition: opacity 350ms ease;
 }
 
 /* Expand controls (above/below) */
@@ -313,7 +319,7 @@ body {
   left: 0;
   right: 0;
   display: none; /* JS toggles visibility based on scroll */
-  z-index: 5;
+  z-index: 2000; /* above Monaco layers and scrollbars */
   pointer-events: none; /* re-enable on inner control */
 }
 #expand-top-container { top: 0; }
@@ -328,6 +334,8 @@ body {
   border-top: 1px solid var(--border-color);
   border-bottom: 1px solid var(--border-color);
   pointer-events: auto; /* clickable */
+  position: relative;
+  z-index: 2001;
 }
 .expand-controls.top { border-bottom: 1px solid var(--border-color); }
 .expand-controls.bottom { border-top: 1px solid var(--border-color); }
@@ -450,6 +458,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
+  z-index: 3000; /* ensure over everything */
 }
 
 .submit-modal {

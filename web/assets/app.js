@@ -1,3 +1,5 @@
+      // Set provisional document title while loading
+      try { document.title = 'lrv — Loading…'; } catch {}
       // Global onerror (only when DEBUG) to capture filename/line for syntax errors
       try {
         if (window.DEBUG)
@@ -234,6 +236,14 @@
       );}
           this.config = await configResponse.json();
           this.context = await contextResponse.json();
+          try {
+            if (this.context.title) {
+              document.title = String(this.context.title);
+            } else {
+              const dirName = (this.context.working_directory || '').split('/').pop() || '';
+              document.title = dirName || 'lrv';
+            }
+          } catch {}
           const diffData = await diffResponse.json();
           if (window.DEBUG) {
             console.log('[app] init: parsed config/context/diff');
@@ -656,25 +666,20 @@
         }
 
       renderProjectInfo() {
-        const projectInfo = $('#project-info');
-
-          // Get just the directory name from the full path
-          const dirName =
-            this.context.working_directory.split('/').pop() || this.context.working_directory;
-
-          let html = '';
-          if (this.context.title) {
-            const safeTitle = String(this.context.title);
-            html += `<span class="project-info-separator">·</span> <span class="project-info-value" title="${safeTitle}">${safeTitle}</span>`;
-          }
-          html += `<span class="project-info-separator">·</span><span class="project-info-value" title="${this.context.working_directory}">${dirName}</span>`;
-
-          if (this.context.git_branch) {
-            html += ` <span class="project-info-separator">·</span> <span class="project-info-value git-branch">${this.context.git_branch}</span>`;
-          }
-
-          projectInfo.innerHTML = html;
+        const el = $('#project-info');
+        if (!el) return;
+        if (this.context && this.context.title) {
+          const t = String(this.context.title);
+          el.innerHTML = `<span class="project-info-value" title="${t}">${t}</span>`;
+          return;
         }
+        const dirName = (this.context.working_directory || '').split('/').pop() || this.context.working_directory || '';
+        let html = `<span class="project-info-value" title="${this.context.working_directory}">${dirName}</span>`;
+        if (this.context.git_branch) {
+          html += ` <span class="project-info-separator">·</span> <span class="project-info-value git-branch">${this.context.git_branch}</span>`;
+        }
+        el.innerHTML = html;
+      }
 
         setupUI() {
           // File list clicks

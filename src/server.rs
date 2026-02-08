@@ -11,6 +11,7 @@ use axum::{
 use rust_embed::RustEmbed;
 use serde::Deserialize;
 use std::path::{Component, Path};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 use mime_guess;
@@ -47,13 +48,32 @@ pub fn create_router(state: AppState) -> Router {
 async fn serve_index() -> impl IntoResponse {
     match WebAssets::get("dist/index.html") {
         Some(content) => {
-            // AMD Monaco: allow eval + blob workers; still no inline scripts
-            const CSP: &str = "default-src 'self'; script-src 'self' 'unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'";
+            // Generate a best-effort nonce (time + counter + pid, hex)
+            static NONCE_CTR: AtomicU64 = AtomicU64::new(1);
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos() as u64;
+            let ctr = NONCE_CTR.fetch_add(1, Ordering::Relaxed);
+            let pid = std::process::id() as u64;
+            let mix = now ^ (ctr.wrapping_mul(0x9E37_79B9_7F4A_7C15)) ^ pid;
+            let nonce = format!("{:016x}{:016x}", now, mix);
+
+            // Inject nonce into HTML
+            let mut html = String::from_utf8_lossy(&content.data).to_string();
+            html = html.replace("__CSP_NONCE__", &nonce);
+
+            // AMD Monaco: allow eval + blob workers; allow nonce for the inline preloader
+            let csp = format!(
+                "default-src 'self'; script-src 'self' 'unsafe-eval' blob: 'nonce-{}'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+                nonce
+            );
+
             Response::builder()
                 .status(StatusCode::OK)
                 .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
-                .header(header::CONTENT_SECURITY_POLICY, CSP)
-                .body(axum::body::Body::from(content.data))
+                .header(header::CONTENT_SECURITY_POLICY, csp)
+                .body(axum::body::Body::from(html))
                 .unwrap()
         }
         None => (
@@ -70,6 +90,14 @@ struct WebAssets;
 
 async fn serve_asset(AxumPath(path): AxumPath<String>) -> Response {
     let asset_path = format!("assets/{}", path);
+    // Guard debugging-only assets from being served unless explicitly enabled
+    // Set LRV_DEBUG_ASSETS=1 to allow accessing preloader demo files.
+    if (path.starts_with("preloader")) && std::env::var("LRV_DEBUG_ASSETS").unwrap_or_default() != "1" {
+        return Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .body(axum::body::Body::from("Asset not found"))
+            .unwrap();
+    }
     if let Some(content) = WebAssets::get(&asset_path) {
         let mime = mime_guess::from_path(&asset_path).first_or_octet_stream();
         Response::builder()

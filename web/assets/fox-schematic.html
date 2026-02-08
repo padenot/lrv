@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Schematic Fox — Debug</title>
+    <style>
+      html, body { height: 100%; }
+      body { margin: 0; background: #0d1117; display: grid; place-items: center; }
+      .wrap { display: grid; gap: 12px; place-items: center; color: #c9d1d9; font: 14px/1.4 system-ui, sans-serif; }
+      svg { width: 320px; height: 320px; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <!-- Minimal, schematic fox head (front view) -->
+      <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" aria-label="schematic fox">
+        <!-- Base head -->
+        <defs>
+          <linearGradient id="gFace" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#ff8a1a" />
+            <stop offset="100%" stop-color="#ff6b00" />
+          </linearGradient>
+        </defs>
+
+        <!-- Ears -->
+        <path d="M45 30 L80 15 L88 55 Q65 48 45 30 Z" fill="#ff7a00"/>
+        <path d="M155 30 L120 15 L112 55 Q135 48 155 30 Z" fill="#ff7a00"/>
+        <!-- Inner ears -->
+        <path d="M52 35 L79 22 L84 48 Q67 44 52 35 Z" fill="#ffb380" opacity="0.9"/>
+        <path d="M148 35 L121 22 L116 48 Q133 44 148 35 Z" fill="#ffb380" opacity="0.9"/>
+
+        <!-- Head shape -->
+        <path d="M40 60
+                 Q 100 30 160 60
+                 Q 170 120 100 165
+                 Q 30 120 40 60 Z" fill="url(#gFace)"/>
+
+        <!-- Cheeks / muzzle -->
+        <ellipse cx="70" cy="125" rx="38" ry="26" fill="#ffffff"/>
+        <ellipse cx="130" cy="125" rx="38" ry="26" fill="#ffffff"/>
+
+        <!-- Nose -->
+        <circle cx="100" cy="138" r="6" fill="#111"/>
+
+        <!-- Eyes (almond) -->
+        <g>
+          <!-- Left eye -->
+          <path d="M58 100 Q70 92 82 100 Q70 108 58 100 Z" fill="#111"/>
+          <circle cx="70" cy="100" r="5" fill="#fff" opacity="0.9"/>
+          <!-- Right eye -->
+          <path d="M142 100 Q130 92 118 100 Q130 108 142 100 Z" fill="#111"/>
+          <circle cx="130" cy="100" r="5" fill="#fff" opacity="0.9"/>
+        </g>
+
+        <!-- Subtle chin shadow -->
+        <ellipse cx="100" cy="152" rx="18" ry="6" fill="#000" opacity="0.1"/>
+      </svg>
+      <div>Very schematic fox head for quick reference (debug)</div>
+    </div>
+  </body>
+  </html>
+

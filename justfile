@@ -61,7 +61,7 @@ test-theme:
 # Serve current diff locally (loopback + tailscale if available)
 serve-current title="Current Diff":
     just build-release
-    bash scripts/serve-current.sh {{title}}
+    bash scripts/serve-current.sh "{{title}}"
 
 # Single command: build release, export diff, run perf, save/commit artifacts
 bench-release diff="0e4ff74" commit_artifacts="false" code_commits="HEAD":
