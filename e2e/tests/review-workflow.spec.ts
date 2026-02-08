@@ -13,7 +13,6 @@ let serverUrl: string | null = null;
 let testRepoPath: string | null = null;
 let serverLogPath: string | null = null;
 const IS_BENCH = !!process.env.LRV_BENCH_DIFF;
-const IS_BENCH = !!process.env.LRV_BENCH_DIFF;
 
 /**
  * Start the lrv server with a test diff
