@@ -10,7 +10,7 @@
   <body>
     <!-- Lightweight inline preloader (fox tail waggle) -->
     <div id="preloader-overlay" style="position:fixed;inset:0;background:#161b22;display:flex;align-items:center;justify-content:center;z-index:2147483647">
-      <canvas id="preloader-canvas" width="600" height="600" style="width:600px;height:600px"></canvas>
+      <canvas id="preloader-canvas" width="600" height="600" style="width:min(80vw,600px);height:min(80vh,600px)"></canvas>
     </div>
     <script id="preloader" nonce="__CSP_NONCE__">
       (function(){
@@ -18,8 +18,12 @@
         if(m && m.matches){ const ov=document.getElementById('preloader-overlay'); if(ov) ov.remove(); const ed=document.getElementById('editor-container'); if(ed) ed.style.opacity='1'; return; }
         try{ document.documentElement.classList.add('preloading'); }catch{}
         const d=document, w=window; const c=d.getElementById('preloader-canvas'); if(!c) return; const ctx=c.getContext('2d');
-        const DPR = Math.max(1, w.devicePixelRatio||1); c.width = 600*DPR; c.height = 600*DPR; ctx.scale(DPR, DPR);
-        const W=600, H=600; let t0=performance.now(); let rafId=0;
+        const DPR = Math.max(1, w.devicePixelRatio||1);
+        const CSS_W = Math.min(w.innerWidth*0.8, 600);
+        const CSS_H = Math.min(w.innerHeight*0.8, 600);
+        c.style.width = CSS_W + 'px'; c.style.height = CSS_H + 'px';
+        c.width = Math.round(CSS_W*DPR); c.height = Math.round(CSS_H*DPR); ctx.scale(DPR, DPR);
+        const W=CSS_W, H=CSS_H; let t0=performance.now(); let rafId=0;
         const BG = '#161b22';
         const SCLERA = '#ffffff';
         const IRIS = '#ff7a00';
@@ -117,13 +121,15 @@
     </script>
     <div class="header">
       <h1>
-        lrv
+        <span class="wordmark">lrv</span>
         <span class="project-info" id="project-info"></span>
         <span class="review-time" id="review-time"></span>
       </h1>
       <div class="header-actions">
         <span class="public-banner" id="public-banner" style="display:none">PUBLIC MODE</span>
+        <span class="nav-indicator" id="nav-indicator" style="display:none"></span>
         <span class="comment-badge"><span id="comment-count">0</span> comments</span>
+        <button id="help-btn" class="help-btn" title="Keyboard Shortcuts">?</button>
         <button id="settings-btn" class="settings-btn">Settings</button>
         <button id="toggle-view">Inline/Side-by-Side</button>
         <button id="submit-review">Submit Review</button>

@@ -79,22 +79,34 @@ body {
 
 .header h1 {
   font-size: 14px;
-  font-weight: 500;
+  font-weight: 600;
   display: flex;
-  align-items: center;
+  /* Align text baselines of lrv, message, date, etc. */
+  align-items: baseline;
   gap: 12px;
+}
+
+/* Wordmark styling for "lrv" */
+.header .wordmark {
+  font-family: 'Geist Sans', var(--font-sans);
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  line-height: 1.1;
+  color: var(--accent-color);
 }
 
 .review-time {
   color: var(--text-secondary);
   font-size: 12px;
   font-weight: 400;
+  line-height: 1.1;
 }
 
 .project-info {
   color: var(--text-tertiary);
   font-size: 12px;
   font-weight: 400;
+  line-height: 1.1;
 }
 
 .project-info-value {
@@ -148,6 +160,16 @@ body {
   font-weight: 500;
 }
 
+/* Navigation indicator (ephemeral) */
+.nav-indicator {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+}
+
 .header button {
   background: var(--accent-color);
   color: white;
@@ -158,6 +180,12 @@ body {
   font-size: 12px;
   font-weight: 500;
   transition: background 0.15s ease;
+}
+
+/* Keep Settings button neutral (not primary) in header */
+.header .settings-btn {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
 }
 
 .header button:hover {
@@ -236,9 +264,46 @@ body {
   user-select: none;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 8px;
 }
+
+.file-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.file-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+/* Small per-file comment count badge */
+.file-comment-badge {
+  display: inline-block;
+  min-width: 16px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  font-size: 10px;
+  line-height: 1;
+  text-align: center;
+}
+
+/* +/- delta styling */
+.file-delta {
+  font-size: 10px;
+  font-weight: 700;
+  display: inline-flex;
+  gap: 4px;
+}
+.file-delta .delta-add { color: #22c55e; }
+.file-delta .delta-del { color: #ef4444; }
 
 .file-list li:hover,
 .file-list li.active {
@@ -363,9 +428,7 @@ body {
   background: var(--border-color);
 }
 
-.monaco-editor .view-lines .view-line:hover {
-  background: rgba(255, 255, 255, 0.04);
-}
+/* Remove custom hover backgrounds to avoid masking Monaco diff overlays */
 
 /* Diff decorations */
 .line-added {
@@ -377,14 +440,34 @@ body {
 .line-modified {
   background: rgba(33, 150, 243, 0.15);
 }
-.line-focused-hunk {
-  background: rgba(255, 215, 0, 0.1);
+/* Focused hunk highlight (our decoration class) */
+/* Hunk-level focus: very light tint + thin left rail */
+.monaco-editor .focused-hunk-line {
+  background-color: color-mix(in srgb, var(--accent-color), transparent 92%) !important;
+  /* Left rail via background-image so line-level overlay can add its own rail */
+  background-image: linear-gradient(var(--accent-color), var(--accent-color));
+  background-size: 2px 100%;
+  background-repeat: no-repeat;
+  background-position: 0 0;
 }
 
-/* Custom glyph margin icon for comments */
-.monaco-editor .line-comment-marker::before {
-  content: '💬';
+/* Single-line focus indicator (keyboard j/k) */
+/* Line-level focus: slightly stronger tint + second rail a few px in */
+.monaco-editor .focused-line {
+  position: relative;
+  background-color: color-mix(in srgb, var(--accent-color), transparent 86%) !important;
 }
+.monaco-editor .focused-line::before {
+  content: '';
+  position: absolute;
+  left: 3px; /* offset from hunk rail */
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--accent-color);
+}
+
+/* Use Monaco codicon for comment glyphs */
 
 .inline-comment-box {
   background: var(--bg-secondary);
@@ -510,6 +593,48 @@ body {
   overflow: auto;
 }
 
+/* Keyboard shortcuts table */
+.shortcuts-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.shortcuts-table thead th {
+  text-align: left;
+  color: var(--text-secondary);
+  background: var(--bg-elevated);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.shortcuts-table th,
+.shortcuts-table td {
+  border-bottom: 1px solid var(--border-color);
+  padding: 8px 10px;
+  vertical-align: middle;
+}
+.key-combo {
+  display: inline-flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.key-combo .key {
+  display: inline-block;
+  padding: 2px 6px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.2;
+}
+.key-combo .key-or {
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+
 /* Settings modal styles */
 .settings-form {
   display: flex;
@@ -535,6 +660,19 @@ body {
 .settings-form optgroup {
   color: var(--text-secondary);
 }
+.help-btn {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  padding: 6px 10px;
+}
+
+/* Ensure header overrides apply equally to help + settings (not accent) */
+.header .help-btn,
+.header .settings-btn {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+
 .settings-form option {
   color: var(--text-primary);
 }

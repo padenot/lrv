@@ -50,6 +50,16 @@
         },
       };
 
+      // Helper: fetch JSON with status check
+      async function fetchJSON(url, options) {
+        const res = await fetch(url, options);
+        if (!res.ok) {
+          const text = await res.text().catch(() => '');
+          throw new Error(`Request failed ${res.status} ${res.statusText} at ${url}${text ? `: ${text.slice(0, 200)}` : ''}`);
+        }
+        return res.json();
+      }
+
       // Simple theme → accent mapping (use theme’s intended accent color)
       const UI_THEME_ACCENTS_HEX = {
         'firefox-devtools-dark': '#ff7de9',
@@ -66,6 +76,21 @@
       try {
         window.UIThemeAccentsHex = UI_THEME_ACCENTS_HEX;
       } catch {}
+
+      // Small ephemeral navigation indicator in header
+      let __navTimer = null;
+      function showNavIndicator(text) {
+        try {
+          const el = document.getElementById('nav-indicator');
+          if (!el) return;
+          el.textContent = text;
+          el.style.display = 'inline-block';
+          if (__navTimer) clearTimeout(__navTimer);
+          __navTimer = setTimeout(() => {
+            el.style.display = 'none';
+          }, 900);
+        } catch {}
+      }
 
       function markAppReady() {
       if (window.__APP_READY) {
@@ -147,15 +172,19 @@
 
       // Keyboard shortcuts configuration
       const KEYBOARD_SHORTCUTS = [
-        { keys: ['Shift+ArrowDown', 'Shift+J'], action: 'nextFile', description: 'Next file' },
-        {
-          keys: ['Shift+ArrowUp', 'Shift+K'],
-          action: 'previousFile',
-          description: 'Previous file',
-        },
-        { keys: ['ArrowDown', 'j'], action: 'nextHunk', description: 'Next hunk' },
-        { keys: ['ArrowUp', 'k'], action: 'previousHunk', description: 'Previous hunk' },
-        { keys: ['Enter'], action: 'openComment', description: 'Comment on current hunk' },
+        // File navigation
+        { keys: ['Mod+ArrowDown', 'Mod+J'], action: 'nextFile', description: 'Next file' },
+        { keys: ['Mod+ArrowUp', 'Mod+K'], action: 'previousFile', description: 'Previous file' },
+        // Hunk navigation
+        { keys: ['Shift+ArrowDown', 'Shift+J'], action: 'nextHunk', description: 'Next hunk' },
+        { keys: ['Shift+ArrowUp', 'Shift+K'], action: 'previousHunk', description: 'Previous hunk' },
+        // Line navigation (within change hunks)
+        { keys: ['ArrowDown', 'j'], action: 'lineDown', description: 'Next changed line' },
+        { keys: ['ArrowUp', 'k'], action: 'lineUp', description: 'Previous changed line' },
+        // View toggle, comments and actions
+        { keys: ['s'], action: 'toggleView', description: 'Toggle inline/side-by-side' },
+        { keys: ['Enter'], action: 'openComment', description: 'Comment on focused line' },
+        { keys: ['Escape'], action: 'clearFocus', description: 'Clear focus' },
         { keys: ['Mod+Shift+Enter'], action: 'submitReview', description: 'Submit review' },
         { keys: ['?'], action: 'showHelp', description: 'Show keyboard shortcuts' },
       ];
@@ -193,40 +222,10 @@
           window.Perf.recordAppInitStart();
           // Load config, context, and diff data from API
           const t0 = performance.now();
-          const [configResponse, contextResponse, diffResponse] = await Promise.all([
-            fetch('/api/config')
-              .then((r) => {
-                if (window.DEBUG) {
-                  console.log('[net] /api/config', r.status);
-                }
-                return r;
-              })
-              .catch((e) => {
-                console.error('[net] /api/config failed', e);
-                throw e;
-              }),
-            fetch('/api/context')
-              .then((r) => {
-                if (window.DEBUG) {
-                  console.log('[net] /api/context', r.status);
-                }
-                return r;
-              })
-              .catch((e) => {
-                console.error('[net] /api/context failed', e);
-                throw e;
-              }),
-            fetch('/api/diff')
-              .then((r) => {
-                if (window.DEBUG) {
-                  console.log('[net] /api/diff', r.status);
-                }
-                return r;
-              })
-              .catch((e) => {
-                console.error('[net] /api/diff failed', e);
-                throw e;
-              }),
+          const [configData, contextData, diffData] = await Promise.all([
+            fetchJSON('/api/config'),
+            fetchJSON('/api/context'),
+            fetchJSON('/api/diff'),
           ]);
           if (window.DEBUG)
             {console.log(
@@ -234,8 +233,8 @@
         Math.round(performance.now() - t0),
         'ms',
       );}
-          this.config = await configResponse.json();
-          this.context = await contextResponse.json();
+          this.config = configData;
+          this.context = contextData;
           try {
             if (this.context.title) {
               document.title = String(this.context.title);
@@ -244,7 +243,6 @@
               document.title = dirName || 'lrv';
             }
           } catch {}
-          const diffData = await diffResponse.json();
           if (window.DEBUG) {
             console.log('[app] init: parsed config/context/diff');
           }
@@ -322,11 +320,13 @@
                 requestAnimationFrame(() =>
                   requestAnimationFrame(() => {
                     window.Perf.recordAppInitEnd();
-                    // Minimal perf log (always on): app init duration
+                    // Minimal perf log (gated behind DEBUG)
                     try {
-                      const e = performance.getEntriesByName('appInit');
-                      const d = e && e.length ? e[e.length - 1].duration : null;
-                      if (d != null) {console.log('[perf] appInit ms:', Math.round(d));}
+                      if (window.DEBUG) {
+                        const e = performance.getEntriesByName('appInit');
+                        const d = e && e.length ? e[e.length - 1].duration : null;
+                        if (d != null) { console.log('[perf] appInit ms:', Math.round(d)); }
+                      }
                     } catch {}
                     markAppReady();
                   }),
@@ -396,17 +396,21 @@
               let newLineStart = Infinity;
               let newLineEnd = 0;
 
-              // Track hunk ranges for keyboard navigation
+              // Track hunk ranges for keyboard navigation; include new-side and deletion-only old-side ranges
               const hunkRanges = [];
 
               file.hunks.forEach((hunk) => {
-                // Store the first and last new-side lines of this hunk
+                // New-side focus range
                 const newLines = hunk.lines.filter((l) => l.new_line).map((l) => l.new_line);
                 if (newLines.length > 0) {
-                  hunkRanges.push({
-                    start: Math.min(...newLines),
-                    end: Math.max(...newLines),
-                  });
+                  hunkRanges.push({ side: 'new', start: Math.min(...newLines), end: Math.max(...newLines) });
+                }
+                // Old-side (deletions) focus range
+                const deletedOldLines = hunk.lines
+                  .filter((l) => l.old_line && l.type === 'delete')
+                  .map((l) => l.old_line);
+                if (deletedOldLines.length > 0) {
+                  hunkRanges.push({ side: 'old', start: Math.min(...deletedOldLines), end: Math.max(...deletedOldLines) });
                 }
 
                 hunk.lines.forEach((line) => {
@@ -668,17 +672,33 @@
       renderProjectInfo() {
         const el = $('#project-info');
         if (!el) return;
+        el.textContent = '';
         if (this.context && this.context.title) {
           const t = String(this.context.title);
-          el.innerHTML = `<span class="project-info-value" title="${t}">${t}</span>`;
+          const span = document.createElement('span');
+          span.className = 'project-info-value';
+          span.setAttribute('title', t);
+          span.textContent = t;
+          el.appendChild(span);
           return;
         }
-        const dirName = (this.context.working_directory || '').split('/').pop() || this.context.working_directory || '';
-        let html = `<span class="project-info-value" title="${this.context.working_directory}">${dirName}</span>`;
+        const wd = String(this.context.working_directory || '');
+        const dirName = (wd || '').split('/').pop() || wd;
+        const dirSpan = document.createElement('span');
+        dirSpan.className = 'project-info-value';
+        dirSpan.setAttribute('title', wd);
+        dirSpan.textContent = dirName;
+        el.appendChild(dirSpan);
         if (this.context.git_branch) {
-          html += ` <span class="project-info-separator">·</span> <span class="project-info-value git-branch">${this.context.git_branch}</span>`;
+          const sep = document.createElement('span');
+          sep.className = 'project-info-separator';
+          sep.textContent = '·';
+          el.appendChild(sep);
+          const br = document.createElement('span');
+          br.className = 'project-info-value git-branch';
+          br.textContent = String(this.context.git_branch);
+          el.appendChild(br);
         }
-        el.innerHTML = html;
       }
 
         setupUI() {
@@ -695,6 +715,9 @@
         $('#settings-btn').addEventListener('click', () => {
           this.showSettingsModal();
         });
+
+        // Help button
+        $('#help-btn').addEventListener('click', () => this.showKeyboardHelp());
 
           // Submit button
         $('#submit-review').addEventListener('click', async () => {
@@ -757,6 +780,15 @@
               case 'previousFile':
                 this.previousFile();
                 break;
+              case 'toggleView':
+                this.toggleView();
+                break;
+              case 'lineDown':
+                this.moveLine(1);
+                break;
+              case 'lineUp':
+                this.moveLine(-1);
+                break;
               case 'nextHunk':
                 this.nextHunk();
                 break;
@@ -764,7 +796,7 @@
                 this.previousHunk();
                 break;
               case 'openComment':
-                this.openCommentOnCurrentHunk();
+                this.openCommentOnCurrentFocus();
                 break;
               case 'submitReview':
                 this.showSubmitConfirmation();
@@ -772,8 +804,17 @@
               case 'showHelp':
                 this.showKeyboardHelp();
                 break;
+              case 'clearFocus':
+                this.clearFocusedHunk();
+                break;
             }
           });
+        }
+
+        toggleView() {
+          this.isInline = !this.isInline;
+          this.loadFile(this.currentFileIndex);
+          try { showNavIndicator(this.isInline ? 'Inline' : 'Side-by-Side'); } catch {}
         }
 
         matchKeyboardShortcut(e) {
@@ -834,12 +875,14 @@
         nextFile() {
           if (this.currentFileIndex < this.files.length - 1) {
             this.loadFile(this.currentFileIndex + 1);
+            showNavIndicator(`File ${this.currentFileIndex + 2}/${this.files.length}`);
           }
         }
 
         previousFile() {
           if (this.currentFileIndex > 0) {
             this.loadFile(this.currentFileIndex - 1);
+            showNavIndicator(`File ${this.currentFileIndex}/${this.files.length}`);
           }
         }
 
@@ -882,46 +925,154 @@
 
           const hunkRange = hunks[hunkIndex];
           const range = this.fileRanges[file.path];
-          const offset = range && !range.hasFullContent ? range.new.start - 1 : 0;
-          const monacoStartLine = hunkRange.start - offset;
-          const monacoEndLine = hunkRange.end - offset;
+          const newOffset = range && !range.hasFullContent ? range.new.start - 1 : 0;
+          const oldOffset = range && !range.hasFullContent ? range.old.start - 1 : 0;
 
-          const modifiedEditor = this.editor.getModifiedEditor();
           const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
           const smooth = monaco.editor.ScrollType.Smooth;
-          modifiedEditor.revealLineInCenter(monacoStartLine, reduceMotion ? monaco.editor.ScrollType.Immediate : smooth);
 
-          // Highlight the focused hunk
-          this.highlightFocusedHunk(monacoStartLine, monacoEndLine);
+          if (hunkRange.side === 'old') {
+            const originalEditor = this.editor.getOriginalEditor();
+            const monacoStartLine = hunkRange.start - oldOffset;
+            const monacoEndLine = hunkRange.end - oldOffset;
+            originalEditor.revealLineInCenter(monacoStartLine, reduceMotion ? monaco.editor.ScrollType.Immediate : smooth);
+            this.highlightFocusedHunk(monacoStartLine, monacoEndLine, 'old');
+            this.setFocusedLine('old', monacoStartLine, false);
+            // Indicator
+            const idx = (this.currentHunkIndex[file.path] || 0) + 1;
+            const total = (this.fileHunks[file.path] || []).length;
+            showNavIndicator(`Hunk ${idx}/${total} • old`);
+          } else {
+            const modifiedEditor = this.editor.getModifiedEditor();
+            const monacoStartLine = hunkRange.start - newOffset;
+            const monacoEndLine = hunkRange.end - newOffset;
+            modifiedEditor.revealLineInCenter(monacoStartLine, reduceMotion ? monaco.editor.ScrollType.Immediate : smooth);
+            this.highlightFocusedHunk(monacoStartLine, monacoEndLine, 'new');
+            this.setFocusedLine('new', monacoStartLine, false);
+            const idx = (this.currentHunkIndex[file.path] || 0) + 1;
+            const total = (this.fileHunks[file.path] || []).length;
+            showNavIndicator(`Hunk ${idx}/${total} • new`);
+          }
         }
 
-        highlightFocusedHunk(startLine, endLine) {
+        highlightFocusedHunk(startLine, endLine, side = 'new') {
           if (!this.editor) {
             return;
           }
 
           const modifiedEditor = this.editor.getModifiedEditor();
+          const originalEditor = this.editor.getOriginalEditor();
 
-          // Create decorations for the focused hunk
           const decorations = [];
           for (let line = startLine; line <= endLine; line++) {
             decorations.push({
               range: new monaco.Range(line, 1, line, 1),
-              options: {
-                isWholeLine: true,
-                className: 'focused-hunk-line',
-              },
+              options: { isWholeLine: true, className: 'focused-hunk-line' },
             });
           }
 
-          // Update decorations
-          this.focusedHunkDecorations = modifiedEditor.deltaDecorations(
-            this.focusedHunkDecorations || [],
-            decorations,
-          );
+          // Clear both sides, then apply to the chosen side
+          this.focusedHunkDecorationsNew = modifiedEditor.deltaDecorations(this.focusedHunkDecorationsNew || [], []);
+          this.focusedHunkDecorationsOld = originalEditor.deltaDecorations(this.focusedHunkDecorationsOld || [], []);
+          if (side === 'old') {
+            this.focusedHunkDecorationsOld = originalEditor.deltaDecorations([], decorations);
+          } else {
+            this.focusedHunkDecorationsNew = modifiedEditor.deltaDecorations([], decorations);
+          }
         }
 
-        openCommentOnCurrentHunk() {
+        setFocusedLine(side, monacoLine, reveal = true) {
+          if (!this.editor) return;
+          this.currentFocusedLine = { side, line: monacoLine };
+          const modifiedEditor = this.editor.getModifiedEditor();
+          const originalEditor = this.editor.getOriginalEditor();
+          const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+          const scrollType = reduceMotion ? monaco.editor.ScrollType.Immediate : monaco.editor.ScrollType.Smooth;
+
+          // Clear existing
+          this.focusedLineDecorationsNew = modifiedEditor.deltaDecorations(this.focusedLineDecorationsNew || [], []);
+          this.focusedLineDecorationsOld = originalEditor.deltaDecorations(this.focusedLineDecorationsOld || [], []);
+
+          const dec = [{ range: new monaco.Range(monacoLine, 1, monacoLine, 1), options: { isWholeLine: true, className: 'focused-line' } }];
+          if (side === 'old') {
+            this.focusedLineDecorationsOld = originalEditor.deltaDecorations([], dec);
+            if (reveal) originalEditor.revealLineInCenterIfOutsideViewport(monacoLine, scrollType);
+          } else {
+            this.focusedLineDecorationsNew = modifiedEditor.deltaDecorations([], dec);
+            if (reveal) modifiedEditor.revealLineInCenterIfOutsideViewport(monacoLine, scrollType);
+          }
+          // Header indicator
+          const range = this.fileRanges[this.files[this.currentFileIndex].path];
+          const newOffset = range && !range.hasFullContent ? range.new.start - 1 : 0;
+          const oldOffset = range && !range.hasFullContent ? range.old.start - 1 : 0;
+          const fileLine = side === 'old' ? (monacoLine + oldOffset) : (monacoLine + newOffset);
+          showNavIndicator(`Line ${fileLine} • ${side === 'old' ? 'old' : 'new'}`);
+        }
+
+        moveLine(delta) {
+          if (!this.editor) return;
+          const file = this.files[this.currentFileIndex];
+          const hunks = this.fileHunks[file.path];
+          if (!hunks || hunks.length === 0) return;
+          const range = this.fileRanges[file.path];
+          const newOffset = range && !range.hasFullContent ? range.new.start - 1 : 0;
+          const oldOffset = range && !range.hasFullContent ? range.old.start - 1 : 0;
+
+          // Initialize focus if needed: start of current hunk
+          let idx = this.currentHunkIndex[file.path] || 0;
+          const hr = hunks[idx];
+          if (!this.currentFocusedLine) {
+            const side = hr.side === 'old' ? 'old' : 'new';
+            const monacoStart = side === 'old' ? (hr.start - oldOffset) : (hr.start - newOffset);
+            this.setFocusedLine(side, monacoStart, true);
+            return;
+          }
+
+          let { side, line } = this.currentFocusedLine;
+          // Verify current focus lies within current hunk; adjust if not
+          const hunkStart = (hr.side === 'old' ? (hr.start - oldOffset) : (hr.start - newOffset));
+          const hunkEnd = (hr.side === 'old' ? (hr.end - oldOffset) : (hr.end - newOffset));
+          if (side !== (hr.side || 'new') || line < hunkStart || line > hunkEnd) {
+            side = hr.side === 'old' ? 'old' : 'new';
+            line = hunkStart;
+          }
+
+          // Step within hunk
+          let nextLine = line + delta;
+          if (nextLine >= hunkStart && nextLine <= hunkEnd) {
+            this.setFocusedLine(side, nextLine, true);
+            return;
+          }
+
+          // Move to neighbor hunk
+          if (delta > 0 && idx < hunks.length - 1) {
+            idx += 1;
+            this.currentHunkIndex[file.path] = idx;
+            const nhr = hunks[idx];
+            const ns = nhr.side === 'old' ? 'old' : 'new';
+            const nStart = ns === 'old' ? (nhr.start - oldOffset) : (nhr.start - newOffset);
+            this.jumpToHunk(idx);
+            this.setFocusedLine(ns, nStart, true);
+          } else if (delta < 0 && idx > 0) {
+            idx -= 1;
+            this.currentHunkIndex[file.path] = idx;
+            const phr = hunks[idx];
+            const ps = phr.side === 'old' ? 'old' : 'new';
+            const pEnd = ps === 'old' ? (phr.end - oldOffset) : (phr.end - newOffset);
+            this.jumpToHunk(idx);
+            this.setFocusedLine(ps, pEnd, true);
+          }
+        }
+
+        clearFocusedHunk() {
+          if (!this.editor) { return; }
+          const modifiedEditor = this.editor.getModifiedEditor();
+          const originalEditor = this.editor.getOriginalEditor();
+          this.focusedHunkDecorationsNew = modifiedEditor.deltaDecorations(this.focusedHunkDecorationsNew || [], []);
+          this.focusedHunkDecorationsOld = originalEditor.deltaDecorations(this.focusedHunkDecorationsOld || [], []);
+        }
+
+        openCommentOnCurrentFocus() {
           if (!this.editor) {
             return;
           }
@@ -932,14 +1083,23 @@
             return;
           }
 
+          const range = this.fileRanges[file.path];
+          const newOffset = range && !range.hasFullContent ? range.new.start - 1 : 0;
+          const oldOffset = range && !range.hasFullContent ? range.old.start - 1 : 0;
+
+          if (this.currentFocusedLine) {
+            const { side, line } = this.currentFocusedLine;
+            const fileLineNumber = side === 'old' ? (line + oldOffset) : (line + newOffset);
+            this.showCommentDialog(file.path, fileLineNumber, line, side);
+            return;
+          }
+
+          // Fallback to current hunk start if no line is focused
           const currentIdx = this.currentHunkIndex[file.path] || 0;
           const hunkRange = hunks[currentIdx];
-          const fileLineNumber = hunkRange.start;
-          const range = this.fileRanges[file.path];
-          const offset = range && !range.hasFullContent ? range.new.start - 1 : 0;
-          const monacoLine = fileLineNumber - offset;
-
-          this.showCommentDialog(file.path, fileLineNumber, monacoLine, 'new');
+          const side = hunkRange.side === 'old' ? 'old' : 'new';
+          const monacoLine = side === 'old' ? (hunkRange.start - oldOffset) : (hunkRange.start - newOffset);
+          this.showCommentDialog(file.path, hunkRange.start, monacoLine, side);
         }
 
         setupSidebarResizer() {
@@ -984,6 +1144,9 @@
             li.dataset.index = index;
             li.className = index === this.currentFileIndex ? 'active' : '';
 
+            // Left: name + (optional) comment count
+            const left = document.createElement('span');
+            left.className = 'file-left';
             const name = document.createElement('span');
             // Display renames clearly as "old.txt → new.txt"
             if (file.status === 'renamed' && file.old_path) {
@@ -991,13 +1154,42 @@
             } else {
               name.textContent = file.path;
             }
+            left.appendChild(name);
+
+            const commentCount = this.commentManager.getCommentsForFile(file.path).length;
+            if (commentCount > 0) {
+              const commentBadge = document.createElement('span');
+              commentBadge.className = 'file-comment-badge';
+              commentBadge.textContent = String(commentCount);
+              left.appendChild(commentBadge);
+            }
+
+            // Right: per-file +/- and status
+            const right = document.createElement('span');
+            right.className = 'file-right';
+
+            // Compute per-file additions/deletions (serde lowercases enum and renames to `type`)
+            const added = (file.hunks || []).reduce(
+              (acc, h) => acc + (h.lines || []).filter((l) => l && l.type === 'add').length,
+              0,
+            );
+            const deleted = (file.hunks || []).reduce(
+              (acc, h) => acc + (h.lines || []).filter((l) => l && l.type === 'delete').length,
+              0,
+            );
+
+            const delta = document.createElement('span');
+            delta.className = 'file-delta';
+            delta.innerHTML = `<span class="delta-add">+${added}</span> <span class="delta-del">-${deleted}</span>`;
+            right.appendChild(delta);
 
             const status = document.createElement('span');
             status.className = `file-status ${file.status}`;
             status.textContent = file.status[0].toUpperCase();
+            right.appendChild(status);
 
-            li.appendChild(name);
-            li.appendChild(status);
+            li.appendChild(left);
+            li.appendChild(right);
             list.appendChild(li);
           });
         }
@@ -1026,7 +1218,13 @@
             (file.hunks || []).forEach((hunk) => {
               const newLines = hunk.lines.filter((l) => l.new_line).map((l) => l.new_line);
               if (newLines.length > 0) {
-                hunkRanges.push({ start: Math.min(...newLines), end: Math.max(...newLines) });
+                hunkRanges.push({ side: 'new', start: Math.min(...newLines), end: Math.max(...newLines) });
+              }
+              const deletedOldLines = hunk.lines
+                .filter((l) => l.old_line && l.type === 'delete')
+                .map((l) => l.old_line);
+              if (deletedOldLines.length > 0) {
+                hunkRanges.push({ side: 'old', start: Math.min(...deletedOldLines), end: Math.max(...deletedOldLines) });
               }
               hunk.lines.forEach((line) => {
                 if (line.old_line) {
@@ -1114,6 +1312,9 @@
               automaticLayout: true,
               scrollBeyondLastLine: false,
               minimap: { enabled: true },
+              glyphMargin: true,
+              folding: false,
+              lineDecorationsWidth: 0,
               fontSize: 13,
               fontFamily: mono,
               lineNumbers: 'on',
@@ -1124,19 +1325,10 @@
               },
             });
             try {
-              this.editor.getModifiedEditor().updateOptions({ smoothScrolling: !reduceMotion });
-              this.editor.getOriginalEditor().updateOptions({ smoothScrolling: !reduceMotion });
+              // Defer sub-editor option updates until models are set
             } catch (_) {}
           } else {
-            this.editor.updateOptions({
-              renderSideBySide: !this.isInline,
-              theme: theme,
-              fontFamily: mono,
-            });
-            try {
-              this.editor.getModifiedEditor().updateOptions({ smoothScrolling: !reduceMotion });
-              this.editor.getOriginalEditor().updateOptions({ smoothScrolling: !reduceMotion });
-            } catch (_) {}
+            // Defer diff editor option updates until after models are bound
           }
 
           // Lazily fetch content and slice to visible range
@@ -1207,6 +1399,26 @@
             original: this.originalModel,
             modified: this.modifiedModel,
           });
+          // Now that models are bound, update diff editor + sub-editors
+          try {
+            this.editor.updateOptions({
+              renderSideBySide: !this.isInline,
+              theme: theme,
+              fontFamily: mono,
+              glyphMargin: true,
+              folding: false,
+              lineDecorationsWidth: 0,
+            });
+            const me = this.editor.getModifiedEditor && this.editor.getModifiedEditor();
+            const oe = this.editor.getOriginalEditor && this.editor.getOriginalEditor();
+            const opts = { smoothScrolling: !reduceMotion, glyphMargin: true, folding: false };
+            if (me && me.getModel()) me.updateOptions(opts);
+            if (oe && oe.getModel()) oe.updateOptions(opts);
+          } catch (_) {}
+          // Offsets for line/hunk navigation helpers
+          try { this.currentOffsets = { newOffset: newStart > 0 ? newStart - 1 : 0, oldOffset: oldStart > 0 ? oldStart - 1 : 0 }; } catch {}
+          // Store offsets for line/hunk navigation helpers
+          this.currentOffsets = { newOffset: newStart > 0 ? newStart - 1 : 0, oldOffset: oldStart > 0 ? oldStart - 1 : 0 };
           try {
             window.__APP_READY = true;
           } catch (e) {}
@@ -1216,9 +1428,11 @@
             requestAnimationFrame(() => {
               window.Perf.recordFileSwitchEnd();
               try {
-                const e = performance.getEntriesByName('fileSwitch');
-                const d = e && e.length ? e[e.length - 1].duration : null;
-                if (d != null) {console.log('[perf] fileSwitch ms:', Math.round(d));}
+                if (window.DEBUG) {
+                  const e = performance.getEntriesByName('fileSwitch');
+                  const d = e && e.length ? e[e.length - 1].duration : null;
+                  if (d != null) { console.log('[perf] fileSwitch ms:', Math.round(d)); }
+                }
               } catch {}
               // Derive accent color from a visible keyword token if present (prefer 'function'/'const'/'import')
               try {
@@ -1280,9 +1494,12 @@
             originalEditor.updateOptions({ lineNumbers: 'on' });
           }
 
-          // Add click handler for comments on BOTH sides
+          // Add click handler for comments on BOTH sides (line numbers and glyph margin)
           modifiedEditor.onMouseDown((e) => {
-            if (e.target.type === monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS) {
+            if (
+              e.target.type === monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS ||
+              e.target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN
+            ) {
               const monacoLine = e.target.position.lineNumber;
               const fileLineNumber = monacoLine + newOffset;
               this.showCommentDialog(file.path, fileLineNumber, monacoLine, 'new');
@@ -1290,7 +1507,10 @@
           });
 
           originalEditor.onMouseDown((e) => {
-            if (e.target.type === monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS) {
+            if (
+              e.target.type === monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS ||
+              e.target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN
+            ) {
               const monacoLine = e.target.position.lineNumber;
               const fileLineNumber = monacoLine + oldOffset;
               this.showCommentDialog(file.path, fileLineNumber, monacoLine, 'old');
@@ -1303,11 +1523,19 @@
           // Setup scroll listener to show/hide bottom expand control
           this.setupScrollListener();
 
-          // Highlight the current hunk (first hunk by default)
+          // Highlight the current hunk (first hunk by default) and set focused line
           const hunks = this.fileHunks[file.path];
           if (hunks && hunks.length > 0) {
             const currentIdx = this.currentHunkIndex[file.path] || 0;
-            setTimeout(() => this.jumpToHunk(currentIdx), 100);
+            setTimeout(() => {
+              this.jumpToHunk(currentIdx);
+              const hr = hunks[currentIdx];
+              const newOffset = this.currentOffsets ? this.currentOffsets.newOffset : 0;
+              const oldOffset = this.currentOffsets ? this.currentOffsets.oldOffset : 0;
+              const side = hr.side === 'old' ? 'old' : 'new';
+              const monacoLine = side === 'old' ? (hr.start - oldOffset) : (hr.start - newOffset);
+              this.setFocusedLine(side, monacoLine, false);
+            }, 100);
           }
         }
 
@@ -1335,8 +1563,7 @@
                 range: new monaco.Range(monacoLine, 1, monacoLine, 1),
                 options: {
                   isWholeLine: true,
-                  className: 'line-comment-marker',
-                  glyphMarginClassName: 'line-comment-marker',
+                  glyphMarginClassName: 'codicon codicon-comment',
                   glyphMarginHoverMessage: { value: comment.body },
                 },
               };
@@ -1351,8 +1578,7 @@
                 range: new monaco.Range(monacoLine, 1, monacoLine, 1),
                 options: {
                   isWholeLine: true,
-                  className: 'line-comment-marker',
-                  glyphMarginClassName: 'line-comment-marker',
+                  glyphMarginClassName: 'codicon codicon-comment',
                   glyphMarginHoverMessage: { value: comment.body },
                 },
               };
@@ -1398,7 +1624,7 @@
             : '';
           domNode.innerHTML = `
           <h3>Line ${fileLineNumber} (${sideLabel})${existingComment ? ' - Edit' : ''}</h3>
-          <textarea class="comment-textarea" placeholder="Add your comment..." autofocus>${existingComment ? existingComment.body : ''}</textarea>
+          <textarea class="comment-textarea" placeholder="Add your comment..." autofocus></textarea>
           <div class="comment-actions">
             <span class="shortcut-hint">${modKey}+Enter to save</span>
             ${deleteBtnHtml}
@@ -1426,6 +1652,9 @@
           const saveBtn = domNode.querySelector('.save-btn');
           const cancelBtn = domNode.querySelector('.cancel-btn');
           const textarea = domNode.querySelector('.comment-textarea');
+          if (existingComment && textarea) {
+            textarea.value = existingComment.body || '';
+          }
 
           // Keyboard shortcuts
           const handleKeydown = (e) => {
@@ -1489,12 +1718,10 @@
 
           // Ensure cache exists
           if (!this.fileCache[file.path]) {
-            const [oldResponse, newResponse] = await Promise.all([
-              fetch(`/api/file?path=${encodeURIComponent(file.path)}&side=old`),
-              fetch(`/api/file?path=${encodeURIComponent(file.path)}&side=new`),
+            const [oldData, newData] = await Promise.all([
+              fetchJSON(`/api/file?path=${encodeURIComponent(file.path)}&side=old`),
+              fetchJSON(`/api/file?path=${encodeURIComponent(file.path)}&side=new`),
             ]);
-            const oldData = await oldResponse.json();
-            const newData = await newResponse.json();
             this.fileCache[file.path] = { old: oldData.content, new: newData.content };
           }
 
@@ -1662,13 +1889,10 @@
         async fetchFileLengths(filePath) {
           const range = this.fileRanges[filePath];
 
-          const [oldResponse, newResponse] = await Promise.all([
-            fetch(`/api/file?path=${encodeURIComponent(filePath)}&side=old`),
-            fetch(`/api/file?path=${encodeURIComponent(filePath)}&side=new`),
+          const [oldData, newData] = await Promise.all([
+            fetchJSON(`/api/file?path=${encodeURIComponent(filePath)}&side=old`),
+            fetchJSON(`/api/file?path=${encodeURIComponent(filePath)}&side=new`),
           ]);
-
-          const oldData = await oldResponse.json();
-          const newData = await newResponse.json();
 
           range.totalOldLines = oldData.content.split('\n').length;
           range.totalNewLines = newData.content.split('\n').length;
@@ -1699,24 +1923,25 @@
             return;
           }
 
-          console.log(`Expanding ${position} for ${filePath}`);
-          console.log(
-            `Current range: old ${range.old.start}-${range.old.end}, new ${range.new.start}-${range.new.end}`,
-          );
+          if (window.DEBUG) {
+            console.log(`Expanding ${position} for ${filePath}`);
+            console.log(
+              `Current range: old ${range.old.start}-${range.old.end}, new ${range.new.start}-${range.new.end}`,
+            );
+          }
 
           // Fetch the full file content
-          const [oldResponse, newResponse] = await Promise.all([
-            fetch(`/api/file?path=${encodeURIComponent(filePath)}&side=old`),
-            fetch(`/api/file?path=${encodeURIComponent(filePath)}&side=new`),
+          const [oldData, newData] = await Promise.all([
+            fetchJSON(`/api/file?path=${encodeURIComponent(filePath)}&side=old`),
+            fetchJSON(`/api/file?path=${encodeURIComponent(filePath)}&side=new`),
           ]);
-
-          const oldData = await oldResponse.json();
-          const newData = await newResponse.json();
 
           const oldLines = oldData.content.split('\n');
           const newLines = newData.content.split('\n');
 
-          console.log(`File lengths: old ${oldLines.length}, new ${newLines.length}`);
+          if (window.DEBUG) {
+            console.log(`File lengths: old ${oldLines.length}, new ${newLines.length}`);
+          }
 
           // Calculate new range
           const expandAmount = 20;
@@ -1734,17 +1959,21 @@
             newNewEnd = Math.min(newLines.length, range.new.end + expandAmount);
           }
 
-          console.log(
-            `New range: old ${newOldStart}-${newOldEnd}, new ${newNewStart}-${newNewEnd}`,
-          );
+          if (window.DEBUG) {
+            console.log(
+              `New range: old ${newOldStart}-${newOldEnd}, new ${newNewStart}-${newNewEnd}`,
+            );
+          }
 
           // Extract the lines we need (0-indexed slice from 1-indexed line numbers)
           file.old_content = oldLines.slice(newOldStart - 1, newOldEnd).join('\n');
           file.new_content = newLines.slice(newNewStart - 1, newNewEnd).join('\n');
 
-          console.log(
-            `Extracted content lengths: old ${file.old_content.split('\n').length}, new ${file.new_content.split('\n').length}`,
-          );
+          if (window.DEBUG) {
+            console.log(
+              `Extracted content lengths: old ${file.old_content.split('\n').length}, new ${file.new_content.split('\n').length}`,
+            );
+          }
 
           // Update range
           range.old.start = newOldStart;
@@ -1795,6 +2024,7 @@
         updateUI() {
           const count = this.commentManager.getComments().length;
           document.getElementById('comment-count').textContent = count.toString();
+          this.renderFileList();
         }
 
         showKeyboardHelp() {
@@ -1809,9 +2039,10 @@
           // Header
           const header = document.createElement('div');
           header.className = 'submit-modal-header';
+          const titleId = 'kb-help-title';
           header.innerHTML = `
-          <h2>Keyboard Shortcuts</h2>
-          <button class="submit-modal-close">&times;</button>
+          <h2 id="${titleId}">Keyboard Shortcuts</h2>
+          <button class="submit-modal-close" aria-label="Close">&times;</button>
         `;
 
           // Body
@@ -1889,9 +2120,30 @@
           overlay.appendChild(modal);
           document.body.appendChild(overlay);
 
+          // A11y/focus management
+          const previouslyFocused = document.activeElement;
+          modal.setAttribute('role', 'dialog');
+          modal.setAttribute('aria-modal', 'true');
+          modal.setAttribute('aria-labelledby', titleId);
+          const focusable = () => Array.from(modal.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')).filter(el => !el.hasAttribute('disabled'));
+          const onTrap = (e) => {
+            if (e.key === 'Tab') {
+              const nodes = focusable();
+              if (nodes.length === 0) return;
+              const first = nodes[0];
+              const last = nodes[nodes.length - 1];
+              if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+              else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+            }
+          };
+          document.addEventListener('keydown', onTrap);
+          setTimeout(() => { const f = modal.querySelector('.submit-modal-close') || focusable()[0]; if (f) f.focus(); }, 0);
+
           // Event handlers
           const close = () => {
             overlay.remove();
+            document.removeEventListener('keydown', onTrap);
+            if (previouslyFocused && previouslyFocused.focus) { previouslyFocused.focus(); }
           };
 
           header.querySelector('.submit-modal-close').onclick = close;
@@ -1924,9 +2176,10 @@
           // Header
           const header = document.createElement('div');
           header.className = 'submit-modal-header';
+          const titleId = 'settings-title';
           header.innerHTML = `
-          <h2>Settings</h2>
-          <button class="submit-modal-close">&times;</button>
+          <h2 id="${titleId}">Settings</h2>
+          <button class="submit-modal-close" aria-label="Close">&times;</button>
         `;
 
           // Body
@@ -1953,12 +2206,14 @@
           const currentAutoCloseTab =
             this.config.auto_close_tab !== undefined ? this.config.auto_close_tab : true;
 
-          console.log('Settings modal - current values:', {
-            currentColorScheme,
-            currentFont,
-            currentSplitView,
-            currentAutoCloseTab,
-          });
+          if (window.DEBUG) {
+            console.log('Settings modal - current values:', {
+              currentColorScheme,
+              currentFont,
+              currentSplitView,
+              currentAutoCloseTab,
+            });
+          }
 
           form.innerHTML = `
           <div class="settings-field">
@@ -2026,9 +2281,31 @@
           overlay.appendChild(modal);
           document.body.appendChild(overlay);
 
+          // A11y/focus management
+          const previouslyFocused = document.activeElement;
+          modal.setAttribute('role', 'dialog');
+          modal.setAttribute('aria-modal', 'true');
+          modal.setAttribute('aria-labelledby', titleId);
+          const focusable = () => Array.from(modal.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')).filter(el => !el.hasAttribute('disabled'));
+          const initial = modal.querySelector('#color-scheme') || focusable()[0];
+          const onTrap = (e) => {
+            if (e.key === 'Tab') {
+              const nodes = focusable();
+              if (nodes.length === 0) return;
+              const first = nodes[0];
+              const last = nodes[nodes.length - 1];
+              if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+              else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+            }
+          };
+          document.addEventListener('keydown', onTrap);
+          setTimeout(() => { if (initial) initial.focus(); }, 0);
+
           // Event handlers
           const close = () => {
             overlay.remove();
+            document.removeEventListener('keydown', onTrap);
+            if (previouslyFocused && previouslyFocused.focus) { previouslyFocused.focus(); }
           };
 
           const save = async () => {
@@ -2116,6 +2393,13 @@
           <h2>${comments.length === 0 ? 'Submit Review' : `Review Comments (${comments.length})`}</h2>
           <button class="submit-modal-close">&times;</button>
         `;
+          // A11y: ensure heading has an id and close button has a label
+          try {
+            const h2 = header.querySelector('h2');
+            if (h2) { h2.id = 'submit-title'; }
+            const closeBtn = header.querySelector('.submit-modal-close');
+            if (closeBtn) { closeBtn.setAttribute('aria-label', 'Close'); }
+          } catch {}
 
           // Body
           const body = document.createElement('div');
@@ -2149,10 +2433,7 @@
               for (const side of sides) {
                 const key = `${filePath}:${side}`;
                 try {
-                  const response = await fetch(
-                    `/api/file?path=${encodeURIComponent(filePath)}&side=${side}`,
-                  );
-                  const data = await response.json();
+                  const data = await fetchJSON(`/api/file?path=${encodeURIComponent(filePath)}&side=${side}`);
                   fileContents[key] = data.content.split('\n');
                 } catch (err) {
                   console.error(`Failed to fetch ${key}:`, err);
@@ -2216,9 +2497,32 @@
           overlay.appendChild(modal);
           document.body.appendChild(overlay);
 
+          // A11y/focus trap & dialog attrs
+          const previouslyFocused = document.activeElement;
+          try {
+            modal.setAttribute('role', 'dialog');
+            modal.setAttribute('aria-modal', 'true');
+            modal.setAttribute('aria-labelledby', 'submit-title');
+          } catch {}
+          const focusable = () => Array.from(modal.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')).filter(el => !el.hasAttribute('disabled'));
+          const onTrap = (e) => {
+            if (e.key === 'Tab') {
+              const nodes = focusable();
+              if (nodes.length === 0) return;
+              const first = nodes[0];
+              const last = nodes[nodes.length - 1];
+              if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+              else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+            }
+          };
+          document.addEventListener('keydown', onTrap);
+          setTimeout(() => { const f = modal.querySelector('.confirm-submit-btn'); if (f) f.focus(); }, 0);
+
           // Event handlers
           const close = () => {
             overlay.remove();
+            document.removeEventListener('keydown', onTrap);
+            if (previouslyFocused && previouslyFocused.focus) { previouslyFocused.focus(); }
           };
 
           const submit = async () => {
@@ -2227,11 +2531,12 @@
             submitBtn.textContent = 'Submitting...';
 
             try {
-              await fetch('/api/complete', {
+              const resp = await fetch('/api/complete', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ comments }),
               });
+              if (!resp.ok) { throw new Error(`HTTP ${resp.status}`); }
 
               submitBtn.textContent = 'Submitted!';
               document.getElementById('submit-review').disabled = true;
@@ -2276,5 +2581,5 @@
       // Initialize app
       const app = new MonacoApp();
       app.init().then(() => {
-        console.log('Monaco Editor initialized');
+        if (window.DEBUG) { console.log('Monaco Editor initialized'); }
       });
