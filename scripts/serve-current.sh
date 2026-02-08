@@ -17,8 +17,15 @@ LOG_DIR=$(mktemp -d)
 LOG="$LOG_DIR/server.log"
 PIDFILE="$LOG_DIR/server.pid"
 
+# Choose a diff source: working tree vs last commit when clean
+DIFF_SOURCE="diff"
+if git diff HEAD --quiet; then
+  DIFF_SOURCE="show"
+fi
+
 (
-  (git diff HEAD | "$LRV" --no-open --bind 127.0.0.1 ${TAIL_IP:+--bind $TAIL_IP} --port 0 --title "$TITLE")
+  ( ( [ "$DIFF_SOURCE" = "diff" ] && git diff HEAD || git show --no-color --patch HEAD ) \
+    | "$LRV" --no-open --bind 127.0.0.1 ${TAIL_IP:+--bind $TAIL_IP} --port 0 --title "$TITLE" )
 ) >"$LOG" 2>&1 & echo $! >"$PIDFILE"
 
 for _ in $(seq 1 200); do
@@ -32,4 +39,3 @@ URLS=$(sed -n 's/^  \(http:\/\/[^ ]*\)$/\1/p' "$LOG")
 echo "PID: $(cat "$PIDFILE")"
 echo "URLs:"; echo "$URLS"
 echo "Log: $LOG"
-
