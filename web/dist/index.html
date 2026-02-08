@@ -1,1777 +1,2109 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>lrv - local review</title>
-  <!-- Local fonts via @font-face; provide system fallbacks if not present -->
-  <style>
-    @font-face {
-      font-family: 'Inter';
-      src: url('/assets/fonts/Inter-Variable.woff2') format('woff2');
-      font-weight: 100 900;
-      font-style: normal;
-      font-display: swap;
-    }
-    @font-face {
-      font-family: 'Geist Sans';
-      src: url('/assets/fonts/GeistSans-Variable.woff2') format('woff2');
-      font-weight: 100 900;
-      font-style: normal;
-      font-display: swap;
-    }
-    @font-face {
-      font-family: 'JetBrains Mono';
-      src: url('/assets/fonts/JetBrainsMono-Variable.woff2') format('woff2'),
-           url('/assets/fonts/JetBrainsMono-Regular.ttf') format('truetype');
-      font-weight: 100 900;
-      font-style: normal;
-      font-display: swap;
-    }
-  </style>
-  <style>
-    /* Dynamic theme variables - set by JavaScript based on Monaco editor theme */
-    :root {
-      --bg-primary: #1e1e1e;
-      --bg-secondary: #252526;
-      --bg-elevated: #2d2d30;
-      --border-color: #3e3e42;
-      --text-primary: #cccccc;
-      --text-secondary: #858585;
-      --accent-color: #007acc;
-      --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-      --font-mono: 'JetBrains Mono', 'Monaco', 'Menlo', 'Consolas', monospace;
-      --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
-      --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
-    }
-
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-
-    body {
-      font-family: var(--font-sans);
-      background: var(--bg-primary);
-      color: var(--text-primary);
-      height: 100vh;
-      overflow: hidden;
-      display: flex;
-      flex-direction: column;
-    }
-
-    .header {
-      background: var(--bg-secondary);
-      padding: 8px 16px;
-      border-bottom: 1px solid var(--border-color);
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      z-index: 100;
-      flex-shrink: 0;
-    }
-
-    .header h1 {
-      font-size: 14px;
-      font-weight: 500;
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-
-    .review-time {
-      color: var(--text-secondary);
-      font-size: 12px;
-      font-weight: 400;
-    }
-
-    .project-info {
-      color: var(--text-tertiary);
-      font-size: 12px;
-      font-weight: 400;
-    }
-
-    .project-info-value {
-      color: var(--text-secondary);
-      font-family: var(--font-mono);
-    }
-
-    .git-branch {
-      color: var(--accent-color);
-    }
-
-    .project-info-separator {
-      margin: 0 8px;
-      color: var(--border-color);
-    }
-
-    .header-actions {
-      display: flex;
-      gap: 12px;
-      align-items: center;
-    }
-
-    .settings-btn {
-      background: var(--bg-elevated);
-      color: var(--text-primary);
-      padding: 6px 10px;
-    }
-
-    .settings-btn:hover {
-      background: var(--border-color);
-    }
-
-    .comment-badge {
-      background: var(--bg-elevated);
-      color: var(--text-primary);
-      padding: 4px 10px;
-      border-radius: 0px;
-      font-size: 11px;
-      font-weight: 500;
-    }
-
-
-    .header button {
-      background: var(--accent-color);
-      color: white;
-      border: none;
-      padding: 6px 12px;
-      border-radius: 0px;
-      cursor: pointer;
-      font-size: 12px;
-      font-weight: 500;
-      transition: background 0.15s ease;
-    }
-
-    .header button:hover {
-      opacity: 0.8;
-    }
-
-    .header button:disabled {
-      background: var(--text-tertiary);
-      cursor: not-allowed;
-    }
-
-    .main {
-      display: flex;
-      flex: 1;
-      min-height: 0;
-    }
-
-    .sidebar {
-      width: 280px;
-      min-width: 150px;
-      max-width: 600px;
-      background: var(--bg-secondary);
-      border-right: 1px solid var(--border-color);
-      overflow-y: auto;
-      display: flex;
-      flex-direction: column;
-      position: relative;
-    }
-
-    .sidebar-resizer {
-      position: absolute;
-      top: 0;
-      right: 0;
-      width: 4px;
-      height: 100%;
-      cursor: ew-resize;
-      background: transparent;
-      z-index: 10;
-    }
-
-    .sidebar-resizer:hover,
-    .sidebar-resizer.dragging {
-      background: var(--accent-color);
-    }
-
-    .sidebar-section {
-      padding: 16px;
-    }
-
-    .sidebar-section h2 {
-      font-size: 13px;
-      text-transform: uppercase;
-      color: var(--text-secondary);
-      margin-bottom: 12px;
-      font-weight: 600;
-      letter-spacing: 0.5px;
-    }
-
-    .stats {
-      font-size: 12px;
-      color: var(--text-secondary);
-      margin-bottom: 16px;
-      padding-bottom: 12px;
-      border-bottom: 1px solid var(--border-color);
-      font-family: var(--font-mono);
-    }
-
-    .file-list {
-      list-style: none;
-    }
-
-    .file-list li {
-      padding: 8px 12px;
-      cursor: pointer;
-      border-radius: 0px;
-      font-size: 13px;
-      margin-bottom: 2px;
-      transition: all 0.15s ease;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      font-family: var(--font-mono);
-      border-left: 3px solid transparent;
-    }
-
-    .file-list li:hover {
-      background: var(--bg-elevated);
-    }
-
-    .file-list li.active {
-      background: var(--bg-elevated);
-      border-left-color: var(--accent-color);
-      color: var(--text-primary);
-    }
-
-    .file-list-actions {
-      margin-top: 8px;
-      padding-top: 8px;
-      border-top: 1px solid var(--border-color);
-    }
-
-    .file-action-btn {
-      width: 100%;
-      padding: 8px 12px;
-      background: var(--bg-elevated);
-      color: var(--text-primary);
-      border: none;
-      border-radius: 0px;
-      cursor: pointer;
-      font-size: 12px;
-      font-weight: 500;
-      transition: all 0.15s ease;
-      text-align: left;
-    }
-
-    .file-action-btn:hover {
-      background: var(--bg-elevated);
-      color: var(--text-primary);
-    }
-
-    .file-action-btn:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-
-    .file-status {
-      font-size: 10px;
-      padding: 2px 6px;
-      border-radius: 3px;
-      text-transform: uppercase;
-      font-weight: 600;
-    }
-
-    .file-status.modified { background: #1a7f37; color: white; }
-    .file-status.added { background: #1a7f37; color: white; }
-    .file-status.deleted { background: #cf222e; color: white; }
-    .file-status.renamed { background: #bf8700; color: white; }
-
-    .content {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-      position: relative;
-      min-height: 0;
-    }
-
-    .file-header {
-      display: none;
-    }
-
-    #editor-container {
-      flex: 1;
-      position: relative;
-      overflow: visible;
-    }
-
-
-    .inline-comment-box {
-      background: var(--bg-elevated);
-      border: 1px solid var(--border-color);
-      border-radius: 0px;
-      padding: 12px;
-      width: 500px;
-      box-shadow: var(--shadow-md);
-      margin: 8px 0;
-    }
-
-    .inline-comment-box h3 {
-      margin-bottom: 8px;
-      font-size: 12px;
-      font-weight: 500;
-      color: var(--text-secondary);
-    }
-
-    .comment-textarea {
-      width: 100%;
-      min-height: 80px;
-      padding: 10px;
-      background: var(--bg-primary);
-      border: 1px solid var(--border-color);
-      border-radius: 0px;
-      color: var(--text-primary);
-      font-family: var(--font-sans);
-      font-size: 13px;
-      resize: vertical;
-      line-height: 1.4;
-      transition: border-color 0.15s ease;
-    }
-
-    .comment-textarea:focus {
-      outline: none;
-      border-color: var(--accent-color);
-    }
-
-    .comment-actions {
-      display: flex;
-      gap: 8px;
-      align-items: center;
-      margin-top: 12px;
-    }
-
-    .shortcut-hint {
-      color: var(--text-secondary);
-      font-size: 11px;
-      margin-right: auto;
-      font-family: var(--font-mono);
-    }
-
-    .comment-actions button {
-      padding: 6px 14px;
-      border: none;
-      border-radius: 0px;
-      cursor: pointer;
-      font-size: 12px;
-      font-weight: 500;
-      transition: all 0.15s ease;
-    }
-
-    .btn-primary {
-      background: var(--accent-color);
-      color: white;
-    }
-
-    .btn-primary:hover {
-      opacity: 0.8;
-    }
-
-    .btn-secondary {
-      background: var(--bg-elevated);
-      color: var(--text-primary);
-    }
-
-    .btn-secondary:hover {
-      background: var(--border-color);
-    }
-
-    .btn-danger {
-      background: #c42b1c;
-      color: white;
-    }
-
-    .btn-danger:hover {
-      background: #e81123;
-    }
-
-    #expand-top-container {
-      position: sticky;
-      top: 0;
-      left: 0;
-      right: 0;
-      z-index: 100;
-      background: var(--bg-primary);
-      pointer-events: auto;
-      display: none;
-    }
-
-    #expand-bottom-container {
-      position: sticky;
-      bottom: 0;
-      left: 0;
-      right: 0;
-      z-index: 100;
-      background: var(--bg-primary);
-      pointer-events: auto;
-      display: none;
-    }
-
-    #editor-container {
-      flex: 1;
-      position: relative;
-      overflow: visible;
-    }
-
-    .expand-controls {
-      display: flex;
-      gap: 8px;
-      align-items: center;
-      padding: 8px 20px;
-      background: var(--bg-primary);
-      border: 1px solid var(--border-color);
-    }
-
-    .expand-btn {
-      background: var(--bg-elevated);
-      color: var(--text-primary);
-      border: none;
-      padding: 4px 12px;
-      border-radius: 3px;
-      cursor: pointer;
-      font-size: 12px;
-      font-weight: 500;
-      transition: all 0.15s ease;
-    }
-
-    .expand-btn:hover {
-      background: var(--bg-elevated);
-      color: var(--text-primary);
-    }
-
-    .expand-btn:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-
-    .expand-line {
-      flex: 1;
-      height: 1px;
-      background: var(--border-color);
-    }
-
-    .line-comment-marker {
-      background: var(--accent-color);
-      width: 4px;
-      margin-left: 2px;
-    }
-
-    .focused-hunk-line {
-      border-left: 3px solid var(--accent-color);
-    }
-
-    .empty-state {
-      padding: 32px;
-      text-align: center;
-      color: var(--text-secondary);
-      font-size: 13px;
-    }
-
-    .submit-modal-overlay {
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background: rgba(0, 0, 0, 0.8);
-      z-index: 1000;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 20px;
-      backdrop-filter: blur(4px);
-    }
-
-    .submit-modal {
-      background: var(--bg-elevated);
-      border: 1px solid var(--border-color);
-      border-radius: 0px;
-      max-width: 900px;
-      max-height: 80vh;
-      width: 100%;
-      display: flex;
-      flex-direction: column;
-      box-shadow: var(--shadow-md);
-    }
-
-    .submit-modal-header {
-      padding: 16px 20px;
-      border-bottom: 1px solid var(--border-color);
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-
-    .submit-modal-header h2 {
-      margin: 0;
-      font-size: 16px;
-      font-weight: 500;
-    }
-
-    .submit-modal-close {
-      background: transparent;
-      border: none;
-      color: var(--text-secondary);
-      cursor: pointer;
-      font-size: 20px;
-      padding: 0;
-      width: 28px;
-      height: 28px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      border-radius: 0px;
-      transition: all 0.15s ease;
-    }
-
-    .submit-modal-close:hover {
-      background: var(--bg-elevated);
-      color: var(--accent-color);
-    }
-
-    .submit-modal-body {
-      padding: 20px;
-      overflow-y: auto;
-      flex: 1;
-    }
-
-    .comment-preview {
-      background: var(--bg-primary);
-      border: 1px solid var(--border-color);
-      border-radius: 0px;
-      padding: 16px;
-      margin-bottom: 16px;
-    }
-
-    .comment-preview-header {
-      font-size: 12px;
-      color: var(--text-secondary);
-      margin-bottom: 12px;
-      font-weight: 500;
-      font-family: var(--font-mono);
-    }
-
-    .comment-preview-code {
-      background: var(--bg-secondary);
-      border: 1px solid var(--border-color);
-      border-radius: 0px;
-      padding: 10px;
-      font-family: var(--font-mono);
-      font-size: 12px;
-      margin-bottom: 10px;
-      overflow-x: auto;
-    }
-
-    .comment-preview-code-line {
-      white-space: pre;
-      line-height: 1.5;
-    }
-
-    .comment-preview-code-line.target {
-      background: var(--bg-elevated);
-      margin: 0 -10px;
-      padding: 0 10px;
-      border-left: 3px solid var(--accent-color);
-    }
-
-    .comment-preview-text {
-      font-size: 13px;
-      line-height: 1.5;
-      color: var(--text-primary);
-      white-space: pre-wrap;
-      word-break: break-word;
-    }
-
-    .submit-modal-footer {
-      padding: 16px 20px;
-      border-top: 1px solid var(--border-color);
-      display: flex;
-      justify-content: flex-end;
-      gap: 12px;
-    }
-
-    .help-modal {
-      max-width: 600px;
-    }
-
-    .shortcuts-table {
-      width: 100%;
-      border-collapse: collapse;
-      margin-top: 16px;
-    }
-
-    .shortcuts-table th {
-      text-align: left;
-      padding: 8px 12px;
-      border-bottom: 1px solid var(--border-color);
-      font-size: 11px;
-      text-transform: uppercase;
-      color: var(--text-secondary);
-      font-weight: 600;
-      letter-spacing: 0.5px;
-    }
-
-    .shortcuts-table td {
-      padding: 10px 12px;
-      border-bottom: 1px solid var(--border-color);
-      font-size: 13px;
-    }
-
-    .shortcuts-table tr:last-child td {
-      border-bottom: none;
-    }
-
-    .key-combo {
-      display: inline-flex;
-      gap: 4px;
-      flex-wrap: wrap;
-    }
-
-    .key {
-      background: var(--bg-elevated);
-      color: var(--text-primary);
-      padding: 3px 8px;
-      border-radius: 0px;
-      font-family: var(--font-mono);
-      font-size: 11px;
-      font-weight: 500;
-      border: 1px solid var(--border-color);
-      box-shadow: var(--shadow-sm);
-    }
-
-    .key-or {
-      color: var(--text-secondary);
-      font-size: 11px;
-      align-self: center;
-    }
-
-    .settings-form {
-      display: flex;
-      flex-direction: column;
-      gap: 20px;
-      padding: 10px 0;
-    }
-
-    .settings-field {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
-
-    .settings-field label {
-      font-size: 13px;
-      font-weight: 500;
-      color: var(--text-primary);
-    }
-
-    .settings-field select,
-    .settings-field input[type="text"] {
-      background: var(--bg-primary);
-      border: 1px solid var(--border-color);
-      border-radius: 0px;
-      color: var(--text-primary);
-      padding: 8px 12px;
-      font-size: 13px;
-      font-family: var(--font-sans);
-      transition: border-color 0.15s ease;
-    }
-
-    .settings-field select:focus,
-    .settings-field input[type="text"]:focus {
-      outline: none;
-      border-color: var(--accent-color);
-    }
-
-    .settings-field input[type="checkbox"] {
-      width: 18px;
-      height: 18px;
-      cursor: pointer;
-      accent-color: var(--accent-color);
-    }
-
-    .checkbox-wrapper {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-
-    .checkbox-wrapper span {
-      color: var(--text-secondary);
-    }
-  </style>
-</head>
-<body>
-  <div class="header">
-    <h1>
-      lrv
-      <span class="project-info" id="project-info"></span>
-      <span class="review-time" id="review-time"></span>
-    </h1>
-    <div class="header-actions">
-      <span class="comment-badge"><span id="comment-count">0</span> comments</span>
-      <button id="settings-btn" class="settings-btn">Settings</button>
-      <button id="toggle-view">Inline/Side-by-Side</button>
-      <button id="submit-review">Submit Review</button>
-    </div>
-  </div>
-  <div class="main">
-    <div class="sidebar" id="sidebar">
-      <div class="sidebar-section">
-        <h2>Files</h2>
-        <div class="stats" id="stats"></div>
-        <ul class="file-list" id="file-list"></ul>
-        <div class="file-list-actions">
-          <button id="show-full-file" class="file-action-btn" style="display:none;">📄 Show Full File</button>
-        </div>
+<!doctype html>
+<html lang="en" data-ui-ready="0">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>lrv - local review</title>
+    <!-- Local fonts via @font-face; provide system fallbacks if not present -->
+    <style>
+      @font-face {
+        font-family: 'Inter';
+        src: url('/assets/fonts/Inter-Variable.woff2') format('woff2');
+        font-weight: 100 900;
+        font-style: normal;
+        font-display: swap;
+      }
+      @font-face {
+        font-family: 'Geist Sans';
+        src: url('/assets/fonts/GeistSans-Variable.woff2') format('woff2');
+        font-weight: 100 900;
+        font-style: normal;
+        font-display: swap;
+      }
+      @font-face {
+        font-family: 'JetBrains Mono';
+        src:
+          url('/assets/fonts/JetBrainsMono-Variable.woff2') format('woff2'),
+          url('/assets/fonts/JetBrainsMono-Regular.ttf') format('truetype');
+        font-weight: 100 900;
+        font-style: normal;
+        font-display: swap;
+      }
+    </style>
+    <style>
+      /* Dynamic theme variables - set by JavaScript based on Monaco editor theme */
+      :root {
+        /* Colors are set at runtime by applyThemeToUI() based on the selected Monaco theme */
+        --bg-primary: #1e1e1e;
+        --bg-secondary: #252526;
+        --bg-elevated: #2d2d30;
+        --border-color: #3e3e42;
+        --text-primary: #cccccc;
+        --text-secondary: #858585;
+        --text-tertiary: #6e6e6e;
+        /* --accent-color is set from the theme (e.g., Firefox DevTools Dark uses pink) */
+        --accent-color: #007acc;
+        --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+        --font-mono: 'JetBrains Mono', 'Monaco', 'Menlo', 'Consolas', monospace;
+        --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
+        --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
+      }
+
+      /* Prevent flash of default theme: hide body until UI theme is applied */
+      html:not([data-ui-ready='1']) body {
+        visibility: hidden;
+      }
+
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: var(--font-sans);
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        height: 100vh;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .header {
+        background: var(--bg-secondary);
+        padding: 8px 16px;
+        border-bottom: 1px solid var(--border-color);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        z-index: 100;
+        flex-shrink: 0;
+      }
+
+      .header h1 {
+        font-size: 14px;
+        font-weight: 500;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .review-time {
+        color: var(--text-secondary);
+        font-size: 12px;
+        font-weight: 400;
+      }
+
+      .project-info {
+        color: var(--text-tertiary);
+        font-size: 12px;
+        font-weight: 400;
+      }
+
+      .project-info-value {
+        color: var(--text-secondary);
+        font-family: var(--font-mono);
+        white-space: nowrap;
+        text-overflow: ellipsis;
+        overflow: hidden;
+      }
+
+      .git-branch {
+        color: var(--accent-color);
+      }
+
+      .project-info-separator {
+        margin: 0 8px;
+        color: var(--border-color);
+      }
+
+      .header-actions {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+      }
+
+      .settings-btn {
+        background: var(--bg-elevated);
+        color: var(--text-primary);
+        padding: 6px 10px;
+      }
+
+      .settings-btn:hover {
+        background: var(--border-color);
+      }
+
+      .comment-badge {
+        background: var(--bg-elevated);
+        color: var(--text-primary);
+        padding: 4px 10px;
+        border-radius: 0px;
+        font-size: 11px;
+        font-weight: 500;
+      }
+
+      .header button {
+        background: var(--accent-color);
+        color: white;
+        border: none;
+        padding: 6px 12px;
+        border-radius: 0px;
+        cursor: pointer;
+        font-size: 12px;
+        font-weight: 500;
+        transition: background 0.15s ease;
+      }
+
+      .header button:hover {
+        opacity: 0.8;
+      }
+
+      .header button:disabled {
+        background: var(--text-tertiary);
+        cursor: not-allowed;
+      }
+
+      .main {
+        display: flex;
+        flex: 1;
+        min-height: 0;
+      }
+
+      .sidebar {
+        width: 280px;
+        min-width: 150px;
+        max-width: 600px;
+        background: var(--bg-secondary);
+        border-right: 1px solid var(--border-color);
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        position: relative;
+      }
+
+      .sidebar-resizer {
+        position: absolute;
+        top: 0;
+        right: 0;
+        width: 4px;
+        height: 100%;
+        cursor: ew-resize;
+        background: transparent;
+        z-index: 10;
+      }
+
+      .sidebar-resizer:hover,
+      .sidebar-resizer.dragging {
+        background: var(--accent-color);
+      }
+
+      .sidebar-section {
+        padding: 16px;
+      }
+
+      .sidebar-section h2 {
+        font-size: 13px;
+        text-transform: uppercase;
+        color: var(--text-secondary);
+        margin-bottom: 12px;
+        font-weight: 600;
+        letter-spacing: 0.5px;
+      }
+
+      .stats {
+        font-size: 12px;
+        color: var(--text-secondary);
+        margin-bottom: 16px;
+        padding-bottom: 12px;
+        border-bottom: 1px solid var(--border-color);
+        font-family: var(--font-mono);
+      }
+
+      .file-list {
+        list-style: none;
+      }
+
+      .file-list li {
+        padding: 8px 12px;
+        cursor: pointer;
+        border-radius: 0px;
+        font-size: 13px;
+        margin-bottom: 2px;
+        transition: all 0.15s ease;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-family: var(--font-mono);
+        border-left: 3px solid transparent;
+      }
+
+      .file-list li:hover {
+        background: var(--bg-elevated);
+      }
+
+      .file-list li.active {
+        background: var(--bg-elevated);
+        border-left-color: var(--accent-color);
+        color: var(--text-primary);
+      }
+
+      .file-list-actions {
+        margin-top: 8px;
+        padding-top: 8px;
+        border-top: 1px solid var(--border-color);
+      }
+
+      .file-action-btn {
+        width: 100%;
+        padding: 8px 12px;
+        background: var(--bg-elevated);
+        color: var(--text-primary);
+        border: none;
+        border-radius: 0px;
+        cursor: pointer;
+        font-size: 12px;
+        font-weight: 500;
+        transition: all 0.15s ease;
+        text-align: left;
+      }
+
+      .file-action-btn:hover {
+        background: var(--bg-elevated);
+        color: var(--text-primary);
+      }
+
+      .file-action-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      .file-status {
+        font-size: 10px;
+        padding: 2px 6px;
+        border-radius: 3px;
+        text-transform: uppercase;
+        font-weight: 600;
+      }
+
+      .file-status.modified {
+        background: #1a7f37;
+        color: white;
+      }
+      .file-status.added {
+        background: #1a7f37;
+        color: white;
+      }
+      .file-status.deleted {
+        background: #cf222e;
+        color: white;
+      }
+      .file-status.renamed {
+        background: #bf8700;
+        color: white;
+      }
+
+      .content {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        position: relative;
+        min-height: 0;
+      }
+
+      .file-header {
+        display: none;
+      }
+
+      #editor-container {
+        flex: 1;
+        position: relative;
+        overflow: visible;
+      }
+
+      .inline-comment-box {
+        background: var(--bg-elevated);
+        border: 1px solid var(--border-color);
+        border-radius: 0px;
+        padding: 12px;
+        width: 500px;
+        box-shadow: var(--shadow-md);
+        margin: 8px 0;
+      }
+
+      .inline-comment-box h3 {
+        margin-bottom: 8px;
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--text-secondary);
+      }
+
+      .comment-textarea {
+        width: 100%;
+        min-height: 80px;
+        padding: 10px;
+        background: var(--bg-primary);
+        border: 1px solid var(--border-color);
+        border-radius: 0px;
+        color: var(--text-primary);
+        font-family: var(--font-sans);
+        font-size: 13px;
+        resize: vertical;
+        line-height: 1.4;
+        transition: border-color 0.15s ease;
+      }
+
+      .comment-textarea:focus {
+        outline: none;
+        border-color: var(--accent-color);
+      }
+
+      .comment-actions {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        margin-top: 12px;
+      }
+
+      .shortcut-hint {
+        color: var(--text-secondary);
+        font-size: 11px;
+        margin-right: auto;
+        font-family: var(--font-mono);
+      }
+
+      /* Unified button baseline for action buttons in modals and comment widgets */
+      .comment-actions button,
+      .submit-modal-footer button {
+        padding: 6px 14px;
+        border: none;
+        border-radius: 0px;
+        cursor: pointer;
+        font-size: 12px;
+        font-weight: 500;
+        transition: all 0.15s ease;
+      }
+
+      .btn-primary {
+        background: var(--accent-color);
+        color: white;
+      }
+
+      .btn-primary:hover {
+        opacity: 0.8;
+      }
+      .btn-primary:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+
+      .btn-secondary {
+        background: var(--bg-elevated);
+        color: var(--text-primary);
+      }
+
+      .btn-secondary:hover {
+        background: var(--border-color);
+      }
+      .btn-secondary:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+
+      .btn-danger {
+        background: #c42b1c;
+        color: white;
+      }
+
+      .btn-danger:hover {
+        background: #e81123;
+      }
+      .btn-danger:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+
+      #expand-top-container {
+        position: sticky;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 100;
+        background: var(--bg-primary);
+        pointer-events: auto;
+        display: none;
+      }
+
+      #expand-bottom-container {
+        position: sticky;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        z-index: 100;
+        background: var(--bg-primary);
+        pointer-events: auto;
+        display: none;
+      }
+
+      #editor-container {
+        flex: 1;
+        position: relative;
+        overflow: visible;
+      }
+
+      .expand-controls {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        padding: 8px 20px;
+        background: var(--bg-primary);
+        border: 1px solid var(--border-color);
+      }
+
+      .expand-btn {
+        background: var(--bg-elevated);
+        color: var(--text-primary);
+        border: none;
+        padding: 4px 12px;
+        border-radius: 3px;
+        cursor: pointer;
+        font-size: 12px;
+        font-weight: 500;
+        transition: all 0.15s ease;
+      }
+
+      .expand-btn:hover {
+        background: var(--bg-elevated);
+        color: var(--text-primary);
+      }
+
+      .expand-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      .expand-line {
+        flex: 1;
+        height: 1px;
+        background: var(--border-color);
+      }
+
+      .line-comment-marker {
+        background: var(--accent-color);
+        width: 4px;
+        margin-left: 2px;
+      }
+
+      .focused-hunk-line {
+        border-left: 3px solid var(--accent-color);
+      }
+
+      .empty-state {
+        padding: 32px;
+        text-align: center;
+        color: var(--text-secondary);
+        font-size: 13px;
+      }
+
+      .submit-modal-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.8);
+        z-index: 1000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+        backdrop-filter: blur(4px);
+      }
+
+      .submit-modal {
+        background: var(--bg-elevated);
+        border: 1px solid var(--border-color);
+        border-radius: 0px;
+        max-width: 900px;
+        max-height: 80vh;
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+        box-shadow: var(--shadow-md);
+      }
+
+      .submit-modal-header {
+        padding: 16px 20px;
+        border-bottom: 1px solid var(--border-color);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      .submit-modal-header h2 {
+        margin: 0;
+        font-size: 16px;
+        font-weight: 500;
+      }
+
+      .submit-modal-close {
+        background: transparent;
+        border: none;
+        color: var(--text-secondary);
+        cursor: pointer;
+        font-size: 20px;
+        padding: 0;
+        width: 28px;
+        height: 28px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 0px;
+        transition: all 0.15s ease;
+      }
+
+      .submit-modal-close:hover {
+        background: var(--bg-elevated);
+        color: var(--accent-color);
+      }
+
+      .submit-modal-body {
+        padding: 20px;
+        overflow-y: auto;
+        flex: 1;
+      }
+
+      .comment-preview {
+        background: var(--bg-primary);
+        border: 1px solid var(--border-color);
+        border-radius: 0px;
+        padding: 16px;
+        margin-bottom: 16px;
+      }
+
+      .comment-preview-header {
+        font-size: 12px;
+        color: var(--text-secondary);
+        margin-bottom: 12px;
+        font-weight: 500;
+        font-family: var(--font-mono);
+      }
+
+      .comment-preview-code {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: 0px;
+        padding: 10px;
+        font-family: var(--font-mono);
+        font-size: 12px;
+        margin-bottom: 10px;
+        overflow-x: auto;
+      }
+
+      .comment-preview-code-line {
+        white-space: pre;
+        line-height: 1.5;
+      }
+
+      .comment-preview-code-line.target {
+        background: var(--bg-elevated);
+        margin: 0 -10px;
+        padding: 0 10px;
+        border-left: 3px solid var(--accent-color);
+      }
+
+      .comment-preview-text {
+        font-size: 13px;
+        line-height: 1.5;
+        color: var(--text-primary);
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      .submit-modal-footer {
+        padding: 16px 20px;
+        border-top: 1px solid var(--border-color);
+        display: flex;
+        justify-content: flex-end;
+        gap: 12px;
+      }
+
+      .help-modal {
+        max-width: 600px;
+      }
+
+      .shortcuts-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 16px;
+      }
+
+      .shortcuts-table th {
+        text-align: left;
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--border-color);
+        font-size: 11px;
+        text-transform: uppercase;
+        color: var(--text-secondary);
+        font-weight: 600;
+        letter-spacing: 0.5px;
+      }
+
+      .shortcuts-table td {
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--border-color);
+        font-size: 13px;
+      }
+
+      .shortcuts-table tr:last-child td {
+        border-bottom: none;
+      }
+
+      .key-combo {
+        display: inline-flex;
+        gap: 4px;
+        flex-wrap: wrap;
+      }
+
+      .key {
+        background: var(--bg-elevated);
+        color: var(--text-primary);
+        padding: 3px 8px;
+        border-radius: 0px;
+        font-family: var(--font-mono);
+        font-size: 11px;
+        font-weight: 500;
+        border: 1px solid var(--border-color);
+        box-shadow: var(--shadow-sm);
+      }
+
+      .key-or {
+        color: var(--text-secondary);
+        font-size: 11px;
+        align-self: center;
+      }
+
+      .settings-form {
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+        padding: 10px 0;
+      }
+
+      .settings-field {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .settings-field label {
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--text-primary);
+      }
+
+      .settings-field select,
+      .settings-field input[type='text'] {
+        background: var(--bg-primary);
+        border: 1px solid var(--border-color);
+        border-radius: 0px;
+        color: var(--text-primary);
+        padding: 8px 12px;
+        font-size: 13px;
+        font-family: var(--font-sans);
+        transition: border-color 0.15s ease;
+      }
+
+      .settings-field select:focus,
+      .settings-field input[type='text']:focus {
+        outline: none;
+        border-color: var(--accent-color);
+      }
+
+      .settings-field input[type='checkbox'] {
+        width: 18px;
+        height: 18px;
+        cursor: pointer;
+        accent-color: var(--accent-color);
+      }
+
+      .checkbox-wrapper {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .checkbox-wrapper span {
+        color: var(--text-secondary);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="header">
+      <h1>
+        lrv
+        <span class="project-info" id="project-info"></span>
+        <span class="review-time" id="review-time"></span>
+      </h1>
+      <div class="header-actions">
+        <span class="comment-badge"><span id="comment-count">0</span> comments</span>
+        <button id="settings-btn" class="settings-btn">Settings</button>
+        <button id="toggle-view">Inline/Side-by-Side</button>
+        <button id="submit-review">Submit Review</button>
       </div>
-      <div class="sidebar-resizer" id="sidebar-resizer"></div>
     </div>
-    <div class="content">
-      <div id="expand-top-container"></div>
-      <div id="editor-container"></div>
-      <div id="expand-bottom-container"></div>
+    <div class="main">
+      <div class="sidebar" id="sidebar">
+        <div class="sidebar-section">
+          <h2>Files</h2>
+          <div class="stats" id="stats"></div>
+          <ul class="file-list" id="file-list"></ul>
+          <div class="file-list-actions">
+            <button id="show-full-file" class="file-action-btn" style="display: none">
+              📄 Show Full File
+            </button>
+          </div>
+        </div>
+        <div class="sidebar-resizer" id="sidebar-resizer"></div>
+      </div>
+      <div class="content">
+        <div id="expand-top-container"></div>
+        <div id="editor-container"></div>
+        <div id="expand-bottom-container"></div>
+      </div>
     </div>
-  </div>
 
-  <!-- Prefer local Monaco; fall back to CDN if missing -->
-  <script>
-    window.MONACO_VS_BASE = '/assets/vendor/monaco/min/vs';
-    (function() {
-      var s = document.createElement('script');
-      s.src = window.MONACO_VS_BASE + '/loader.js';
-      s.onerror = function() {
-        window.MONACO_VS_BASE = 'https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs';
-        var cdn = document.createElement('script');
-        cdn.src = window.MONACO_VS_BASE + '/loader.js';
-        document.head.appendChild(cdn);
-      };
-      document.head.appendChild(s);
-    })();
-  </script>
-
-  <script>
-    // Toggle for optional debug logging
-    window.DEBUG = false;
-    // Simple performance instrumentation
-    window.Perf = {
-      mark: (name) => { try { performance.mark(name); } catch (e) {} },
-      measure: (name, start, end) => { try { performance.measure(name, { start, end }); } catch (e) {} },
-      recordFileSwitchStart: () => { window.Perf.mark('fileSwitchStart'); },
-      recordFileSwitchEnd: () => { window.Perf.mark('fileSwitchEnd'); window.Perf.measure('fileSwitch', 'fileSwitchStart', 'fileSwitchEnd'); },
-      recordAppInitStart: () => { window.Perf.mark('appInitStart'); },
-      recordAppInitEnd: () => { window.Perf.mark('appInitEnd'); window.Perf.measure('appInit', 'appInitStart', 'appInitEnd'); },
-      getMetrics: () => {
-        const toDurations = (name) => (performance.getEntriesByName(name) || []).map(e => e.duration);
-        return {
-          fileSwitch: toDurations('fileSwitch'),
-          appInit: toDurations('appInit'),
+    <!-- Prefer local Monaco; fall back to CDN if missing -->
+    <script>
+      window.MONACO_VS_BASE = '/assets/vendor/monaco/min/vs';
+      (function () {
+        var s = document.createElement('script');
+        s.src = window.MONACO_VS_BASE + '/loader.js';
+        s.onerror = function () {
+          window.MONACO_VS_BASE = 'https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs';
+          var cdn = document.createElement('script');
+          cdn.src = window.MONACO_VS_BASE + '/loader.js';
+          document.head.appendChild(cdn);
         };
-      },
-      clear: () => { try { performance.clearMarks(); performance.clearMeasures(); } catch (e) {} }
-    };
-    // Mock diff data
-    // Comment Manager
-    class CommentManager {
-      constructor() {
-        this.comments = [];
-        this.listeners = [];
-      }
+        s.onload = function () {
+          if (window.DEBUG) console.log('[app] monaco loader loaded from', s.src);
+        };
+        document.head.appendChild(s);
+      })();
+    </script>
 
-      addComment(comment) {
-        this.comments.push(comment);
-        this.notifyListeners();
-      }
+    <script>
+      // Global onerror (only when DEBUG) to capture filename/line for syntax errors
+      try {
+        if (window.DEBUG)
+          window.addEventListener('error', function (e) {
+            try {
+              console.log('[onerror]', e.message, e.filename, e.lineno, e.colno);
+            } catch (_) {}
+          });
+      } catch (_) {}
+      // Toggle for optional debug logging (off by default in dist)
+      window.DEBUG = false;
+      // App readiness flag (set true when first diff is rendered)
+      window.__APP_READY = false;
+      // Simple performance instrumentation
+      window.Perf = {
+        mark: (name) => {
+          performance.mark(name);
+        },
+        measure: (name, start, end) => {
+          performance.measure(name, { start, end });
+        },
+        recordFileSwitchStart: () => {
+          performance.mark('fileSwitchStart');
+        },
+        recordFileSwitchEnd: () => {
+          performance.mark('fileSwitchEnd');
+          performance.measure('fileSwitch', { start: 'fileSwitchStart', end: 'fileSwitchEnd' });
+        },
+        recordAppInitStart: () => {
+          performance.mark('appInitStart');
+        },
+        recordAppInitEnd: () => {
+          performance.mark('appInitEnd');
+          performance.measure('appInit', { start: 'appInitStart', end: 'appInitEnd' });
+        },
+        getMetrics: () => {
+          const toDurations = (name) =>
+            (performance.getEntriesByName(name) || []).map((e) => e.duration);
+          return { fileSwitch: toDurations('fileSwitch'), appInit: toDurations('appInit') };
+        },
+        clear: () => {
+          performance.clearMarks();
+          performance.clearMeasures();
+        },
+      };
 
-      removeComment(index) {
-        this.comments.splice(index, 1);
-        this.notifyListeners();
-      }
+      // Simple theme → accent mapping (use theme’s intended accent color)
+      const UI_THEME_ACCENTS_HEX = {
+        'firefox-devtools-dark': '#ff7de9',
+        'firefox-devtools-light': '#d92bb4',
+        'github-dark': '#58a6ff',
+        'github-light': '#0969da',
+        'solarized-dark': '#268bd2',
+        'solarized-light': '#268bd2',
+        'vs-dark': '#007acc',
+        'hc-black': '#007acc',
+        vs: '#007acc',
+        'hc-light': '#007acc',
+      };
+      try {
+        window.UIThemeAccentsHex = UI_THEME_ACCENTS_HEX;
+      } catch {}
 
-      findComment(file, line, side) {
-        return this.comments.findIndex(c =>
-          c.file === file && c.start_line === line && c.side === side
-        );
+      function markAppReady() {
+        if (window.__APP_READY) return;
+        const hasLines =
+          document.querySelectorAll('.monaco-editor .view-lines .view-line').length > 0;
+        if (hasLines) {
+          window.__APP_READY = true;
+          if (window.DEBUG) console.log('[app] APP_READY: diff lines visible');
+          return;
+        }
+        const container = document.querySelector('.monaco-editor .view-lines');
+        if (container && !window.__APP_READY) {
+          if (window.DEBUG) console.log('[app] Waiting for first view-line via MutationObserver');
+          const obs = new MutationObserver(() => {
+            if (document.querySelectorAll('.monaco-editor .view-lines .view-line').length > 0) {
+              window.__APP_READY = true;
+              if (window.DEBUG) console.log('[app] APP_READY: observer saw first line');
+              obs.disconnect();
+            }
+          });
+          obs.observe(container, { childList: true, subtree: true });
+        }
       }
+      // Mock diff data
+      // Comment Manager
+      class CommentManager {
+        constructor() {
+          this.comments = [];
+          this.listeners = [];
+        }
 
-      updateComment(index, newBody) {
-        if (index >= 0 && index < this.comments.length) {
-          this.comments[index].body = newBody;
+        addComment(comment) {
+          this.comments.push(comment);
           this.notifyListeners();
         }
+
+        removeComment(index) {
+          this.comments.splice(index, 1);
+          this.notifyListeners();
+        }
+
+        findComment(file, line, side) {
+          return this.comments.findIndex(
+            (c) => c.file === file && c.start_line === line && c.side === side,
+          );
+        }
+
+        updateComment(index, newBody) {
+          if (index >= 0 && index < this.comments.length) {
+            this.comments[index].body = newBody;
+            this.notifyListeners();
+          }
+        }
+
+        getComments() {
+          return [...this.comments];
+        }
+
+        getCommentsForFile(file) {
+          return this.comments.filter((c) => c.file === file);
+        }
+
+        onChange(listener) {
+          this.listeners.push(listener);
+        }
+
+        notifyListeners() {
+          this.listeners.forEach((l) => l());
+        }
       }
 
-      getComments() {
-        return [...this.comments];
-      }
+      // Keyboard shortcuts configuration
+      const KEYBOARD_SHORTCUTS = [
+        { keys: ['Shift+ArrowDown', 'Shift+J'], action: 'nextFile', description: 'Next file' },
+        {
+          keys: ['Shift+ArrowUp', 'Shift+K'],
+          action: 'previousFile',
+          description: 'Previous file',
+        },
+        { keys: ['ArrowDown', 'j'], action: 'nextHunk', description: 'Next hunk' },
+        { keys: ['ArrowUp', 'k'], action: 'previousHunk', description: 'Previous hunk' },
+        { keys: ['Enter'], action: 'openComment', description: 'Comment on current hunk' },
+        { keys: ['Mod+Shift+Enter'], action: 'submitReview', description: 'Submit review' },
+        { keys: ['?'], action: 'showHelp', description: 'Show keyboard shortcuts' },
+      ];
 
-      getCommentsForFile(file) {
-        return this.comments.filter(c => c.file === file);
-      }
+      // Monaco App
+      class MonacoApp {
+        constructor() {
+          this.commentManager = new CommentManager();
+          this.currentFileIndex = 0;
+          this.editor = null;
+          this.isInline = false;
+          this.modifiedDecorations = [];
+          this.originalDecorations = [];
+          this.focusedHunkDecorations = [];
+          this.currentWidget = null;
+          this.diff = null;
+          this.files = [];
+          this.stats = null;
+          this.fileCache = {};
+          this.fileRanges = {}; // Track visible ranges per file
+          this.fileHunks = {}; // Track hunk start lines per file: { [path]: number[] }
+          this.currentHunkIndex = {}; // Track current hunk index per file
+          this.config = null; // User config from server
+          this.originalModel = null;
+          this.modifiedModel = null;
+          this.scrollListenerDispose = null;
 
-      onChange(listener) {
-        this.listeners.push(listener);
-      }
+          this.commentManager.onChange(() => this.updateUI());
+        }
 
-      notifyListeners() {
-        this.listeners.forEach(l => l());
-      }
-    }
-
-    // Keyboard shortcuts configuration
-    const KEYBOARD_SHORTCUTS = [
-      { keys: ['Shift+ArrowDown', 'Shift+J'], action: 'nextFile', description: 'Next file' },
-      { keys: ['Shift+ArrowUp', 'Shift+K'], action: 'previousFile', description: 'Previous file' },
-      { keys: ['ArrowDown', 'j'], action: 'nextHunk', description: 'Next hunk' },
-      { keys: ['ArrowUp', 'k'], action: 'previousHunk', description: 'Previous hunk' },
-      { keys: ['Enter'], action: 'openComment', description: 'Comment on current hunk' },
-      { keys: ['Mod+Shift+Enter'], action: 'submitReview', description: 'Submit review' },
-      { keys: ['?'], action: 'showHelp', description: 'Show keyboard shortcuts' }
-    ];
-
-    // Monaco App
-    class MonacoApp {
-      constructor() {
-        this.commentManager = new CommentManager();
-        this.currentFileIndex = 0;
-        this.editor = null;
-        this.isInline = false;
-        this.modifiedDecorations = [];
-        this.originalDecorations = [];
-        this.focusedHunkDecorations = [];
-        this.currentWidget = null;
-        this.diff = null;
-        this.files = [];
-        this.stats = null;
-        this.fileCache = {};
-        this.fileRanges = {}; // Track visible ranges per file
-        this.fileHunks = {}; // Track hunk start lines per file: { [path]: number[] }
-        this.currentHunkIndex = {}; // Track current hunk index per file
-        this.config = null; // User config from server
-        this.originalModel = null;
-        this.modifiedModel = null;
-        this.scrollListenerDispose = null;
-
-        this.commentManager.onChange(() => this.updateUI());
-      }
-
-      async init() {
-        window.Perf.recordAppInitStart();
-        // Load config, context, and diff data from API
-        const [configResponse, contextResponse, diffResponse] = await Promise.all([
-          fetch('/api/config'),
-          fetch('/api/context'),
-          fetch('/api/diff')
-        ]);
-
-        this.config = await configResponse.json();
-        this.context = await contextResponse.json();
-        const diffData = await diffResponse.json();
-        this.files = diffData.files;
-        this.stats = diffData.stats;
-
-        // Apply split view setting from config
-        this.isInline = !this.config.split_view;
-
-        require.config({ paths: { vs: window.MONACO_VS_BASE || '/assets/vendor/monaco/min/vs' } });
-
-        return new Promise((resolve) => {
-          require(['vs/editor/editor.main'], () => {
-            this.defineCustomThemes();
-            this.applyThemeToUI(this.config.color_scheme || 'vs-dark');
-            this.setupUI();
-            this.renderFileList();
-            this.loadFile(0);
-            // Set review timestamp
-            document.getElementById('review-time').textContent = new Date().toLocaleString();
-            // Set project info
-            this.renderProjectInfo();
-            // Wait for paint and record init end
-            requestAnimationFrame(() => requestAnimationFrame(() => window.Perf.recordAppInitEnd()));
-            resolve();
-          });
-        });
-      }
-
-      async convertHunksToDiff(diffData) {
-        // Convert hunk-based diff to full file content format for Monaco
-        const files = await Promise.all(diffData.files.map(async (file) => {
-          // Get the actual file content to properly pad and align
-          const [oldResponse, newResponse] = await Promise.all([
-            fetch(`/api/file?path=${encodeURIComponent(file.path)}&side=old`),
-            fetch(`/api/file?path=${encodeURIComponent(file.path)}&side=new`)
+        async init() {
+          if (window.DEBUG) console.log('[app] init: start');
+          window.Perf.recordAppInitStart();
+          // Load config, context, and diff data from API
+          const t0 = performance.now();
+          const [configResponse, contextResponse, diffResponse] = await Promise.all([
+            fetch('/api/config')
+              .then((r) => {
+                if (window.DEBUG) console.log('[net] /api/config', r.status);
+                return r;
+              })
+              .catch((e) => {
+                console.error('[net] /api/config failed', e);
+                throw e;
+              }),
+            fetch('/api/context')
+              .then((r) => {
+                if (window.DEBUG) console.log('[net] /api/context', r.status);
+                return r;
+              })
+              .catch((e) => {
+                console.error('[net] /api/context failed', e);
+                throw e;
+              }),
+            fetch('/api/diff')
+              .then((r) => {
+                if (window.DEBUG) console.log('[net] /api/diff', r.status);
+                return r;
+              })
+              .catch((e) => {
+                console.error('[net] /api/diff failed', e);
+                throw e;
+              }),
           ]);
+          if (window.DEBUG)
+            console.log(
+              '[app] init: responses received in',
+              Math.round(performance.now() - t0),
+              'ms',
+            );
+          this.config = await configResponse.json();
+          this.context = await contextResponse.json();
+          const diffData = await diffResponse.json();
+          if (window.DEBUG) console.log('[app] init: parsed config/context/diff');
+          this.files = diffData.files;
+          this.stats = diffData.stats;
 
-          let oldData = { content: '' };
-          let newData = { content: '' };
+          // Apply split view setting from config
+          this.isInline = !this.config.split_view;
+
+          // Wait for AMD loader to be ready
+          await new Promise((resolve, reject) => {
+            const start = performance.now();
+            const timer = setInterval(() => {
+              if (window.require) {
+                clearInterval(timer);
+                resolve(null);
+              }
+              if (performance.now() - start > 5000) {
+                clearInterval(timer);
+                reject(new Error('AMD loader not ready'));
+              }
+            }, 25);
+          });
+          window.require.config({
+            paths: { vs: window.MONACO_VS_BASE || '/assets/vendor/monaco/min/vs' },
+          });
+
+          // Pre-apply theme variables to avoid flash while Monaco loads
           try {
-            if (oldResponse.ok) oldData = await oldResponse.json();
-          } catch (e) { /* ignore */ }
-          try {
-            if (newResponse.ok) newData = await newResponse.json();
-          } catch (e) { /* ignore */ }
+            this.applyThemeToUI(this.config.color_scheme || 'vs-dark');
+            document.documentElement.setAttribute('data-ui-ready', '1');
+          } catch {}
 
-          const oldAllLines = oldData.content.split('\n');
-          const newAllLines = newData.content.split('\n');
-
-          // Find the range covered by hunks
-          let oldLineStart = Infinity;
-          let oldLineEnd = 0;
-          let newLineStart = Infinity;
-          let newLineEnd = 0;
-
-          // Track hunk ranges for keyboard navigation
-          const hunkRanges = [];
-
-          file.hunks.forEach(hunk => {
-            // Store the first and last new-side lines of this hunk
-            const newLines = hunk.lines.filter(l => l.new_line).map(l => l.new_line);
-            if (newLines.length > 0) {
-              hunkRanges.push({
-                start: Math.min(...newLines),
-                end: Math.max(...newLines)
+          return new Promise((resolve) => {
+            window.require(['vs/editor/editor.main'], () => {
+              if (window.DEBUG) console.log('[app] monaco loaded');
+              this.defineCustomThemes();
+              this.applyThemeToUI(this.config.color_scheme || 'vs-dark');
+              // Accent is set from UI_THEME_ACCENTS_HEX; keep logic simple and deterministic
+              try {
+                document.documentElement.setAttribute('data-ui-ready', '1');
+              } catch {}
+              // Set accent directly from our theme map when available (fast, deterministic)
+              try {
+                const hexMap = window.UIThemeAccentsHex || {};
+                const hex = hexMap[this.config.color_scheme || 'vs-dark'];
+                if (hex) {
+                  const norm = document.createElement('div');
+                  norm.style.color = hex;
+                  document.body.appendChild(norm);
+                  try {
+                    const rgb = getComputedStyle(norm).color;
+                    if (rgb) document.documentElement.style.setProperty('--accent-color', rgb);
+                  } finally {
+                    norm.remove();
+                  }
+                  try {
+                    window.__ACCENT_READY = true;
+                  } catch {}
+                }
+              } catch {}
+              this.setupUI();
+              this.renderFileList();
+              if (window.DEBUG) console.log('[app] calling loadFile(0)');
+              Promise.resolve(this.loadFile(0)).then(() => {
+                // Set review timestamp
+                document.getElementById('review-time').textContent = new Date().toLocaleString();
+                // Set project info
+                this.renderProjectInfo();
+                // Wait for paint and record init end
+                requestAnimationFrame(() =>
+                  requestAnimationFrame(() => {
+                    window.Perf.recordAppInitEnd();
+                    // Minimal perf log (always on): app init duration
+                    try {
+                      const e = performance.getEntriesByName('appInit');
+                      const d = e && e.length ? e[e.length - 1].duration : null;
+                      if (d != null) console.log('[perf] appInit ms:', Math.round(d));
+                    } catch {}
+                    markAppReady();
+                  }),
+                );
+                resolve();
               });
-            }
-
-            hunk.lines.forEach(line => {
-              if (line.old_line) {
-                oldLineStart = Math.min(oldLineStart, line.old_line);
-                oldLineEnd = Math.max(oldLineEnd, line.old_line);
-              }
-              if (line.new_line) {
-                newLineStart = Math.min(newLineStart, line.new_line);
-                newLineEnd = Math.max(newLineEnd, line.new_line);
-              }
             });
           });
+        }
 
-          // Store hunk ranges
-          this.fileHunks[file.path] = hunkRanges;
-          this.currentHunkIndex[file.path] = 0;
+        async convertHunksToDiff(diffData) {
+          // Convert hunk-based diff to full file content format for Monaco
+          const files = await Promise.all(
+            diffData.files.map(async (file) => {
+              // Get the actual file content to properly pad and align
+              const f0 = performance.now();
+              const [oldResponse, newResponse] = await Promise.all([
+                fetch(`/api/file?path=${encodeURIComponent(file.path)}&side=old`)
+                  .then((r) => {
+                    if (window.DEBUG) console.log('[net] /api/file old', file.path, r.status);
+                    return r;
+                  })
+                  .catch((e) => {
+                    console.error('[net] /api/file old failed', file.path, e);
+                    throw e;
+                  }),
+                fetch(`/api/file?path=${encodeURIComponent(file.path)}&side=new`)
+                  .then((r) => {
+                    if (window.DEBUG) console.log('[net] /api/file new', file.path, r.status);
+                    return r;
+                  })
+                  .catch((e) => {
+                    console.error('[net] /api/file new failed', file.path, e);
+                    throw e;
+                  }),
+              ]);
+              if (window.DEBUG)
+                console.log(
+                  '[net] /api/file pair completed for',
+                  file.path,
+                  Math.round(performance.now() - f0) + 'ms',
+                );
 
-          // Extract just the visible range from the actual files
-          const oldContent = oldAllLines.slice(oldLineStart - 1, oldLineEnd).join('\n');
-          const newContent = newAllLines.slice(newLineStart - 1, newLineEnd).join('\n');
+              let oldData = { content: '' };
+              let newData = { content: '' };
+              try {
+                if (oldResponse.ok) oldData = await oldResponse.json();
+              } catch (e) {
+                /* ignore */
+              }
+              try {
+                if (newResponse.ok) newData = await newResponse.json();
+              } catch (e) {
+                /* ignore */
+              }
 
-          // Track the visible range for this file
-          this.fileRanges[file.path] = {
-            old: { start: oldLineStart, end: oldLineEnd },
-            new: { start: newLineStart, end: newLineEnd },
-            hasFullContent: false,
-            totalOldLines: oldAllLines.length,
-            totalNewLines: newAllLines.length
-          };
+              const oldAllLines = oldData.content.split('\n');
+              const newAllLines = newData.content.split('\n');
+
+              // Find the range covered by hunks
+              let oldLineStart = Infinity;
+              let oldLineEnd = 0;
+              let newLineStart = Infinity;
+              let newLineEnd = 0;
+
+              // Track hunk ranges for keyboard navigation
+              const hunkRanges = [];
+
+              file.hunks.forEach((hunk) => {
+                // Store the first and last new-side lines of this hunk
+                const newLines = hunk.lines.filter((l) => l.new_line).map((l) => l.new_line);
+                if (newLines.length > 0) {
+                  hunkRanges.push({
+                    start: Math.min(...newLines),
+                    end: Math.max(...newLines),
+                  });
+                }
+
+                hunk.lines.forEach((line) => {
+                  if (line.old_line) {
+                    oldLineStart = Math.min(oldLineStart, line.old_line);
+                    oldLineEnd = Math.max(oldLineEnd, line.old_line);
+                  }
+                  if (line.new_line) {
+                    newLineStart = Math.min(newLineStart, line.new_line);
+                    newLineEnd = Math.max(newLineEnd, line.new_line);
+                  }
+                });
+              });
+
+              // Store hunk ranges
+              this.fileHunks[file.path] = hunkRanges;
+              this.currentHunkIndex[file.path] = 0;
+
+              // Extract just the visible range from the actual files
+              const oldContent = oldAllLines.slice(oldLineStart - 1, oldLineEnd).join('\n');
+              const newContent = newAllLines.slice(newLineStart - 1, newLineEnd).join('\n');
+
+              // Track the visible range for this file
+              this.fileRanges[file.path] = {
+                old: { start: oldLineStart, end: oldLineEnd },
+                new: { start: newLineStart, end: newLineEnd },
+                hasFullContent: false,
+                totalOldLines: oldAllLines.length,
+                totalNewLines: newAllLines.length,
+              };
+
+              return {
+                path: file.path,
+                old_path: file.old_path,
+                status: file.status,
+                old_content: oldContent,
+                new_content: newContent,
+              };
+            }),
+          );
 
           return {
-            path: file.path,
-            old_path: file.old_path,
-            status: file.status,
-            old_content: oldContent,
-            new_content: newContent
-          };
-        }));
-
-        return {
-          files,
-          stats: diffData.stats
-        };
-      }
-
-      applyThemeToUI(themeName) {
-        // Extract colors from Monaco theme and apply to UI
-        const isDark = !themeName.includes('light') && themeName !== 'vs';
-
-        let bgPrimary, bgSecondary, bgElevated, borderColor, textPrimary, textSecondary, accentColor;
-
-        if (isDark) {
-          // Dark theme colors
-          if (themeName === 'github-dark') {
-            bgPrimary = '#0d1117';
-            bgSecondary = '#161b22';
-            bgElevated = '#21262d';
-            borderColor = '#30363d';
-            textPrimary = '#c9d1d9';
-            textSecondary = '#8b949e';
-            accentColor = '#58a6ff';
-          } else if (themeName === 'firefox-devtools-dark') {
-            bgPrimary = '#0c0c0d';
-            bgSecondary = '#1c1b22';
-            bgElevated = '#2b2a33';
-            borderColor = '#38373f';
-            textPrimary = '#b1b1b3';
-            textSecondary = '#8f8f9d';
-            accentColor = '#ff9400';
-          } else if (themeName === 'solarized-dark') {
-            bgPrimary = '#002b36';
-            bgSecondary = '#073642';
-            bgElevated = '#0d4552';
-            borderColor = '#11505d';
-            textPrimary = '#839496';
-            textSecondary = '#586e75';
-            accentColor = '#268bd2';
-          } else {
-            // Default dark (vs-dark, hc-black)
-            bgPrimary = '#1e1e1e';
-            bgSecondary = '#252526';
-            bgElevated = '#2d2d30';
-            borderColor = '#3e3e42';
-            textPrimary = '#cccccc';
-            textSecondary = '#858585';
-            accentColor = '#007acc';
-          }
-        } else {
-          // Light theme colors
-          if (themeName === 'github-light') {
-            bgPrimary = '#ffffff';
-            bgSecondary = '#f6f8fa';
-            bgElevated = '#ffffff';
-            borderColor = '#d0d7de';
-            textPrimary = '#24292f';
-            textSecondary = '#57606a';
-            accentColor = '#0969da';
-          } else if (themeName === 'firefox-devtools-light') {
-            bgPrimary = '#ffffff';
-            bgSecondary = '#f5f5f5';
-            bgElevated = '#ffffff';
-            borderColor = '#e0e0e0';
-            textPrimary = '#222222';
-            textSecondary = '#737373';
-            accentColor = '#0074e8';
-          } else if (themeName === 'solarized-light') {
-            bgPrimary = '#fdf6e3';
-            bgSecondary = '#eee8d5';
-            bgElevated = '#fdf6e3';
-            borderColor = '#d9d2c2';
-            textPrimary = '#657b83';
-            textSecondary = '#93a1a1';
-            accentColor = '#268bd2';
-          } else {
-            // Default light (vs, hc-light)
-            bgPrimary = '#ffffff';
-            bgSecondary = '#f3f3f3';
-            bgElevated = '#ffffff';
-            borderColor = '#cccccc';
-            textPrimary = '#000000';
-            textSecondary = '#6e6e6e';
-            accentColor = '#007acc';
-          }
-        }
-
-        // Apply CSS variables
-        document.documentElement.style.setProperty('--bg-primary', bgPrimary);
-        document.documentElement.style.setProperty('--bg-secondary', bgSecondary);
-        document.documentElement.style.setProperty('--bg-elevated', bgElevated);
-        document.documentElement.style.setProperty('--border-color', borderColor);
-        document.documentElement.style.setProperty('--text-primary', textPrimary);
-        document.documentElement.style.setProperty('--text-secondary', textSecondary);
-        document.documentElement.style.setProperty('--accent-color', accentColor);
-      }
-
-      defineCustomThemes() {
-        // Solarized Dark
-        monaco.editor.defineTheme('solarized-dark', {
-          base: 'vs-dark',
-          inherit: true,
-          rules: [
-            { token: 'comment', foreground: '586e75', fontStyle: 'italic' },
-            { token: 'keyword', foreground: '859900' },
-            { token: 'number', foreground: 'd33682' },
-            { token: 'string', foreground: '2aa198' },
-            { token: 'type', foreground: 'b58900' },
-            { token: 'class', foreground: 'b58900' },
-            { token: 'function', foreground: '268bd2' },
-            { token: 'variable', foreground: '268bd2' },
-            { token: 'constant', foreground: 'd33682' },
-          ],
-          colors: {
-            'editor.background': '#002b36',
-            'editor.foreground': '#839496',
-            'editor.lineHighlightBackground': '#073642',
-            'editorCursor.foreground': '#839496',
-            'editor.selectionBackground': '#073642',
-            'editor.inactiveSelectionBackground': '#073642',
-          }
-        });
-
-        // Solarized Light
-        monaco.editor.defineTheme('solarized-light', {
-          base: 'vs',
-          inherit: true,
-          rules: [
-            { token: 'comment', foreground: '93a1a1', fontStyle: 'italic' },
-            { token: 'keyword', foreground: '859900' },
-            { token: 'number', foreground: 'd33682' },
-            { token: 'string', foreground: '2aa198' },
-            { token: 'type', foreground: 'b58900' },
-            { token: 'class', foreground: 'b58900' },
-            { token: 'function', foreground: '268bd2' },
-            { token: 'variable', foreground: '268bd2' },
-            { token: 'constant', foreground: 'd33682' },
-          ],
-          colors: {
-            'editor.background': '#fdf6e3',
-            'editor.foreground': '#657b83',
-            'editor.lineHighlightBackground': '#eee8d5',
-            'editorCursor.foreground': '#657b83',
-            'editor.selectionBackground': '#eee8d5',
-            'editor.inactiveSelectionBackground': '#eee8d5',
-          }
-        });
-
-        // Firefox DevTools Dark
-        monaco.editor.defineTheme('firefox-devtools-dark', {
-          base: 'vs-dark',
-          inherit: true,
-          rules: [
-            { token: 'comment', foreground: '5c6773', fontStyle: 'italic' },
-            { token: 'keyword', foreground: 'ff7de9' },
-            { token: 'number', foreground: '75bfff' },
-            { token: 'string', foreground: '86de74' },
-            { token: 'type', foreground: '75bfff' },
-            { token: 'class', foreground: 'ff9400' },
-            { token: 'function', foreground: 'ff9400' },
-            { token: 'variable', foreground: 'b1b1b3' },
-            { token: 'constant', foreground: '75bfff' },
-          ],
-          colors: {
-            'editor.background': '#0c0c0d',
-            'editor.foreground': '#b1b1b3',
-            'editor.lineHighlightBackground': '#1c1b22',
-            'editorCursor.foreground': '#b1b1b3',
-            'editor.selectionBackground': '#2b2a33',
-            'editor.inactiveSelectionBackground': '#1c1b22',
-          }
-        });
-
-        // Firefox DevTools Light
-        monaco.editor.defineTheme('firefox-devtools-light', {
-          base: 'vs',
-          inherit: true,
-          rules: [
-            { token: 'comment', foreground: '737373', fontStyle: 'italic' },
-            { token: 'keyword', foreground: 'd92bb4' },
-            { token: 'number', foreground: '0074e8' },
-            { token: 'string', foreground: '058b00' },
-            { token: 'type', foreground: '0074e8' },
-            { token: 'class', foreground: 'c43500' },
-            { token: 'function', foreground: 'c43500' },
-            { token: 'variable', foreground: '222222' },
-            { token: 'constant', foreground: '0074e8' },
-          ],
-          colors: {
-            'editor.background': '#ffffff',
-            'editor.foreground': '#222222',
-            'editor.lineHighlightBackground': '#f5f5f5',
-            'editorCursor.foreground': '#222222',
-            'editor.selectionBackground': '#e6e6e6',
-            'editor.inactiveSelectionBackground': '#f0f0f0',
-          }
-        });
-
-        // GitHub Dark
-        monaco.editor.defineTheme('github-dark', {
-          base: 'vs-dark',
-          inherit: true,
-          rules: [
-            { token: 'comment', foreground: '8b949e', fontStyle: 'italic' },
-            { token: 'keyword', foreground: 'ff7b72' },
-            { token: 'number', foreground: '79c0ff' },
-            { token: 'string', foreground: 'a5d6ff' },
-            { token: 'type', foreground: 'ffa657' },
-            { token: 'class', foreground: 'ffa657' },
-            { token: 'function', foreground: 'd2a8ff' },
-            { token: 'variable', foreground: 'ffa657' },
-            { token: 'constant', foreground: '79c0ff' },
-          ],
-          colors: {
-            'editor.background': '#0d1117',
-            'editor.foreground': '#c9d1d9',
-            'editor.lineHighlightBackground': '#161b22',
-            'editorCursor.foreground': '#c9d1d9',
-            'editor.selectionBackground': '#1f6feb',
-            'editor.inactiveSelectionBackground': '#1f6feb40',
-          }
-        });
-
-        // GitHub Light
-        monaco.editor.defineTheme('github-light', {
-          base: 'vs',
-          inherit: true,
-          rules: [
-            { token: 'comment', foreground: '6e7781', fontStyle: 'italic' },
-            { token: 'keyword', foreground: 'cf222e' },
-            { token: 'number', foreground: '0550ae' },
-            { token: 'string', foreground: '0a3069' },
-            { token: 'type', foreground: '8250df' },
-            { token: 'class', foreground: '8250df' },
-            { token: 'function', foreground: '8250df' },
-            { token: 'variable', foreground: '953800' },
-            { token: 'constant', foreground: '0550ae' },
-          ],
-          colors: {
-            'editor.background': '#ffffff',
-            'editor.foreground': '#24292f',
-            'editor.lineHighlightBackground': '#f6f8fa',
-            'editorCursor.foreground': '#24292f',
-            'editor.selectionBackground': '#0969da30',
-            'editor.inactiveSelectionBackground': '#0969da20',
-          }
-        });
-      }
-
-      renderProjectInfo() {
-        const projectInfo = document.getElementById('project-info');
-
-        // Get just the directory name from the full path
-        const dirName = this.context.working_directory.split('/').pop() || this.context.working_directory;
-
-        let html = '';
-        if (this.context.title) {
-          html += `<span class="project-info-separator">·</span> <span class="project-info-value">${this.context.title}</span>`;
-        }
-        html += `<span class="project-info-separator">·</span><span class="project-info-value" title="${this.context.working_directory}">${dirName}</span>`;
-
-        if (this.context.git_branch) {
-          html += ` <span class="project-info-separator">·</span> <span class="project-info-value git-branch">${this.context.git_branch}</span>`;
-        }
-
-        projectInfo.innerHTML = html;
-      }
-
-      setupUI() {
-        // File list clicks
-        document.getElementById('file-list').addEventListener('click', (e) => {
-          const li = e.target.closest('li');
-          if (li) {
-            const index = parseInt(li.dataset.index);
-            this.loadFile(index);
-          }
-        });
-
-        // Settings button
-        document.getElementById('settings-btn').addEventListener('click', () => {
-          this.showSettingsModal();
-        });
-
-        // Submit button
-        document.getElementById('submit-review').addEventListener('click', async () => {
-          this.showSubmitConfirmation();
-        });
-
-        // Toggle view
-        document.getElementById('toggle-view').addEventListener('click', () => {
-          this.isInline = !this.isInline;
-          this.loadFile(this.currentFileIndex);
-        });
-
-        // Stats
-        document.getElementById('stats').textContent =
-          `${this.stats.files_changed} files, +${this.stats.additions} -${this.stats.deletions}`;
-
-        // Sidebar resizer
-        this.setupSidebarResizer();
-
-        // Keyboard shortcuts
-        this.setupKeyboardShortcuts();
-      }
-
-      setupKeyboardShortcuts() {
-        document.addEventListener('keydown', (e) => {
-          // Only handle shortcuts when no comment dialog is open (except for help)
-          if (this.currentWidget !== null && e.key !== '?') return;
-
-          // Don't handle shortcuts when focused on text input (except for help)
-          const activeElement = document.activeElement;
-          if ((activeElement.tagName === 'TEXTAREA' || activeElement.tagName === 'INPUT') && e.key !== '?') return;
-
-          // Match key event to shortcut
-          const action = this.matchKeyboardShortcut(e);
-          if (!action) return;
-
-          e.preventDefault();
-
-          // Execute action
-          switch (action) {
-            case 'nextFile':
-              this.nextFile();
-              break;
-            case 'previousFile':
-              this.previousFile();
-              break;
-            case 'nextHunk':
-              this.nextHunk();
-              break;
-            case 'previousHunk':
-              this.previousHunk();
-              break;
-            case 'openComment':
-              this.openCommentOnCurrentHunk();
-              break;
-            case 'submitReview':
-              this.showSubmitConfirmation();
-              break;
-            case 'showHelp':
-              this.showKeyboardHelp();
-              break;
-          }
-        });
-      }
-
-      matchKeyboardShortcut(e) {
-        const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
-        const modKey = isMac ? e.metaKey : e.ctrlKey;
-
-        for (const shortcut of KEYBOARD_SHORTCUTS) {
-          for (const keyCombo of shortcut.keys) {
-            if (this.matchesKeyCombo(e, keyCombo, modKey)) {
-              return shortcut.action;
-            }
-          }
-        }
-        return null;
-      }
-
-      matchesKeyCombo(e, combo, modKey) {
-        const parts = combo.split('+');
-        let needsMod = false;
-        let needsShift = false;
-        let key = '';
-
-        for (const part of parts) {
-          if (part === 'Mod') {
-            needsMod = true;
-          } else if (part === 'Shift') {
-            needsShift = true;
-          } else {
-            key = part;
-          }
-        }
-
-        // Check Mod key
-        if (needsMod !== modKey) return false;
-
-        // Special handling for characters that naturally require Shift (like ?)
-        // These should match regardless of Shift state
-        const specialChars = ['?', '!', '@', '#', '$', '%', '^', '&', '*', '(', ')'];
-        const isSpecialChar = specialChars.includes(key);
-
-        // Check Shift key (but ignore for special chars)
-        if (!isSpecialChar && needsShift !== e.shiftKey) return false;
-
-        // For letter keys with Shift, the key combo will have uppercase letter
-        // e.g., "Shift+J" means e.key="J" with shift, "j" means e.key="j" without shift
-        return e.key === key;
-      }
-
-      nextFile() {
-        if (this.currentFileIndex < this.diff.files.length - 1) {
-          this.loadFile(this.currentFileIndex + 1);
-        }
-      }
-
-      previousFile() {
-        if (this.currentFileIndex > 0) {
-          this.loadFile(this.currentFileIndex - 1);
-        }
-      }
-
-      nextHunk() {
-        const file = this.diff.files[this.currentFileIndex];
-        const hunks = this.fileHunks[file.path];
-        if (!hunks || hunks.length === 0) return;
-
-        const currentIdx = this.currentHunkIndex[file.path] || 0;
-        const nextIdx = Math.min(currentIdx + 1, hunks.length - 1);
-        this.currentHunkIndex[file.path] = nextIdx;
-        this.jumpToHunk(nextIdx);
-      }
-
-      previousHunk() {
-        const file = this.diff.files[this.currentFileIndex];
-        const hunks = this.fileHunks[file.path];
-        if (!hunks || hunks.length === 0) return;
-
-        const currentIdx = this.currentHunkIndex[file.path] || 0;
-        const prevIdx = Math.max(currentIdx - 1, 0);
-        this.currentHunkIndex[file.path] = prevIdx;
-        this.jumpToHunk(prevIdx);
-      }
-
-      jumpToHunk(hunkIndex) {
-        if (!this.editor) return;
-
-        const file = this.diff.files[this.currentFileIndex];
-        const hunks = this.fileHunks[file.path];
-        if (!hunks || hunkIndex >= hunks.length) return;
-
-        const hunkRange = hunks[hunkIndex];
-        const range = this.fileRanges[file.path];
-        const offset = range && !range.hasFullContent ? range.new.start - 1 : 0;
-        const monacoStartLine = hunkRange.start - offset;
-        const monacoEndLine = hunkRange.end - offset;
-
-        const modifiedEditor = this.editor.getModifiedEditor();
-        modifiedEditor.revealLineInCenter(monacoStartLine);
-
-        // Highlight the focused hunk
-        this.highlightFocusedHunk(monacoStartLine, monacoEndLine);
-      }
-
-      highlightFocusedHunk(startLine, endLine) {
-        if (!this.editor) return;
-
-        const modifiedEditor = this.editor.getModifiedEditor();
-
-        // Create decorations for the focused hunk
-        const decorations = [];
-        for (let line = startLine; line <= endLine; line++) {
-          decorations.push({
-            range: new monaco.Range(line, 1, line, 1),
-            options: {
-              isWholeLine: true,
-              className: 'focused-hunk-line'
-            }
-          });
-        }
-
-        // Update decorations
-        this.focusedHunkDecorations = modifiedEditor.deltaDecorations(
-          this.focusedHunkDecorations || [],
-          decorations
-        );
-      }
-
-      openCommentOnCurrentHunk() {
-        if (!this.editor) return;
-
-        const file = this.diff.files[this.currentFileIndex];
-        const hunks = this.fileHunks[file.path];
-        if (!hunks || hunks.length === 0) return;
-
-        const currentIdx = this.currentHunkIndex[file.path] || 0;
-        const hunkRange = hunks[currentIdx];
-        const fileLineNumber = hunkRange.start;
-        const range = this.fileRanges[file.path];
-        const offset = range && !range.hasFullContent ? range.new.start - 1 : 0;
-        const monacoLine = fileLineNumber - offset;
-
-        this.showCommentDialog(file.path, fileLineNumber, monacoLine, 'new');
-      }
-
-      setupSidebarResizer() {
-        const sidebar = document.getElementById('sidebar');
-        const resizer = document.getElementById('sidebar-resizer');
-        let isResizing = false;
-
-        resizer.addEventListener('mousedown', (e) => {
-          isResizing = true;
-          resizer.classList.add('dragging');
-          document.body.style.cursor = 'ew-resize';
-          document.body.style.userSelect = 'none';
-          e.preventDefault();
-        });
-
-        document.addEventListener('mousemove', (e) => {
-          if (!isResizing) return;
-          const newWidth = e.clientX;
-          if (newWidth >= 150 && newWidth <= 600) {
-            sidebar.style.width = newWidth + 'px';
-          }
-        });
-
-        document.addEventListener('mouseup', () => {
-          if (isResizing) {
-            isResizing = false;
-            resizer.classList.remove('dragging');
-            document.body.style.cursor = '';
-            document.body.style.userSelect = '';
-          }
-        });
-      }
-
-      renderFileList() {
-        const list = document.getElementById('file-list');
-        list.innerHTML = '';
-
-        this.diff.files.forEach((file, index) => {
-          const li = document.createElement('li');
-          li.dataset.index = index;
-          li.className = index === this.currentFileIndex ? 'active' : '';
-
-          const name = document.createElement('span');
-          // Display renames clearly as "old.txt → new.txt"
-          if (file.status === 'renamed' && file.old_path) {
-            name.textContent = `${file.old_path} → ${file.path}`;
-          } else {
-            name.textContent = file.path;
-          }
-
-          const status = document.createElement('span');
-          status.className = `file-status ${file.status}`;
-          status.textContent = file.status[0].toUpperCase();
-
-          li.appendChild(name);
-          li.appendChild(status);
-          list.appendChild(li);
-        });
-      }
-
-      async loadFile(index) {
-        window.Perf.recordFileSwitchStart();
-        this.currentFileIndex = index;
-        const file = this.files[index];
-
-        // Update show full file button
-        const showFullBtn = document.getElementById('show-full-file');
-        let range = this.fileRanges[file.path];
-        if (!range) {
-          // Initialize range and hunk ranges from metadata
-          let oldLineStart = Infinity, oldLineEnd = 0, newLineStart = Infinity, newLineEnd = 0;
-          const hunkRanges = [];
-          (file.hunks || []).forEach(hunk => {
-            const newLines = hunk.lines.filter(l => l.new_line).map(l => l.new_line);
-            if (newLines.length > 0) {
-              hunkRanges.push({ start: Math.min(...newLines), end: Math.max(...newLines) });
-            }
-            hunk.lines.forEach(line => {
-              if (line.old_line) { oldLineStart = Math.min(oldLineStart, line.old_line); oldLineEnd = Math.max(oldLineEnd, line.old_line); }
-              if (line.new_line) { newLineStart = Math.min(newLineStart, line.new_line); newLineEnd = Math.max(newLineEnd, line.new_line); }
-            });
-          });
-          this.fileHunks[file.path] = hunkRanges;
-          this.currentHunkIndex[file.path] = 0;
-          range = this.fileRanges[file.path] = {
-            old: { start: oldLineStart, end: oldLineEnd },
-            new: { start: newLineStart, end: newLineEnd },
-            hasFullContent: false,
-            totalOldLines: null,
-            totalNewLines: null
+            files,
+            stats: diffData.stats,
           };
         }
-        if (range && range.hasFullContent) {
-          showFullBtn.style.display = 'none';
-        } else {
-          showFullBtn.style.display = 'block';
-          showFullBtn.disabled = false;
-          showFullBtn.textContent = `Show Full File`;
-          showFullBtn.onclick = () => this.loadFullFile(index);
+
+        applyThemeToUI(themeName) {
+          // Derive UI colors from the Monaco theme definitions we register locally.
+          const setVar = (k, v) => {
+            if (v) document.documentElement.style.setProperty(k, v);
+          };
+
+          // Accent from theme rules: prefer the 'keyword' token color defined in our theme
+          try {
+            const defs = window.UI_THEME_DEFS || {};
+            const def = defs[themeName];
+            if (def && Array.isArray(def.rules)) {
+              const kw = def.rules.find((r) => r && r.token === 'keyword' && r.foreground);
+              if (kw && kw.foreground) {
+                const hex = '#' + String(kw.foreground).replace(/^#/, '');
+                const norm = document.createElement('div');
+                norm.style.color = hex;
+                document.body.appendChild(norm);
+                try {
+                  setVar('--accent-color', getComputedStyle(norm).color);
+                  window.__ACCENT_READY = true;
+                } finally {
+                  norm.remove();
+                }
+              }
+            }
+          } catch {}
+
+          // If an editor exists, derive surface/text colors from its computed styles
+          const editorEl = document.querySelector('.monaco-editor');
+          if (editorEl) {
+            const cs = getComputedStyle(editorEl);
+            setVar('--bg-primary', cs.backgroundColor);
+            // Derive secondary/elevated as slight variants
+            const overlay = document.querySelector('.monaco-editor .margin') || editorEl;
+            const cs2 = getComputedStyle(overlay);
+            setVar('--bg-secondary', cs2.backgroundColor || cs.backgroundColor);
+            setVar('--bg-elevated', cs2.backgroundColor || cs.backgroundColor);
+            // Text colors: use editor foreground if available else fallback to body
+            const bodyCs = getComputedStyle(document.body);
+            setVar('--text-primary', bodyCs.color);
+            setVar('--text-secondary', ''); // allow CSS to fall back; optional refinement
+          }
         }
 
-        this.renderFileList();
-        this.renderExpandControls();
+        defineCustomThemes() {
+          // Initialize theme defs registry
+          window.UI_THEME_DEFS = window.UI_THEME_DEFS || {};
 
-        // Dispose old models and widget; keep editor instance
-        if (this.originalModel) { try { this.originalModel.dispose(); } catch (e) {} this.originalModel = null; }
-        if (this.modifiedModel) { try { this.modifiedModel.dispose(); } catch (e) {} this.modifiedModel = null; }
-        if (this.currentWidget && this.currentWidgetEditor) {
-          try { this.currentWidgetEditor.removeContentWidget(this.currentWidget); } catch (e) {}
-          this.currentWidget = null;
-          this.currentWidgetEditor = null;
+          // Solarized Dark
+          const solarizedDark = {
+            base: 'vs-dark',
+            inherit: true,
+            rules: [
+              { token: 'comment', foreground: '586e75', fontStyle: 'italic' },
+              { token: 'keyword', foreground: '859900' },
+              { token: 'number', foreground: 'd33682' },
+              { token: 'string', foreground: '2aa198' },
+              { token: 'type', foreground: 'b58900' },
+              { token: 'class', foreground: 'b58900' },
+              { token: 'function', foreground: '268bd2' },
+              { token: 'variable', foreground: '268bd2' },
+              { token: 'constant', foreground: 'd33682' },
+            ],
+            colors: {
+              'editor.background': '#002b36',
+              'editor.foreground': '#839496',
+              'editor.lineHighlightBackground': '#073642',
+              'editorCursor.foreground': '#839496',
+              'editor.selectionBackground': '#073642',
+              'editor.inactiveSelectionBackground': '#073642',
+            },
+          };
+          monaco.editor.defineTheme('solarized-dark', solarizedDark);
+          window.UI_THEME_DEFS['solarized-dark'] = solarizedDark;
+
+          // Solarized Light
+          const solarizedLight = {
+            base: 'vs',
+            inherit: true,
+            rules: [
+              { token: 'comment', foreground: '93a1a1', fontStyle: 'italic' },
+              { token: 'keyword', foreground: '859900' },
+              { token: 'number', foreground: 'd33682' },
+              { token: 'string', foreground: '2aa198' },
+              { token: 'type', foreground: 'b58900' },
+              { token: 'class', foreground: 'b58900' },
+              { token: 'function', foreground: '268bd2' },
+              { token: 'variable', foreground: '268bd2' },
+              { token: 'constant', foreground: 'd33682' },
+            ],
+            colors: {
+              'editor.background': '#fdf6e3',
+              'editor.foreground': '#657b83',
+              'editor.lineHighlightBackground': '#eee8d5',
+              'editorCursor.foreground': '#657b83',
+              'editor.selectionBackground': '#eee8d5',
+              'editor.inactiveSelectionBackground': '#eee8d5',
+            },
+          };
+          monaco.editor.defineTheme('solarized-light', solarizedLight);
+          window.UI_THEME_DEFS['solarized-light'] = solarizedLight;
+
+          // Firefox DevTools Dark
+          const fxDark = {
+            base: 'vs-dark',
+            inherit: true,
+            rules: [
+              { token: 'comment', foreground: '5c6773', fontStyle: 'italic' },
+              { token: 'keyword', foreground: 'ff7de9' },
+              { token: 'number', foreground: '75bfff' },
+              { token: 'string', foreground: '86de74' },
+              { token: 'type', foreground: '75bfff' },
+              { token: 'class', foreground: 'ff9400' },
+              { token: 'function', foreground: 'ff9400' },
+              { token: 'variable', foreground: 'b1b1b3' },
+              { token: 'constant', foreground: '75bfff' },
+            ],
+            colors: {
+              'editor.background': '#0c0c0d',
+              'editor.foreground': '#b1b1b3',
+              'editor.lineHighlightBackground': '#1c1b22',
+              'editorCursor.foreground': '#b1b1b3',
+              'editor.selectionBackground': '#2b2a33',
+              'editor.inactiveSelectionBackground': '#1c1b22',
+            },
+          };
+          monaco.editor.defineTheme('firefox-devtools-dark', fxDark);
+          window.UI_THEME_DEFS['firefox-devtools-dark'] = fxDark;
+
+          // Firefox DevTools Light
+          const fxLight = {
+            base: 'vs',
+            inherit: true,
+            rules: [
+              { token: 'comment', foreground: '737373', fontStyle: 'italic' },
+              { token: 'keyword', foreground: 'd92bb4' },
+              { token: 'number', foreground: '0074e8' },
+              { token: 'string', foreground: '058b00' },
+              { token: 'type', foreground: '0074e8' },
+              { token: 'class', foreground: 'c43500' },
+              { token: 'function', foreground: 'c43500' },
+              { token: 'variable', foreground: '222222' },
+              { token: 'constant', foreground: '0074e8' },
+            ],
+            colors: {
+              'editor.background': '#ffffff',
+              'editor.foreground': '#222222',
+              'editor.lineHighlightBackground': '#f5f5f5',
+              'editorCursor.foreground': '#222222',
+              'editor.selectionBackground': '#e6e6e6',
+              'editor.inactiveSelectionBackground': '#f0f0f0',
+            },
+          };
+          monaco.editor.defineTheme('firefox-devtools-light', fxLight);
+          window.UI_THEME_DEFS['firefox-devtools-light'] = fxLight;
+
+          // GitHub Dark
+          const ghDark = {
+            base: 'vs-dark',
+            inherit: true,
+            rules: [
+              { token: 'comment', foreground: '8b949e', fontStyle: 'italic' },
+              { token: 'keyword', foreground: 'ff7b72' },
+              { token: 'number', foreground: '79c0ff' },
+              { token: 'string', foreground: 'a5d6ff' },
+              { token: 'type', foreground: 'ffa657' },
+              { token: 'class', foreground: 'ffa657' },
+              { token: 'function', foreground: 'd2a8ff' },
+              { token: 'variable', foreground: 'ffa657' },
+              { token: 'constant', foreground: '79c0ff' },
+            ],
+            colors: {
+              'editor.background': '#0d1117',
+              'editor.foreground': '#c9d1d9',
+              'editor.lineHighlightBackground': '#161b22',
+              'editorCursor.foreground': '#c9d1d9',
+              'editor.selectionBackground': '#1f6feb',
+              'editor.inactiveSelectionBackground': '#1f6feb40',
+            },
+          };
+          monaco.editor.defineTheme('github-dark', ghDark);
+          window.UI_THEME_DEFS['github-dark'] = ghDark;
+
+          // GitHub Light
+          const ghLight = {
+            base: 'vs',
+            inherit: true,
+            rules: [
+              { token: 'comment', foreground: '6e7781', fontStyle: 'italic' },
+              { token: 'keyword', foreground: 'cf222e' },
+              { token: 'number', foreground: '0550ae' },
+              { token: 'string', foreground: '0a3069' },
+              { token: 'type', foreground: '8250df' },
+              { token: 'class', foreground: '8250df' },
+              { token: 'function', foreground: '8250df' },
+              { token: 'variable', foreground: '953800' },
+              { token: 'constant', foreground: '0550ae' },
+            ],
+            colors: {
+              'editor.background': '#ffffff',
+              'editor.foreground': '#24292f',
+              'editor.lineHighlightBackground': '#f6f8fa',
+              'editorCursor.foreground': '#24292f',
+              'editor.selectionBackground': '#0969da30',
+              'editor.inactiveSelectionBackground': '#0969da20',
+            },
+          };
+          monaco.editor.defineTheme('github-light', ghLight);
+          window.UI_THEME_DEFS['github-light'] = ghLight;
         }
 
-        // Determine language from file extension
-        const extension = file.path.split('.').pop();
-        const languageMap = {
-          'rs': 'rust',
-          'js': 'javascript',
-          'ts': 'typescript',
-          'py': 'python',
-          'md': 'markdown',
-          'json': 'json',
-          'html': 'html',
-          'css': 'css'
-        };
-        const language = languageMap[extension] || 'plaintext';
+        renderProjectInfo() {
+          const projectInfo = document.getElementById('project-info');
 
-        // Use the configured Monaco theme directly
-        const theme = this.config.color_scheme || 'vs-dark';
+          // Get just the directory name from the full path
+          const dirName =
+            this.context.working_directory.split('/').pop() || this.context.working_directory;
 
-        // Create diff editor on first run, reuse afterwards
-        const container = document.getElementById('editor-container');
-        if (!this.editor) {
-          this.editor = monaco.editor.createDiffEditor(container, {
-            theme: theme,
-            renderSideBySide: !this.isInline,
-            readOnly: true,
-            originalEditable: false,
-            automaticLayout: true,
-            scrollBeyondLastLine: false,
-            minimap: { enabled: true },
-            fontSize: 13,
-            fontFamily: this.config.font,
-            lineNumbers: 'on',
-            renderOverviewRuler: true,
-            scrollbar: {
-              vertical: 'visible',
-              horizontal: 'visible'
+          let html = '';
+          if (this.context.title) {
+            const safeTitle = String(this.context.title);
+            html += `<span class="project-info-separator">·</span> <span class="project-info-value" title="${safeTitle}">${safeTitle}</span>`;
+          }
+          html += `<span class="project-info-separator">·</span><span class="project-info-value" title="${this.context.working_directory}">${dirName}</span>`;
+
+          if (this.context.git_branch) {
+            html += ` <span class="project-info-separator">·</span> <span class="project-info-value git-branch">${this.context.git_branch}</span>`;
+          }
+
+          projectInfo.innerHTML = html;
+        }
+
+        setupUI() {
+          // File list clicks
+          document.getElementById('file-list').addEventListener('click', (e) => {
+            const li = e.target.closest('li');
+            if (li) {
+              const index = parseInt(li.dataset.index);
+              this.loadFile(index);
             }
           });
-        } else {
-          this.editor.updateOptions({ renderSideBySide: !this.isInline, theme: theme });
-        }
 
-        // Lazily fetch content and slice to visible range
-        if (!this.fileCache[file.path]) {
-          const [oldResponse, newResponse] = await Promise.all([
-            fetch(`/api/file?path=${encodeURIComponent(file.path)}&side=old`),
-            fetch(`/api/file?path=${encodeURIComponent(file.path)}&side=new`)
-          ]);
-          let oldData = { content: '' }, newData = { content: '' };
-          try { if (oldResponse.ok) oldData = await oldResponse.json(); } catch (e) {}
-          try { if (newResponse.ok) newData = await newResponse.json(); } catch (e) {}
-          this.fileCache[file.path] = { old: oldData.content, new: newData.content };
-        }
-        const oldAll = (this.fileCache[file.path].old || '').split('\n');
-        const newAll = (this.fileCache[file.path].new || '').split('\n');
-        if (range.totalOldLines == null) range.totalOldLines = oldAll.length;
-        if (range.totalNewLines == null) range.totalNewLines = newAll.length;
-        const oldContent = oldAll.slice(Math.max(0, range.old.start - 1), Math.max(range.old.start - 1, range.old.end)).join('\n');
-        const newContent = newAll.slice(Math.max(0, range.new.start - 1), Math.max(range.new.start - 1, range.new.end)).join('\n');
-        this.originalModel = monaco.editor.createModel(oldContent, language);
-        this.modifiedModel = monaco.editor.createModel(newContent, language);
-
-        this.editor.setModel({
-          original: this.originalModel,
-          modified: this.modifiedModel
-        });
-
-        // Record end after the new models are set and painted
-        requestAnimationFrame(() => requestAnimationFrame(() => window.Perf.recordFileSwitchEnd()));
-
-        // Set custom line numbers to show actual file line numbers
-        const modifiedEditor = this.editor.getModifiedEditor();
-        const originalEditor = this.editor.getOriginalEditor();
-
-        let newOffset = 0;
-        let oldOffset = 0;
-
-        if (range && !range.hasFullContent) {
-          newOffset = range.new.start - 1;
-          oldOffset = range.old.start - 1;
-
-          modifiedEditor.updateOptions({
-            lineNumbers: (lineNumber) => (lineNumber + newOffset).toString(),
-            lineNumbersMinChars: 4
+          // Settings button
+          document.getElementById('settings-btn').addEventListener('click', () => {
+            this.showSettingsModal();
           });
 
-          originalEditor.updateOptions({
-            lineNumbers: (lineNumber) => (lineNumber + oldOffset).toString(),
-            lineNumbersMinChars: 4
+          // Submit button
+          document.getElementById('submit-review').addEventListener('click', async () => {
+            this.showSubmitConfirmation();
           });
-        } else {
-          modifiedEditor.updateOptions({ lineNumbers: 'on' });
-          originalEditor.updateOptions({ lineNumbers: 'on' });
+
+          // Toggle view
+          document.getElementById('toggle-view').addEventListener('click', () => {
+            this.isInline = !this.isInline;
+            this.loadFile(this.currentFileIndex);
+          });
+
+          // Stats
+          document.getElementById('stats').textContent =
+            `${this.stats.files_changed} files, +${this.stats.additions} -${this.stats.deletions}`;
+
+          // Sidebar resizer
+          this.setupSidebarResizer();
+
+          // Keyboard shortcuts
+          this.setupKeyboardShortcuts();
         }
 
-        // Add click handler for comments on BOTH sides
-        modifiedEditor.onMouseDown((e) => {
-          if (e.target.type === monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS) {
-            const monacoLine = e.target.position.lineNumber;
-            const fileLineNumber = monacoLine + newOffset;
-            this.showCommentDialog(file.path, fileLineNumber, monacoLine, 'new');
+        setupKeyboardShortcuts() {
+          document.addEventListener('keydown', (e) => {
+            // Never handle shortcuts while authoring text (inputs, textareas, contenteditable)
+            const activeElement = document.activeElement || document.body;
+            if (
+              activeElement &&
+              (activeElement.tagName === 'TEXTAREA' ||
+                activeElement.tagName === 'INPUT' ||
+                activeElement.isContentEditable)
+            )
+              return;
+
+            // If a comment widget is open, disable all global shortcuts
+            if (this.currentWidget !== null) return;
+
+            // Match key event to shortcut
+            const action = this.matchKeyboardShortcut(e);
+            if (!action) return;
+
+            e.preventDefault();
+
+            // Execute action
+            switch (action) {
+              case 'nextFile':
+                this.nextFile();
+                break;
+              case 'previousFile':
+                this.previousFile();
+                break;
+              case 'nextHunk':
+                this.nextHunk();
+                break;
+              case 'previousHunk':
+                this.previousHunk();
+                break;
+              case 'openComment':
+                this.openCommentOnCurrentHunk();
+                break;
+              case 'submitReview':
+                this.showSubmitConfirmation();
+                break;
+              case 'showHelp':
+                this.showKeyboardHelp();
+                break;
+            }
+          });
+        }
+
+        matchKeyboardShortcut(e) {
+          const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+          const modKey = isMac ? e.metaKey : e.ctrlKey;
+
+          for (const shortcut of KEYBOARD_SHORTCUTS) {
+            for (const keyCombo of shortcut.keys) {
+              if (this.matchesKeyCombo(e, keyCombo, modKey)) {
+                return shortcut.action;
+              }
+            }
           }
-        });
+          return null;
+        }
 
-        originalEditor.onMouseDown((e) => {
-          if (e.target.type === monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS) {
-            const monacoLine = e.target.position.lineNumber;
-            const fileLineNumber = monacoLine + oldOffset;
-            this.showCommentDialog(file.path, fileLineNumber, monacoLine, 'old');
+        matchesKeyCombo(e, combo, modKey) {
+          const parts = combo.split('+');
+          let needsMod = false;
+          let needsShift = false;
+          let key = '';
+
+          for (const part of parts) {
+            if (part === 'Mod') {
+              needsMod = true;
+            } else if (part === 'Shift') {
+              needsShift = true;
+            } else {
+              key = part;
+            }
           }
-        });
 
-        // Update decorations for existing comments
-        this.updateDecorations();
+          // Check Mod key
+          if (needsMod !== modKey) return false;
 
-        // Setup scroll listener to show/hide bottom expand control
-        this.setupScrollListener();
+          // Special handling for characters that naturally require Shift (like ?)
+          // These should match regardless of Shift state
+          const specialChars = ['?', '!', '@', '#', '$', '%', '^', '&', '*', '(', ')'];
+          const isSpecialChar = specialChars.includes(key);
 
-        // Highlight the current hunk (first hunk by default)
-        const hunks = this.fileHunks[file.path];
-        if (hunks && hunks.length > 0) {
+          // Check Shift key (but ignore for special chars)
+          if (!isSpecialChar && needsShift !== e.shiftKey) return false;
+
+          // For letter keys with Shift, the key combo will have uppercase letter
+          // e.g., "Shift+J" means e.key="J" with shift, "j" means e.key="j" without shift
+          return e.key === key;
+        }
+
+        nextFile() {
+          if (this.currentFileIndex < this.files.length - 1) {
+            this.loadFile(this.currentFileIndex + 1);
+          }
+        }
+
+        previousFile() {
+          if (this.currentFileIndex > 0) {
+            this.loadFile(this.currentFileIndex - 1);
+          }
+        }
+
+        nextHunk() {
+          const file = this.files[this.currentFileIndex];
+          const hunks = this.fileHunks[file.path];
+          if (!hunks || hunks.length === 0) return;
+
           const currentIdx = this.currentHunkIndex[file.path] || 0;
-          setTimeout(() => this.jumpToHunk(currentIdx), 100);
+          const nextIdx = Math.min(currentIdx + 1, hunks.length - 1);
+          this.currentHunkIndex[file.path] = nextIdx;
+          this.jumpToHunk(nextIdx);
         }
-      }
 
-      updateDecorations() {
-        if (!this.editor) return;
+        previousHunk() {
+          const file = this.files[this.currentFileIndex];
+          const hunks = this.fileHunks[file.path];
+          if (!hunks || hunks.length === 0) return;
 
-        const file = this.files[this.currentFileIndex];
-        const comments = this.commentManager.getCommentsForFile(file.path);
-        const modifiedEditor = this.editor.getModifiedEditor();
-        const originalEditor = this.editor.getOriginalEditor();
+          const currentIdx = this.currentHunkIndex[file.path] || 0;
+          const prevIdx = Math.max(currentIdx - 1, 0);
+          this.currentHunkIndex[file.path] = prevIdx;
+          this.jumpToHunk(prevIdx);
+        }
 
-        // Get offsets for current file
-        const range = this.fileRanges[file.path];
-        const newOffset = range && !range.hasFullContent ? range.new.start - 1 : 0;
-        const oldOffset = range && !range.hasFullContent ? range.old.start - 1 : 0;
+        jumpToHunk(hunkIndex) {
+          if (!this.editor) return;
 
-        // Decorations for modified (new) side
-        const modifiedDecorations = comments
-          .filter(c => c.side === 'new')
-          .map(comment => {
-            const monacoLine = comment.start_line - newOffset;
-            return {
-              range: new monaco.Range(monacoLine, 1, monacoLine, 1),
+          const file = this.files[this.currentFileIndex];
+          const hunks = this.fileHunks[file.path];
+          if (!hunks || hunkIndex >= hunks.length) return;
+
+          const hunkRange = hunks[hunkIndex];
+          const range = this.fileRanges[file.path];
+          const offset = range && !range.hasFullContent ? range.new.start - 1 : 0;
+          const monacoStartLine = hunkRange.start - offset;
+          const monacoEndLine = hunkRange.end - offset;
+
+          const modifiedEditor = this.editor.getModifiedEditor();
+          modifiedEditor.revealLineInCenter(monacoStartLine);
+
+          // Highlight the focused hunk
+          this.highlightFocusedHunk(monacoStartLine, monacoEndLine);
+        }
+
+        highlightFocusedHunk(startLine, endLine) {
+          if (!this.editor) return;
+
+          const modifiedEditor = this.editor.getModifiedEditor();
+
+          // Create decorations for the focused hunk
+          const decorations = [];
+          for (let line = startLine; line <= endLine; line++) {
+            decorations.push({
+              range: new monaco.Range(line, 1, line, 1),
               options: {
                 isWholeLine: true,
-                className: 'line-comment-marker',
-                glyphMarginClassName: 'line-comment-marker',
-                glyphMarginHoverMessage: { value: comment.body }
-              }
-            };
-          });
-
-        // Decorations for original (old) side
-        const originalDecorations = comments
-          .filter(c => c.side === 'old')
-          .map(comment => {
-            const monacoLine = comment.start_line - oldOffset;
-            return {
-              range: new monaco.Range(monacoLine, 1, monacoLine, 1),
-              options: {
-                isWholeLine: true,
-                className: 'line-comment-marker',
-                glyphMarginClassName: 'line-comment-marker',
-                glyphMarginHoverMessage: { value: comment.body }
-              }
-            };
-          });
-
-        this.modifiedDecorations = modifiedEditor.deltaDecorations(this.modifiedDecorations || [], modifiedDecorations);
-        this.originalDecorations = originalEditor.deltaDecorations(this.originalDecorations || [], originalDecorations);
-      }
-
-      showCommentDialog(file, fileLineNumber, monacoLineNumber, side) {
-        const targetEditor = side === 'new'
-          ? this.editor.getModifiedEditor()
-          : this.editor.getOriginalEditor();
-
-        // Remove any existing widget
-        if (this.currentWidget) {
-          if (this.currentWidgetEditor) {
-            this.currentWidgetEditor.removeContentWidget(this.currentWidget);
+                className: 'focused-hunk-line',
+              },
+            });
           }
-          this.currentWidget = null;
-          this.currentWidgetEditor = null;
+
+          // Update decorations
+          this.focusedHunkDecorations = modifiedEditor.deltaDecorations(
+            this.focusedHunkDecorations || [],
+            decorations,
+          );
         }
 
-        const sideLabel = side === 'new' ? 'Modified' : 'Original';
+        openCommentOnCurrentHunk() {
+          if (!this.editor) return;
 
-        // Check for existing comment
-        const existingIndex = this.commentManager.findComment(file, fileLineNumber, side);
-        const existingComment = existingIndex >= 0 ? this.commentManager.comments[existingIndex] : null;
+          const file = this.files[this.currentFileIndex];
+          const hunks = this.fileHunks[file.path];
+          if (!hunks || hunks.length === 0) return;
 
-        // Create the widget
-        const domNode = document.createElement('div');
-        domNode.className = 'inline-comment-box';
-        const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
-        const modKey = isMac ? '⌘' : 'Ctrl';
-        const deleteBtnHtml = existingComment ? '<button class="btn-danger delete-btn">Delete</button>' : '';
-        domNode.innerHTML = `
+          const currentIdx = this.currentHunkIndex[file.path] || 0;
+          const hunkRange = hunks[currentIdx];
+          const fileLineNumber = hunkRange.start;
+          const range = this.fileRanges[file.path];
+          const offset = range && !range.hasFullContent ? range.new.start - 1 : 0;
+          const monacoLine = fileLineNumber - offset;
+
+          this.showCommentDialog(file.path, fileLineNumber, monacoLine, 'new');
+        }
+
+        setupSidebarResizer() {
+          const sidebar = document.getElementById('sidebar');
+          const resizer = document.getElementById('sidebar-resizer');
+          let isResizing = false;
+
+          resizer.addEventListener('mousedown', (e) => {
+            isResizing = true;
+            resizer.classList.add('dragging');
+            document.body.style.cursor = 'ew-resize';
+            document.body.style.userSelect = 'none';
+            e.preventDefault();
+          });
+
+          document.addEventListener('mousemove', (e) => {
+            if (!isResizing) return;
+            const newWidth = e.clientX;
+            if (newWidth >= 150 && newWidth <= 600) {
+              sidebar.style.width = newWidth + 'px';
+            }
+          });
+
+          document.addEventListener('mouseup', () => {
+            if (isResizing) {
+              isResizing = false;
+              resizer.classList.remove('dragging');
+              document.body.style.cursor = '';
+              document.body.style.userSelect = '';
+            }
+          });
+        }
+
+        renderFileList() {
+          const list = document.getElementById('file-list');
+          list.innerHTML = '';
+
+          this.files.forEach((file, index) => {
+            const li = document.createElement('li');
+            li.dataset.index = index;
+            li.className = index === this.currentFileIndex ? 'active' : '';
+
+            const name = document.createElement('span');
+            // Display renames clearly as "old.txt → new.txt"
+            if (file.status === 'renamed' && file.old_path) {
+              name.textContent = `${file.old_path} → ${file.path}`;
+            } else {
+              name.textContent = file.path;
+            }
+
+            const status = document.createElement('span');
+            status.className = `file-status ${file.status}`;
+            status.textContent = file.status[0].toUpperCase();
+
+            li.appendChild(name);
+            li.appendChild(status);
+            list.appendChild(li);
+          });
+        }
+
+        async loadFile(index) {
+          if (window.DEBUG) console.log('[app] loadFile: index', index);
+          window.Perf.recordFileSwitchStart();
+          this.currentFileIndex = index;
+          const file = this.files[index];
+          if (window.DEBUG) console.log('[app] loadFile: path', file.path, 'status', file.status);
+
+          // Update show full file button
+          const showFullBtn = document.getElementById('show-full-file');
+          let range = this.fileRanges[file.path];
+          if (!range) {
+            // Initialize range and hunk ranges from metadata
+            let oldLineStart = Infinity,
+              oldLineEnd = 0,
+              newLineStart = Infinity,
+              newLineEnd = 0;
+            const hunkRanges = [];
+            (file.hunks || []).forEach((hunk) => {
+              const newLines = hunk.lines.filter((l) => l.new_line).map((l) => l.new_line);
+              if (newLines.length > 0) {
+                hunkRanges.push({ start: Math.min(...newLines), end: Math.max(...newLines) });
+              }
+              hunk.lines.forEach((line) => {
+                if (line.old_line) {
+                  oldLineStart = Math.min(oldLineStart, line.old_line);
+                  oldLineEnd = Math.max(oldLineEnd, line.old_line);
+                }
+                if (line.new_line) {
+                  newLineStart = Math.min(newLineStart, line.new_line);
+                  newLineEnd = Math.max(newLineEnd, line.new_line);
+                }
+              });
+            });
+            this.fileHunks[file.path] = hunkRanges;
+            this.currentHunkIndex[file.path] = 0;
+            range = this.fileRanges[file.path] = {
+              old: { start: oldLineStart, end: oldLineEnd },
+              new: { start: newLineStart, end: newLineEnd },
+              hasFullContent: false,
+              totalOldLines: null,
+              totalNewLines: null,
+            };
+          }
+          if (range && range.hasFullContent) {
+            showFullBtn.style.display = 'none';
+          } else {
+            showFullBtn.style.display = 'block';
+            showFullBtn.disabled = false;
+            showFullBtn.textContent = `Show Full File`;
+            showFullBtn.onclick = () => this.loadFullFile(index);
+          }
+
+          this.renderFileList();
+          this.renderExpandControls();
+
+          // Dispose old models and widget; keep editor instance
+          if (this.originalModel) {
+            try {
+              this.originalModel.dispose();
+            } catch (e) {}
+            this.originalModel = null;
+          }
+          if (this.modifiedModel) {
+            try {
+              this.modifiedModel.dispose();
+            } catch (e) {}
+            this.modifiedModel = null;
+          }
+          if (this.currentWidget && this.currentWidgetEditor) {
+            try {
+              this.currentWidgetEditor.removeContentWidget(this.currentWidget);
+            } catch (e) {}
+            this.currentWidget = null;
+            this.currentWidgetEditor = null;
+          }
+
+          // Determine language from file extension
+          const extension = file.path.split('.').pop();
+          const languageMap = {
+            rs: 'rust',
+            js: 'javascript',
+            ts: 'typescript',
+            py: 'python',
+            md: 'markdown',
+            json: 'json',
+            html: 'html',
+            css: 'css',
+          };
+          const language = languageMap[extension] || 'plaintext';
+
+          // Use the configured Monaco theme directly
+          const theme = this.config.color_scheme || 'vs-dark';
+
+          // Create diff editor on first run, reuse afterwards
+          const container = document.getElementById('editor-container');
+          const mono =
+            (this.config.font && String(this.config.font).trim()) ||
+            "'JetBrains Mono', 'Monaco', 'Menlo', 'Consolas', monospace";
+          if (!this.editor) {
+            this.editor = monaco.editor.createDiffEditor(container, {
+              theme: theme,
+              renderSideBySide: !this.isInline,
+              readOnly: true,
+              originalEditable: false,
+              automaticLayout: true,
+              scrollBeyondLastLine: false,
+              minimap: { enabled: true },
+              fontSize: 13,
+              fontFamily: mono,
+              lineNumbers: 'on',
+              renderOverviewRuler: true,
+              scrollbar: {
+                vertical: 'visible',
+                horizontal: 'visible',
+              },
+            });
+          } else {
+            this.editor.updateOptions({
+              renderSideBySide: !this.isInline,
+              theme: theme,
+              fontFamily: mono,
+            });
+          }
+
+          // Lazily fetch content and slice to visible range
+          if (!this.fileCache[file.path]) {
+            if (window.DEBUG) console.log('[app] fetching file contents for', file.path);
+            const [oldResponse, newResponse] = await Promise.all([
+              fetch(`/api/file?path=${encodeURIComponent(file.path)}&side=old`),
+              fetch(`/api/file?path=${encodeURIComponent(file.path)}&side=new`),
+            ]);
+            let oldData = { content: '' },
+              newData = { content: '' };
+            if (oldResponse.ok) {
+              oldData = await oldResponse.json();
+            } else {
+              console.error('[app] old fetch not ok', oldResponse.status);
+            }
+            if (newResponse.ok) {
+              newData = await newResponse.json();
+            } else {
+              console.error('[app] new fetch not ok', newResponse.status);
+            }
+            this.fileCache[file.path] = { old: oldData.content, new: newData.content };
+            if (window.DEBUG)
+              console.log(
+                '[app] fetched lengths old/new',
+                this.fileCache[file.path].old.length,
+                this.fileCache[file.path].new.length,
+              );
+          }
+          const oldAll = (this.fileCache[file.path].old || '').split('\n');
+          const newAll = (this.fileCache[file.path].new || '').split('\n');
+          if (range.totalOldLines == null) range.totalOldLines = oldAll.length;
+          if (range.totalNewLines == null) range.totalNewLines = newAll.length;
+          let oldStart =
+            typeof range.old.start === 'number' && range.old.start > 0 ? range.old.start : 1;
+          let oldEnd = range.old.end && range.old.end >= oldStart ? range.old.end : oldAll.length;
+          let newStart =
+            typeof range.new.start === 'number' && range.new.start > 0 ? range.new.start : 1;
+          let newEnd = range.new.end && range.new.end >= newStart ? range.new.end : newAll.length;
+          if (range.hasFullContent) {
+            oldStart = 1;
+            oldEnd = oldAll.length;
+            newStart = 1;
+            newEnd = newAll.length;
+          }
+          const oldContent = oldAll
+            .slice(Math.max(0, oldStart - 1), Math.max(oldStart - 1, oldEnd))
+            .join('\n');
+          const newContent = newAll
+            .slice(Math.max(0, newStart - 1), Math.max(newStart - 1, newEnd))
+            .join('\n');
+          this.originalModel = monaco.editor.createModel(oldContent, language);
+          this.modifiedModel = monaco.editor.createModel(newContent, language);
+          if (window.DEBUG)
+            console.log(
+              '[app] models created for',
+              file.path,
+              'lang',
+              language,
+              'old/new lines',
+              oldAll.length,
+              newAll.length,
+            );
+
+          this.editor.setModel({
+            original: this.originalModel,
+            modified: this.modifiedModel,
+          });
+          try {
+            window.__APP_READY = true;
+          } catch (e) {}
+
+          // Record end after the new models are set and painted
+          requestAnimationFrame(() =>
+            requestAnimationFrame(() => {
+              window.Perf.recordFileSwitchEnd();
+              try {
+                const e = performance.getEntriesByName('fileSwitch');
+                const d = e && e.length ? e[e.length - 1].duration : null;
+                if (d != null) console.log('[perf] fileSwitch ms:', Math.round(d));
+              } catch {}
+              // Derive accent color from a visible keyword token if present (prefer 'function'/'const'/'import')
+              try {
+                const prefs = [
+                  'function',
+                  'const',
+                  'import',
+                  'class',
+                  'return',
+                  'if',
+                  'export',
+                  'let',
+                ];
+                const spans = Array.from(
+                  document.querySelectorAll('.monaco-editor .view-line span'),
+                );
+                let found = null;
+                for (const p of prefs) {
+                  for (const s of spans) {
+                    const txt = (s.textContent || '').trim();
+                    if (txt === p) {
+                      found = s;
+                      break;
+                    }
+                  }
+                  if (found) break;
+                }
+                if (found) {
+                  const col = getComputedStyle(found).color;
+                  if (col) document.documentElement.style.setProperty('--accent-color', col);
+                }
+              } catch {}
+              markAppReady();
+            }),
+          );
+
+          // Set custom line numbers to show actual file line numbers
+          const modifiedEditor = this.editor.getModifiedEditor();
+          const originalEditor = this.editor.getOriginalEditor();
+
+          let newOffset = 0;
+          let oldOffset = 0;
+
+          if (range && !range.hasFullContent) {
+            newOffset = range.new.start - 1;
+            oldOffset = range.old.start - 1;
+
+            modifiedEditor.updateOptions({
+              lineNumbers: (lineNumber) => (lineNumber + newOffset).toString(),
+              lineNumbersMinChars: 4,
+            });
+
+            originalEditor.updateOptions({
+              lineNumbers: (lineNumber) => (lineNumber + oldOffset).toString(),
+              lineNumbersMinChars: 4,
+            });
+          } else {
+            modifiedEditor.updateOptions({ lineNumbers: 'on' });
+            originalEditor.updateOptions({ lineNumbers: 'on' });
+          }
+
+          // Add click handler for comments on BOTH sides
+          modifiedEditor.onMouseDown((e) => {
+            if (e.target.type === monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS) {
+              const monacoLine = e.target.position.lineNumber;
+              const fileLineNumber = monacoLine + newOffset;
+              this.showCommentDialog(file.path, fileLineNumber, monacoLine, 'new');
+            }
+          });
+
+          originalEditor.onMouseDown((e) => {
+            if (e.target.type === monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS) {
+              const monacoLine = e.target.position.lineNumber;
+              const fileLineNumber = monacoLine + oldOffset;
+              this.showCommentDialog(file.path, fileLineNumber, monacoLine, 'old');
+            }
+          });
+
+          // Update decorations for existing comments
+          this.updateDecorations();
+
+          // Setup scroll listener to show/hide bottom expand control
+          this.setupScrollListener();
+
+          // Highlight the current hunk (first hunk by default)
+          const hunks = this.fileHunks[file.path];
+          if (hunks && hunks.length > 0) {
+            const currentIdx = this.currentHunkIndex[file.path] || 0;
+            setTimeout(() => this.jumpToHunk(currentIdx), 100);
+          }
+        }
+
+        updateDecorations() {
+          if (!this.editor) return;
+
+          const file = this.files[this.currentFileIndex];
+          const comments = this.commentManager.getCommentsForFile(file.path);
+          const modifiedEditor = this.editor.getModifiedEditor();
+          const originalEditor = this.editor.getOriginalEditor();
+
+          // Get offsets for current file
+          const range = this.fileRanges[file.path];
+          const newOffset = range && !range.hasFullContent ? range.new.start - 1 : 0;
+          const oldOffset = range && !range.hasFullContent ? range.old.start - 1 : 0;
+
+          // Decorations for modified (new) side
+          const modifiedDecorations = comments
+            .filter((c) => c.side === 'new')
+            .map((comment) => {
+              const monacoLine = comment.start_line - newOffset;
+              return {
+                range: new monaco.Range(monacoLine, 1, monacoLine, 1),
+                options: {
+                  isWholeLine: true,
+                  className: 'line-comment-marker',
+                  glyphMarginClassName: 'line-comment-marker',
+                  glyphMarginHoverMessage: { value: comment.body },
+                },
+              };
+            });
+
+          // Decorations for original (old) side
+          const originalDecorations = comments
+            .filter((c) => c.side === 'old')
+            .map((comment) => {
+              const monacoLine = comment.start_line - oldOffset;
+              return {
+                range: new monaco.Range(monacoLine, 1, monacoLine, 1),
+                options: {
+                  isWholeLine: true,
+                  className: 'line-comment-marker',
+                  glyphMarginClassName: 'line-comment-marker',
+                  glyphMarginHoverMessage: { value: comment.body },
+                },
+              };
+            });
+
+          this.modifiedDecorations = modifiedEditor.deltaDecorations(
+            this.modifiedDecorations || [],
+            modifiedDecorations,
+          );
+          this.originalDecorations = originalEditor.deltaDecorations(
+            this.originalDecorations || [],
+            originalDecorations,
+          );
+        }
+
+        showCommentDialog(file, fileLineNumber, monacoLineNumber, side) {
+          const targetEditor =
+            side === 'new' ? this.editor.getModifiedEditor() : this.editor.getOriginalEditor();
+
+          // Remove any existing widget
+          if (this.currentWidget) {
+            if (this.currentWidgetEditor) {
+              this.currentWidgetEditor.removeContentWidget(this.currentWidget);
+            }
+            this.currentWidget = null;
+            this.currentWidgetEditor = null;
+          }
+
+          const sideLabel = side === 'new' ? 'Modified' : 'Original';
+
+          // Check for existing comment
+          const existingIndex = this.commentManager.findComment(file, fileLineNumber, side);
+          const existingComment =
+            existingIndex >= 0 ? this.commentManager.comments[existingIndex] : null;
+
+          // Create the widget
+          const domNode = document.createElement('div');
+          domNode.className = 'inline-comment-box';
+          const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+          const modKey = isMac ? '⌘' : 'Ctrl';
+          const deleteBtnHtml = existingComment
+            ? '<button class="btn-danger delete-btn">Delete</button>'
+            : '';
+          domNode.innerHTML = `
           <h3>Line ${fileLineNumber} (${sideLabel})${existingComment ? ' - Edit' : ''}</h3>
           <textarea class="comment-textarea" placeholder="Add your comment..." autofocus>${existingComment ? existingComment.body : ''}</textarea>
           <div class="comment-actions">
@@ -1782,257 +2114,266 @@
           </div>
         `;
 
-        const widget = {
-          getId: () => 'inline.comment.widget',
-          getDomNode: () => domNode,
-          getPosition: () => ({
-            position: {
-              lineNumber: monacoLineNumber,
-              column: 1
-            },
-            preference: [
-              monaco.editor.ContentWidgetPositionPreference.BELOW
-            ]
-          })
-        };
+          const widget = {
+            getId: () => 'inline.comment.widget',
+            getDomNode: () => domNode,
+            getPosition: () => ({
+              position: {
+                lineNumber: monacoLineNumber,
+                column: 1,
+              },
+              preference: [monaco.editor.ContentWidgetPositionPreference.BELOW],
+            }),
+          };
 
-        targetEditor.addContentWidget(widget);
-        this.currentWidget = widget;
-        this.currentWidgetEditor = targetEditor;
+          targetEditor.addContentWidget(widget);
+          this.currentWidget = widget;
+          this.currentWidgetEditor = targetEditor;
 
-        const saveBtn = domNode.querySelector('.save-btn');
-        const cancelBtn = domNode.querySelector('.cancel-btn');
-        const textarea = domNode.querySelector('.comment-textarea');
+          const saveBtn = domNode.querySelector('.save-btn');
+          const cancelBtn = domNode.querySelector('.cancel-btn');
+          const textarea = domNode.querySelector('.comment-textarea');
 
-        // Keyboard shortcuts
-        const handleKeydown = (e) => {
-          if (e.key === 'Escape') {
-            cleanup();
-          } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-            e.preventDefault();
-            saveComment();
-          }
-        };
-        document.addEventListener('keydown', handleKeydown);
+          // Keyboard shortcuts
+          const handleKeydown = (e) => {
+            if (e.key === 'Escape') {
+              cleanup();
+            } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+              e.preventDefault();
+              saveComment();
+            }
+          };
+          document.addEventListener('keydown', handleKeydown);
 
-        const cleanup = () => {
-          targetEditor.removeContentWidget(widget);
-          this.currentWidget = null;
-          document.removeEventListener('keydown', handleKeydown);
-        };
+          const cleanup = () => {
+            targetEditor.removeContentWidget(widget);
+            this.currentWidget = null;
+            document.removeEventListener('keydown', handleKeydown);
+          };
 
-        const saveComment = () => {
-          if (!textarea.value.trim()) {
-            textarea.focus();
-            return;
-          }
+          const saveComment = () => {
+            if (!textarea.value.trim()) {
+              textarea.focus();
+              return;
+            }
 
-          if (existingIndex >= 0) {
-            this.commentManager.updateComment(existingIndex, textarea.value);
-          } else {
-            const comment = {
-              file,
-              start_line: fileLineNumber,
-              end_line: fileLineNumber,
-              side,
-              body: textarea.value,
-              severity: 'comment',
-            };
-            this.commentManager.addComment(comment);
-          }
-          this.updateDecorations();
-          cleanup();
-        };
-
-        saveBtn.onclick = saveComment;
-        cancelBtn.onclick = cleanup;
-
-        // Delete button (only present for existing comments)
-        const deleteBtnEl = domNode.querySelector('.delete-btn');
-        if (deleteBtnEl) {
-          deleteBtnEl.onclick = () => {
-            this.commentManager.removeComment(existingIndex);
+            if (existingIndex >= 0) {
+              this.commentManager.updateComment(existingIndex, textarea.value);
+            } else {
+              const comment = {
+                file,
+                start_line: fileLineNumber,
+                end_line: fileLineNumber,
+                side,
+                body: textarea.value,
+                severity: 'comment',
+              };
+              this.commentManager.addComment(comment);
+            }
             this.updateDecorations();
             cleanup();
           };
+
+          saveBtn.onclick = saveComment;
+          cancelBtn.onclick = cleanup;
+
+          // Delete button (only present for existing comments)
+          const deleteBtnEl = domNode.querySelector('.delete-btn');
+          if (deleteBtnEl) {
+            deleteBtnEl.onclick = () => {
+              this.commentManager.removeComment(existingIndex);
+              this.updateDecorations();
+              cleanup();
+            };
+          }
+
+          // Focus after a brief delay to let Monaco position the widget
+          setTimeout(() => textarea.focus(), 100);
         }
 
-        // Focus after a brief delay to let Monaco position the widget
-        setTimeout(() => textarea.focus(), 100);
-      }
+        async loadFullFile(index) {
+          const file = this.files[index];
 
-      async loadFullFile(index) {
-        const file = this.files[index];
+          // Ensure cache exists
+          if (!this.fileCache[file.path]) {
+            const [oldResponse, newResponse] = await Promise.all([
+              fetch(`/api/file?path=${encodeURIComponent(file.path)}&side=old`),
+              fetch(`/api/file?path=${encodeURIComponent(file.path)}&side=new`),
+            ]);
+            const oldData = await oldResponse.json();
+            const newData = await newResponse.json();
+            this.fileCache[file.path] = { old: oldData.content, new: newData.content };
+          }
 
-        // Ensure cache exists
-        if (!this.fileCache[file.path]) {
-          const [oldResponse, newResponse] = await Promise.all([
-            fetch(`/api/file?path=${encodeURIComponent(file.path)}&side=old`),
-            fetch(`/api/file?path=${encodeURIComponent(file.path)}&side=new`)
-          ]);
-          const oldData = await oldResponse.json();
-          const newData = await newResponse.json();
-          this.fileCache[file.path] = { old: oldData.content, new: newData.content };
-        }
-
-        // Update tracking BEFORE reloading
-        const range = this.fileRanges[file.path];
-        range.hasFullContent = true;
-        range.old.start = 1;
-        range.old.end = range.totalOldLines || (this.fileCache[file.path].old.split('\n').length);
-        range.new.start = 1;
-        range.new.end = range.totalNewLines || (this.fileCache[file.path].new.split('\n').length);
-
-        // Reload the editor with full content via loadFile
-        await this.loadFile(index);
-
-        // Update button
-        const showFullBtn = document.getElementById('show-full-file');
-        showFullBtn.style.display = 'none';
-      }
-
-      async renderExpandControls() {
-        // Remove existing controls
-        document.querySelectorAll('.expand-controls').forEach(el => el.remove());
-
-        const file = this.files[this.currentFileIndex];
-        const range = this.fileRanges[file.path];
-
-        if (window.DEBUG) { console.log(`renderExpandControls for ${file.path}`); console.log('Range:', range); }
-
-        if (!range || range.hasFullContent) {
-          if (window.DEBUG) console.log(`Skipping: ${!range ? 'no range' : 'has full content'}`);
-          return;
-        }
-
-        // Fetch total line counts if we don't have them
-        if (range.totalOldLines === null || range.totalNewLines === null) {
-          await this.fetchFileLengths(file.path);
-        }
-
-        if (window.DEBUG) {
-          console.log(`Total lines: old=${range.totalOldLines}, new=${range.totalNewLines}`);
-          console.log(`Current range: old ${range.old.start}-${range.old.end}, new ${range.new.start}-${range.new.end}`);
-        }
-
-        const topContainer = document.getElementById('expand-top-container');
-        const bottomContainer = document.getElementById('expand-bottom-container');
-
-        // Calculate available lines above and below current view
-        // Use the maximum of old/new sides since they may have different lengths
-        const availableAboveOld = Math.max(0, range.old.start - 1);
-        const availableAboveNew = Math.max(0, range.new.start - 1);
-        const availableAbove = Math.max(availableAboveOld, availableAboveNew);
-
-        const availableBelowOld = Math.max(0, range.totalOldLines - range.old.end);
-        const availableBelowNew = Math.max(0, range.totalNewLines - range.new.end);
-        const availableBelow = Math.max(availableBelowOld, availableBelowNew);
-
-        // If showing full content on both sides, mark as such and hide controls
-        if (availableAbove === 0 && availableBelow === 0) {
+          // Update tracking BEFORE reloading
+          const range = this.fileRanges[file.path];
           range.hasFullContent = true;
-          document.getElementById('show-full-file').style.display = 'none';
+          range.old.start = 1;
+          range.old.end = range.totalOldLines || this.fileCache[file.path].old.split('\n').length;
+          range.new.start = 1;
+          range.new.end = range.totalNewLines || this.fileCache[file.path].new.split('\n').length;
+
+          // Reload the editor with full content via loadFile
+          await this.loadFile(index);
+
+          // Update button
+          const showFullBtn = document.getElementById('show-full-file');
+          showFullBtn.style.display = 'none';
+        }
+
+        async renderExpandControls() {
+          // Remove existing controls
+          document.querySelectorAll('.expand-controls').forEach((el) => el.remove());
+
+          const file = this.files[this.currentFileIndex];
+          const range = this.fileRanges[file.path];
+
+          if (window.DEBUG) {
+            console.log(`renderExpandControls for ${file.path}`);
+            console.log('Range:', range);
+          }
+
+          if (!range || range.hasFullContent) {
+            if (window.DEBUG) console.log(`Skipping: ${!range ? 'no range' : 'has full content'}`);
+            return;
+          }
+
+          // Fetch total line counts if we don't have them
+          if (range.totalOldLines === null || range.totalNewLines === null) {
+            await this.fetchFileLengths(file.path);
+          }
+
+          if (window.DEBUG) {
+            console.log(`Total lines: old=${range.totalOldLines}, new=${range.totalNewLines}`);
+            console.log(
+              `Current range: old ${range.old.start}-${range.old.end}, new ${range.new.start}-${range.new.end}`,
+            );
+          }
+
+          const topContainer = document.getElementById('expand-top-container');
+          const bottomContainer = document.getElementById('expand-bottom-container');
+
+          // Calculate available lines above and below current view
+          // Use the maximum of old/new sides since they may have different lengths
+          const availableAboveOld = Math.max(0, range.old.start - 1);
+          const availableAboveNew = Math.max(0, range.new.start - 1);
+          const availableAbove = Math.max(availableAboveOld, availableAboveNew);
+
+          const availableBelowOld = Math.max(0, range.totalOldLines - range.old.end);
+          const availableBelowNew = Math.max(0, range.totalNewLines - range.new.end);
+          const availableBelow = Math.max(availableBelowOld, availableBelowNew);
+
+          // If showing full content on both sides, mark as such and hide controls
+          if (availableAbove === 0 && availableBelow === 0) {
+            range.hasFullContent = true;
+            document.getElementById('show-full-file').style.display = 'none';
+            topContainer.innerHTML = '';
+            bottomContainer.innerHTML = '';
+            bottomContainer.style.display = 'none';
+            if (window.DEBUG) console.log(`Already showing full file`);
+            return;
+          }
+
+          if (window.DEBUG)
+            console.log(
+              `Available: above=${availableAbove} (old=${availableAboveOld}, new=${availableAboveNew}), below=${availableBelow} (old=${availableBelowOld}, new=${availableBelowNew})`,
+            );
+
+          // Clear previous controls
           topContainer.innerHTML = '';
           bottomContainer.innerHTML = '';
-          bottomContainer.style.display = 'none';
-          console.log(`Already showing full file`);
-          return;
+
+          // Add expand controls
+          if (availableAbove > 0) {
+            if (window.DEBUG) console.log(`Adding top control`);
+            const topControl = this.createExpandControl('top', file.path, availableAbove);
+            topContainer.appendChild(topControl);
+            // Will be shown/hidden by scroll listener
+          } else {
+            topContainer.style.display = 'none';
+          }
+
+          if (availableBelow > 0) {
+            if (window.DEBUG) console.log(`Adding bottom control`);
+            const bottomControl = this.createExpandControl('bottom', file.path, availableBelow);
+            bottomContainer.appendChild(bottomControl);
+            // Will be shown/hidden by scroll listener
+          } else {
+            if (window.DEBUG)
+              console.log(`NOT adding bottom control - availableBelow=${availableBelow}`);
+            bottomContainer.style.display = 'none';
+          }
         }
 
-        if (window.DEBUG) console.log(`Available: above=${availableAbove} (old=${availableAboveOld}, new=${availableAboveNew}), below=${availableBelow} (old=${availableBelowOld}, new=${availableBelowNew})`);
+        setupScrollListener() {
+          if (!this.editor) return;
 
-        // Clear previous controls
-        topContainer.innerHTML = '';
-        bottomContainer.innerHTML = '';
+          const modifiedEditor = this.editor.getModifiedEditor();
 
-        // Add expand controls
-        if (availableAbove > 0) {
-          if (window.DEBUG) console.log(`Adding top control`);
-          const topControl = this.createExpandControl('top', file.path, availableAbove);
-          topContainer.appendChild(topControl);
-          // Will be shown/hidden by scroll listener
-        } else {
-          topContainer.style.display = 'none';
+          // Remove previous listener if it exists
+          if (this.scrollListenerDispose && this.scrollListenerDispose.dispose) {
+            try {
+              this.scrollListenerDispose.dispose();
+            } catch (e) {}
+            this.scrollListenerDispose = null;
+          }
+
+          // Listen for scroll changes
+          this.scrollListenerDispose = modifiedEditor.onDidScrollChange(() => {
+            this.checkExpandVisibility();
+          });
+
+          // Initial check
+          setTimeout(() => this.checkExpandVisibility(), 100);
         }
 
-        if (availableBelow > 0) {
-          if (window.DEBUG) console.log(`Adding bottom control`);
-          const bottomControl = this.createExpandControl('bottom', file.path, availableBelow);
-          bottomContainer.appendChild(bottomControl);
-          // Will be shown/hidden by scroll listener
-        } else {
-          if (window.DEBUG) console.log(`NOT adding bottom control - availableBelow=${availableBelow}`);
-          bottomContainer.style.display = 'none';
-        }
-      }
+        checkExpandVisibility() {
+          if (!this.editor) return;
 
-      setupScrollListener() {
-        if (!this.editor) return;
+          const modifiedEditor = this.editor.getModifiedEditor();
+          const visibleRanges = modifiedEditor.getVisibleRanges();
 
-        const modifiedEditor = this.editor.getModifiedEditor();
+          if (visibleRanges.length === 0) return;
 
-        // Remove previous listener if it exists
-        if (this.scrollListenerDispose && this.scrollListenerDispose.dispose) {
-          try { this.scrollListenerDispose.dispose(); } catch (e) {}
-          this.scrollListenerDispose = null;
-        }
+          const firstVisibleLine = visibleRanges[0].startLineNumber;
+          const lastVisibleLine = visibleRanges[visibleRanges.length - 1].endLineNumber;
+          const totalLines = modifiedEditor.getModel().getLineCount();
 
-        // Listen for scroll changes
-        this.scrollListenerDispose = modifiedEditor.onDidScrollChange(() => {
-          this.checkExpandVisibility();
-        });
+          // Show top expand button when within 3 lines of top
+          const topContainer = document.getElementById('expand-top-container');
+          if (topContainer && topContainer.querySelector('.expand-controls')) {
+            const nearTop = firstVisibleLine <= 4;
+            topContainer.style.display = nearTop ? 'block' : 'none';
+          }
 
-        // Initial check
-        setTimeout(() => this.checkExpandVisibility(), 100);
-      }
-
-      checkExpandVisibility() {
-        if (!this.editor) return;
-
-        const modifiedEditor = this.editor.getModifiedEditor();
-        const visibleRanges = modifiedEditor.getVisibleRanges();
-
-        if (visibleRanges.length === 0) return;
-
-        const firstVisibleLine = visibleRanges[0].startLineNumber;
-        const lastVisibleLine = visibleRanges[visibleRanges.length - 1].endLineNumber;
-        const totalLines = modifiedEditor.getModel().getLineCount();
-
-        // Show top expand button when within 3 lines of top
-        const topContainer = document.getElementById('expand-top-container');
-        if (topContainer && topContainer.querySelector('.expand-controls')) {
-          const nearTop = firstVisibleLine <= 4;
-          topContainer.style.display = nearTop ? 'block' : 'none';
+          // Show bottom expand button when within 3 lines of bottom
+          const bottomContainer = document.getElementById('expand-bottom-container');
+          if (bottomContainer && bottomContainer.querySelector('.expand-controls')) {
+            const nearBottom = lastVisibleLine >= totalLines - 3;
+            bottomContainer.style.display = nearBottom ? 'block' : 'none';
+          }
         }
 
-        // Show bottom expand button when within 3 lines of bottom
-        const bottomContainer = document.getElementById('expand-bottom-container');
-        if (bottomContainer && bottomContainer.querySelector('.expand-controls')) {
-          const nearBottom = lastVisibleLine >= totalLines - 3;
-          bottomContainer.style.display = nearBottom ? 'block' : 'none';
+        async fetchFileLengths(filePath) {
+          const range = this.fileRanges[filePath];
+
+          const [oldResponse, newResponse] = await Promise.all([
+            fetch(`/api/file?path=${encodeURIComponent(filePath)}&side=old`),
+            fetch(`/api/file?path=${encodeURIComponent(filePath)}&side=new`),
+          ]);
+
+          const oldData = await oldResponse.json();
+          const newData = await newResponse.json();
+
+          range.totalOldLines = oldData.content.split('\n').length;
+          range.totalNewLines = newData.content.split('\n').length;
         }
-      }
 
-      async fetchFileLengths(filePath) {
-        const range = this.fileRanges[filePath];
-
-        const [oldResponse, newResponse] = await Promise.all([
-          fetch(`/api/file?path=${encodeURIComponent(filePath)}&side=old`),
-          fetch(`/api/file?path=${encodeURIComponent(filePath)}&side=new`)
-        ]);
-
-        const oldData = await oldResponse.json();
-        const newData = await newResponse.json();
-
-        range.totalOldLines = oldData.content.split('\n').length;
-        range.totalNewLines = newData.content.split('\n').length;
-      }
-
-      createExpandControl(position, filePath, availableLines) {
-        const expandAmount = Math.min(20, availableLines);
-        const control = document.createElement('div');
-        control.className = `expand-controls ${position}`;
-        control.innerHTML = `
+        createExpandControl(position, filePath, availableLines) {
+          const expandAmount = Math.min(20, availableLines);
+          const control = document.createElement('div');
+          control.className = `expand-controls ${position}`;
+          control.innerHTML = `
           <div class="expand-line"></div>
           <button class="expand-btn" data-position="${position}" data-file="${filePath}">
             ↕ Expand ${position === 'top' ? 'Above' : 'Below'} (+${expandAmount} line${expandAmount === 1 ? '' : 's'})
@@ -2040,127 +2381,133 @@
           <div class="expand-line"></div>
         `;
 
-        const btn = control.querySelector('.expand-btn');
-        btn.onclick = () => this.expandLines(position, filePath);
+          const btn = control.querySelector('.expand-btn');
+          btn.onclick = () => this.expandLines(position, filePath);
 
-        return control;
-      }
-
-      async expandLines(position, filePath) {
-        const range = this.fileRanges[filePath];
-        const file = this.files.find(f => f.path === filePath);
-        if (!file) return;
-
-        console.log(`Expanding ${position} for ${filePath}`);
-        console.log(`Current range: old ${range.old.start}-${range.old.end}, new ${range.new.start}-${range.new.end}`);
-
-        // Fetch the full file content
-        const [oldResponse, newResponse] = await Promise.all([
-          fetch(`/api/file?path=${encodeURIComponent(filePath)}&side=old`),
-          fetch(`/api/file?path=${encodeURIComponent(filePath)}&side=new`)
-        ]);
-
-        const oldData = await oldResponse.json();
-        const newData = await newResponse.json();
-
-        const oldLines = oldData.content.split('\n');
-        const newLines = newData.content.split('\n');
-
-        console.log(`File lengths: old ${oldLines.length}, new ${newLines.length}`);
-
-        // Calculate new range
-        const expandAmount = 20;
-        let newOldStart = range.old.start;
-        let newOldEnd = range.old.end;
-        let newNewStart = range.new.start;
-        let newNewEnd = range.new.end;
-
-        if (position === 'top') {
-          newOldStart = Math.max(1, range.old.start - expandAmount);
-          newNewStart = Math.max(1, range.new.start - expandAmount);
-        } else {
-          // Expand below, but don't exceed file length
-          newOldEnd = Math.min(oldLines.length, range.old.end + expandAmount);
-          newNewEnd = Math.min(newLines.length, range.new.end + expandAmount);
+          return control;
         }
 
-        console.log(`New range: old ${newOldStart}-${newOldEnd}, new ${newNewStart}-${newNewEnd}`);
+        async expandLines(position, filePath) {
+          const range = this.fileRanges[filePath];
+          const file = this.files.find((f) => f.path === filePath);
+          if (!file) return;
 
-        // Extract the lines we need (0-indexed slice from 1-indexed line numbers)
-        file.old_content = oldLines.slice(newOldStart - 1, newOldEnd).join('\n');
-        file.new_content = newLines.slice(newNewStart - 1, newNewEnd).join('\n');
+          console.log(`Expanding ${position} for ${filePath}`);
+          console.log(
+            `Current range: old ${range.old.start}-${range.old.end}, new ${range.new.start}-${range.new.end}`,
+          );
 
-        console.log(`Extracted content lengths: old ${file.old_content.split('\n').length}, new ${file.new_content.split('\n').length}`);
+          // Fetch the full file content
+          const [oldResponse, newResponse] = await Promise.all([
+            fetch(`/api/file?path=${encodeURIComponent(filePath)}&side=old`),
+            fetch(`/api/file?path=${encodeURIComponent(filePath)}&side=new`),
+          ]);
 
-        // Update range
-        range.old.start = newOldStart;
-        range.old.end = newOldEnd;
-        range.new.start = newNewStart;
-        range.new.end = newNewEnd;
+          const oldData = await oldResponse.json();
+          const newData = await newResponse.json();
 
-        // Update total line counts if not set
-        if (range.totalOldLines === null) range.totalOldLines = oldLines.length;
-        if (range.totalNewLines === null) range.totalNewLines = newLines.length;
+          const oldLines = oldData.content.split('\n');
+          const newLines = newData.content.split('\n');
 
-        // Save scroll position before reloading
-        let scrollLineNumber = null;
-        if (this.editor) {
-          const modifiedEditor = this.editor.getModifiedEditor();
-          const visibleRanges = modifiedEditor.getVisibleRanges();
-          if (visibleRanges.length > 0) {
-            scrollLineNumber = visibleRanges[0].startLineNumber;
+          console.log(`File lengths: old ${oldLines.length}, new ${newLines.length}`);
+
+          // Calculate new range
+          const expandAmount = 20;
+          let newOldStart = range.old.start;
+          let newOldEnd = range.old.end;
+          let newNewStart = range.new.start;
+          let newNewEnd = range.new.end;
+
+          if (position === 'top') {
+            newOldStart = Math.max(1, range.old.start - expandAmount);
+            newNewStart = Math.max(1, range.new.start - expandAmount);
+          } else {
+            // Expand below, but don't exceed file length
+            newOldEnd = Math.min(oldLines.length, range.old.end + expandAmount);
+            newNewEnd = Math.min(newLines.length, range.new.end + expandAmount);
+          }
+
+          console.log(
+            `New range: old ${newOldStart}-${newOldEnd}, new ${newNewStart}-${newNewEnd}`,
+          );
+
+          // Extract the lines we need (0-indexed slice from 1-indexed line numbers)
+          file.old_content = oldLines.slice(newOldStart - 1, newOldEnd).join('\n');
+          file.new_content = newLines.slice(newNewStart - 1, newNewEnd).join('\n');
+
+          console.log(
+            `Extracted content lengths: old ${file.old_content.split('\n').length}, new ${file.new_content.split('\n').length}`,
+          );
+
+          // Update range
+          range.old.start = newOldStart;
+          range.old.end = newOldEnd;
+          range.new.start = newNewStart;
+          range.new.end = newNewEnd;
+
+          // Update total line counts if not set
+          if (range.totalOldLines === null) range.totalOldLines = oldLines.length;
+          if (range.totalNewLines === null) range.totalNewLines = newLines.length;
+
+          // Save scroll position before reloading
+          let scrollLineNumber = null;
+          if (this.editor) {
+            const modifiedEditor = this.editor.getModifiedEditor();
+            const visibleRanges = modifiedEditor.getVisibleRanges();
+            if (visibleRanges.length > 0) {
+              scrollLineNumber = visibleRanges[0].startLineNumber;
+            }
+          }
+
+          // Calculate how many lines were actually added at top
+          const oldNewStart = range.new.start;
+
+          // Reload editor
+          this.loadFile(this.currentFileIndex);
+
+          // Restore scroll position after a brief delay for editor to initialize
+          if (scrollLineNumber !== null) {
+            setTimeout(() => {
+              if (this.editor) {
+                const modifiedEditor = this.editor.getModifiedEditor();
+                // If we expanded at top, adjust scroll by actual lines added
+                const linesAddedAtTop = position === 'top' ? oldNewStart - newNewStart : 0;
+                const adjustedLine = scrollLineNumber + linesAddedAtTop;
+                modifiedEditor.revealLineInCenter(adjustedLine);
+              }
+            }, 50);
           }
         }
 
-        // Calculate how many lines were actually added at top
-        const oldNewStart = range.new.start;
-
-        // Reload editor
-        this.loadFile(this.currentFileIndex);
-
-        // Restore scroll position after a brief delay for editor to initialize
-        if (scrollLineNumber !== null) {
-          setTimeout(() => {
-            if (this.editor) {
-              const modifiedEditor = this.editor.getModifiedEditor();
-              // If we expanded at top, adjust scroll by actual lines added
-              const linesAddedAtTop = position === 'top' ? (oldNewStart - newNewStart) : 0;
-              const adjustedLine = scrollLineNumber + linesAddedAtTop;
-              modifiedEditor.revealLineInCenter(adjustedLine);
-            }
-          }, 50);
+        updateUI() {
+          const count = this.commentManager.getComments().length;
+          document.getElementById('comment-count').textContent = count.toString();
         }
-      }
 
-      updateUI() {
-        const count = this.commentManager.getComments().length;
-        document.getElementById('comment-count').textContent = count.toString();
-      }
+        showKeyboardHelp() {
+          const overlay = document.createElement('div');
+          overlay.className = 'submit-modal-overlay';
 
-      showKeyboardHelp() {
-        const overlay = document.createElement('div');
-        overlay.className = 'submit-modal-overlay';
+          const modal = document.createElement('div');
+          modal.className = 'submit-modal help-modal';
 
-        const modal = document.createElement('div');
-        modal.className = 'submit-modal help-modal';
+          const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
 
-        const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
-
-        // Header
-        const header = document.createElement('div');
-        header.className = 'submit-modal-header';
-        header.innerHTML = `
+          // Header
+          const header = document.createElement('div');
+          header.className = 'submit-modal-header';
+          header.innerHTML = `
           <h2>Keyboard Shortcuts</h2>
           <button class="submit-modal-close">&times;</button>
         `;
 
-        // Body
-        const body = document.createElement('div');
-        body.className = 'submit-modal-body';
+          // Body
+          const body = document.createElement('div');
+          body.className = 'submit-modal-body';
 
-        const table = document.createElement('table');
-        table.className = 'shortcuts-table';
-        table.innerHTML = `
+          const table = document.createElement('table');
+          table.className = 'shortcuts-table';
+          table.innerHTML = `
           <thead>
             <tr>
               <th>Shortcut</th>
@@ -2170,130 +2517,137 @@
           <tbody></tbody>
         `;
 
-        const tbody = table.querySelector('tbody');
+          const tbody = table.querySelector('tbody');
 
-        KEYBOARD_SHORTCUTS.forEach(shortcut => {
-          const row = document.createElement('tr');
+          KEYBOARD_SHORTCUTS.forEach((shortcut) => {
+            const row = document.createElement('tr');
 
-          const keysCell = document.createElement('td');
-          const keyComboDiv = document.createElement('div');
-          keyComboDiv.className = 'key-combo';
+            const keysCell = document.createElement('td');
+            const keyComboDiv = document.createElement('div');
+            keyComboDiv.className = 'key-combo';
 
-          shortcut.keys.forEach((combo, idx) => {
-            if (idx > 0) {
-              const orSpan = document.createElement('span');
-              orSpan.className = 'key-or';
-              orSpan.textContent = 'or';
-              keyComboDiv.appendChild(orSpan);
-            }
-
-            // Replace Mod with Cmd/Ctrl based on platform
-            const displayCombo = combo.replace('Mod', isMac ? 'Cmd' : 'Ctrl');
-            const parts = displayCombo.split('+');
-
-            parts.forEach((part, partIdx) => {
-              if (partIdx > 0) {
-                const plus = document.createElement('span');
-                plus.textContent = '+';
-                plus.style.margin = '0 2px';
-                plus.style.color = '#888';
-                keyComboDiv.appendChild(plus);
+            shortcut.keys.forEach((combo, idx) => {
+              if (idx > 0) {
+                const orSpan = document.createElement('span');
+                orSpan.className = 'key-or';
+                orSpan.textContent = 'or';
+                keyComboDiv.appendChild(orSpan);
               }
 
-              const key = document.createElement('span');
-              key.className = 'key';
-              // Format key names for display
-              const displayKey = part
-                .replace('ArrowDown', '↓')
-                .replace('ArrowUp', '↑')
-                .replace('Enter', '⏎');
-              key.textContent = displayKey;
-              keyComboDiv.appendChild(key);
+              // Replace Mod with Cmd/Ctrl based on platform
+              const displayCombo = combo.replace('Mod', isMac ? 'Cmd' : 'Ctrl');
+              const parts = displayCombo.split('+');
+
+              parts.forEach((part, partIdx) => {
+                if (partIdx > 0) {
+                  const plus = document.createElement('span');
+                  plus.textContent = '+';
+                  plus.style.margin = '0 2px';
+                  plus.style.color = '#888';
+                  keyComboDiv.appendChild(plus);
+                }
+
+                const key = document.createElement('span');
+                key.className = 'key';
+                // Format key names for display
+                const displayKey = part
+                  .replace('ArrowDown', '↓')
+                  .replace('ArrowUp', '↑')
+                  .replace('Enter', '⏎');
+                key.textContent = displayKey;
+                keyComboDiv.appendChild(key);
+              });
             });
+
+            keysCell.appendChild(keyComboDiv);
+
+            const actionCell = document.createElement('td');
+            actionCell.textContent = shortcut.description;
+
+            row.appendChild(keysCell);
+            row.appendChild(actionCell);
+            tbody.appendChild(row);
           });
 
-          keysCell.appendChild(keyComboDiv);
+          body.appendChild(table);
 
-          const actionCell = document.createElement('td');
-          actionCell.textContent = shortcut.description;
+          modal.appendChild(header);
+          modal.appendChild(body);
+          overlay.appendChild(modal);
+          document.body.appendChild(overlay);
 
-          row.appendChild(keysCell);
-          row.appendChild(actionCell);
-          tbody.appendChild(row);
-        });
+          // Event handlers
+          const close = () => {
+            overlay.remove();
+          };
 
-        body.appendChild(table);
+          header.querySelector('.submit-modal-close').onclick = close;
 
-        modal.appendChild(header);
-        modal.appendChild(body);
-        overlay.appendChild(modal);
-        document.body.appendChild(overlay);
+          // Close on overlay click
+          overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) {
+              close();
+            }
+          });
 
-        // Event handlers
-        const close = () => {
-          overlay.remove();
-        };
+          // Close on Escape or ?
+          const handleClose = (e) => {
+            if (e.key === 'Escape' || e.key === '?') {
+              e.preventDefault();
+              close();
+              document.removeEventListener('keydown', handleClose);
+            }
+          };
+          document.addEventListener('keydown', handleClose);
+        }
 
-        header.querySelector('.submit-modal-close').onclick = close;
+        showSettingsModal() {
+          const overlay = document.createElement('div');
+          overlay.className = 'submit-modal-overlay';
 
-        // Close on overlay click
-        overlay.addEventListener('click', (e) => {
-          if (e.target === overlay) {
-            close();
-          }
-        });
+          const modal = document.createElement('div');
+          modal.className = 'submit-modal help-modal';
 
-        // Close on Escape or ?
-        const handleClose = (e) => {
-          if (e.key === 'Escape' || e.key === '?') {
-            e.preventDefault();
-            close();
-            document.removeEventListener('keydown', handleClose);
-          }
-        };
-        document.addEventListener('keydown', handleClose);
-      }
-
-      showSettingsModal() {
-        const overlay = document.createElement('div');
-        overlay.className = 'submit-modal-overlay';
-
-        const modal = document.createElement('div');
-        modal.className = 'submit-modal help-modal';
-
-        // Header
-        const header = document.createElement('div');
-        header.className = 'submit-modal-header';
-        header.innerHTML = `
+          // Header
+          const header = document.createElement('div');
+          header.className = 'submit-modal-header';
+          header.innerHTML = `
           <h2>Settings</h2>
           <button class="submit-modal-close">&times;</button>
         `;
 
-        // Body
-        const body = document.createElement('div');
-        body.className = 'submit-modal-body';
+          // Body
+          const body = document.createElement('div');
+          body.className = 'submit-modal-body';
 
-        const form = document.createElement('form');
-        form.className = 'settings-form';
+          const form = document.createElement('form');
+          form.className = 'settings-form';
 
-        // Migrate old color scheme names to new ones
-        let currentColorScheme = this.config.color_scheme || 'vs-dark';
-        const legacyThemeMap = {
-          'dark': 'vs-dark',
-          'light': 'vs',
-          'high-contrast': 'hc-black'
-        };
-        if (legacyThemeMap[currentColorScheme]) {
-          currentColorScheme = legacyThemeMap[currentColorScheme];
-        }
+          // Migrate old color scheme names to new ones
+          let currentColorScheme = this.config.color_scheme || 'vs-dark';
+          const legacyThemeMap = {
+            dark: 'vs-dark',
+            light: 'vs',
+            'high-contrast': 'hc-black',
+          };
+          if (legacyThemeMap[currentColorScheme]) {
+            currentColorScheme = legacyThemeMap[currentColorScheme];
+          }
 
-        const currentFont = this.config.font || 'JetBrains Mono';
-        const currentSplitView = this.config.split_view !== undefined ? this.config.split_view : true;
-        const currentAutoCloseTab = this.config.auto_close_tab !== undefined ? this.config.auto_close_tab : true;
+          const currentFont = (this.config.font && this.config.font.trim()) || 'JetBrains Mono';
+          const currentSplitView =
+            this.config.split_view !== undefined ? this.config.split_view : true;
+          const currentAutoCloseTab =
+            this.config.auto_close_tab !== undefined ? this.config.auto_close_tab : true;
 
-        console.log('Settings modal - current values:', { currentColorScheme, currentFont, currentSplitView, currentAutoCloseTab });
+          console.log('Settings modal - current values:', {
+            currentColorScheme,
+            currentFont,
+            currentSplitView,
+            currentAutoCloseTab,
+          });
 
-        form.innerHTML = `
+          form.innerHTML = `
           <div class="settings-field">
             <label for="color-scheme">Theme</label>
             <select id="color-scheme" name="color_scheme">
@@ -2340,270 +2694,277 @@
           </div>
         `;
 
-        body.appendChild(form);
+          body.appendChild(form);
 
-        // Set dropdown values after adding to DOM
-        form.querySelector('#color-scheme').value = currentColorScheme;
+          // Set dropdown values after adding to DOM
+          form.querySelector('#color-scheme').value = currentColorScheme;
 
-        // Footer
-        const footer = document.createElement('div');
-        footer.className = 'submit-modal-footer';
-        footer.innerHTML = `
+          // Footer
+          const footer = document.createElement('div');
+          footer.className = 'submit-modal-footer';
+          footer.innerHTML = `
           <button class="btn-secondary cancel-btn">Cancel</button>
           <button class="btn-primary save-btn">Save</button>
         `;
 
-        modal.appendChild(header);
-        modal.appendChild(body);
-        modal.appendChild(footer);
-        overlay.appendChild(modal);
-        document.body.appendChild(overlay);
+          modal.appendChild(header);
+          modal.appendChild(body);
+          modal.appendChild(footer);
+          overlay.appendChild(modal);
+          document.body.appendChild(overlay);
 
-        // Event handlers
-        const close = () => {
-          overlay.remove();
-        };
-
-        const save = async () => {
-          const saveBtn = footer.querySelector('.save-btn');
-          saveBtn.disabled = true;
-          saveBtn.textContent = 'Saving...';
-
-          const formData = new FormData(form);
-          const newConfig = {
-            color_scheme: formData.get('color_scheme'),
-            font: formData.get('font'),
-            split_view: formData.get('split_view') === 'on',
-            auto_close_tab: formData.get('auto_close_tab') === 'on'
+          // Event handlers
+          const close = () => {
+            overlay.remove();
           };
 
-          try {
-            const response = await fetch('/api/config', {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(newConfig)
-            });
+          const save = async () => {
+            const saveBtn = footer.querySelector('.save-btn');
+            saveBtn.disabled = true;
+            saveBtn.textContent = 'Saving...';
 
-            if (response.ok) {
-              this.config = newConfig;
-              this.isInline = !this.config.split_view;
-              // Apply theme to UI
-              this.applyThemeToUI(this.config.color_scheme);
-              saveBtn.textContent = 'Saved!';
+            const formData = new FormData(form);
+            const newConfig = {
+              color_scheme: formData.get('color_scheme'),
+              font: (formData.get('font') || '').toString().trim() || 'JetBrains Mono',
+              split_view: formData.get('split_view') === 'on',
+              auto_close_tab: formData.get('auto_close_tab') === 'on',
+            };
 
-              setTimeout(() => {
-                close();
-                // Reload editor to apply new settings
-                this.loadFile(this.currentFileIndex);
-              }, 500);
-            } else {
-              alert('Failed to save settings');
+            try {
+              const response = await fetch('/api/config', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(newConfig),
+              });
+
+              if (response.ok) {
+                this.config = newConfig;
+                this.isInline = !this.config.split_view;
+                // Apply theme to Monaco + UI from theme definition
+                try {
+                  monaco.editor.setTheme(this.config.color_scheme || 'vs-dark');
+                } catch {}
+                this.applyThemeToUI(this.config.color_scheme || 'vs-dark');
+                saveBtn.textContent = 'Saved!';
+
+                setTimeout(() => {
+                  close();
+                  // Reload editor to apply new settings
+                  this.loadFile(this.currentFileIndex);
+                }, 500);
+              } else {
+                alert('Failed to save settings');
+                saveBtn.disabled = false;
+                saveBtn.textContent = 'Save';
+              }
+            } catch (error) {
+              alert(`Failed to save settings: ${error}`);
               saveBtn.disabled = false;
               saveBtn.textContent = 'Save';
             }
-          } catch (error) {
-            alert(`Failed to save settings: ${error}`);
-            saveBtn.disabled = false;
-            saveBtn.textContent = 'Save';
-          }
-        };
+          };
 
-        header.querySelector('.submit-modal-close').onclick = close;
-        footer.querySelector('.cancel-btn').onclick = close;
-        footer.querySelector('.save-btn').onclick = save;
+          header.querySelector('.submit-modal-close').onclick = close;
+          footer.querySelector('.cancel-btn').onclick = close;
+          footer.querySelector('.save-btn').onclick = save;
 
-        // Close on overlay click
-        overlay.addEventListener('click', (e) => {
-          if (e.target === overlay) {
-            close();
-          }
-        });
+          // Close on overlay click
+          overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) {
+              close();
+            }
+          });
 
-        // Close on Escape key
-        const handleEscape = (e) => {
-          if (e.key === 'Escape') {
-            close();
-            document.removeEventListener('keydown', handleEscape);
-          }
-        };
-        document.addEventListener('keydown', handleEscape);
-      }
+          // Close on Escape key
+          const handleEscape = (e) => {
+            if (e.key === 'Escape') {
+              close();
+              document.removeEventListener('keydown', handleEscape);
+            }
+          };
+          document.addEventListener('keydown', handleEscape);
+        }
 
-      async showSubmitConfirmation() {
-        const comments = this.commentManager.getComments();
+        async showSubmitConfirmation() {
+          const comments = this.commentManager.getComments();
 
-        // Create overlay
-        const overlay = document.createElement('div');
-        overlay.className = 'submit-modal-overlay';
+          // Create overlay
+          const overlay = document.createElement('div');
+          overlay.className = 'submit-modal-overlay';
 
-        const modal = document.createElement('div');
-        modal.className = 'submit-modal';
+          const modal = document.createElement('div');
+          modal.className = 'submit-modal';
 
-        // Header
-        const header = document.createElement('div');
-        header.className = 'submit-modal-header';
-        header.innerHTML = `
+          // Header
+          const header = document.createElement('div');
+          header.className = 'submit-modal-header';
+          header.innerHTML = `
           <h2>${comments.length === 0 ? 'Submit Review' : `Review Comments (${comments.length})`}</h2>
           <button class="submit-modal-close">&times;</button>
         `;
 
-        // Body
-        const body = document.createElement('div');
-        body.className = 'submit-modal-body';
+          // Body
+          const body = document.createElement('div');
+          body.className = 'submit-modal-body';
 
-        if (comments.length === 0) {
-          const noCommentsMsg = document.createElement('p');
-          noCommentsMsg.textContent = 'No comments. Submit to approve this review.';
-          noCommentsMsg.style.padding = '20px';
-          noCommentsMsg.style.textAlign = 'center';
-          noCommentsMsg.style.color = 'var(--text-secondary)';
-          body.appendChild(noCommentsMsg);
-        }
-
-        // Group comments by file
-        const commentsByFile = {};
-        comments.forEach(comment => {
-          if (!commentsByFile[comment.file]) {
-            commentsByFile[comment.file] = [];
+          if (comments.length === 0) {
+            const noCommentsMsg = document.createElement('p');
+            noCommentsMsg.textContent = 'No comments. Submit to approve this review.';
+            noCommentsMsg.style.padding = '20px';
+            noCommentsMsg.style.textAlign = 'center';
+            noCommentsMsg.style.color = 'var(--text-secondary)';
+            body.appendChild(noCommentsMsg);
           }
-          commentsByFile[comment.file].push(comment);
-        });
 
-        // Fetch file contents for all files
-        const fileContents = {};
-        await Promise.all(Object.keys(commentsByFile).map(async (filePath) => {
-          const fileComments = commentsByFile[filePath];
-          const sides = [...new Set(fileComments.map(c => c.side))];
-
-          for (const side of sides) {
-            const key = `${filePath}:${side}`;
-            try {
-              const response = await fetch(`/api/file?path=${encodeURIComponent(filePath)}&side=${side}`);
-              const data = await response.json();
-              fileContents[key] = data.content.split('\n');
-            } catch (err) {
-              console.error(`Failed to fetch ${key}:`, err);
-              fileContents[key] = [];
+          // Group comments by file
+          const commentsByFile = {};
+          comments.forEach((comment) => {
+            if (!commentsByFile[comment.file]) {
+              commentsByFile[comment.file] = [];
             }
-          }
-        }));
-
-        // Render each comment
-        comments.forEach(comment => {
-          const preview = document.createElement('div');
-          preview.className = 'comment-preview';
-
-          const headerText = `${comment.file}:${comment.start_line} (${comment.side}) — ${comment.severity}`;
-          const previewHeader = document.createElement('div');
-          previewHeader.className = 'comment-preview-header';
-          previewHeader.textContent = headerText;
-
-          // Get code excerpt (line before, target line, line after)
-          const fileKey = `${comment.file}:${comment.side}`;
-          const lines = fileContents[fileKey] || [];
-          const lineIndex = comment.start_line - 1;
-          const startLine = Math.max(0, lineIndex - 1);
-          const endLine = Math.min(lines.length, lineIndex + 2);
-          const excerpt = lines.slice(startLine, endLine);
-
-          const codeBlock = document.createElement('div');
-          codeBlock.className = 'comment-preview-code';
-          excerpt.forEach((line, idx) => {
-            const lineDiv = document.createElement('div');
-            lineDiv.className = 'comment-preview-code-line';
-            if (startLine + idx === lineIndex) {
-              lineDiv.classList.add('target');
-            }
-            lineDiv.textContent = line || ' ';
-            codeBlock.appendChild(lineDiv);
+            commentsByFile[comment.file].push(comment);
           });
 
-          const commentText = document.createElement('div');
-          commentText.className = 'comment-preview-text';
-          commentText.textContent = comment.body;
+          // Fetch file contents for all files
+          const fileContents = {};
+          await Promise.all(
+            Object.keys(commentsByFile).map(async (filePath) => {
+              const fileComments = commentsByFile[filePath];
+              const sides = [...new Set(fileComments.map((c) => c.side))];
 
-          preview.appendChild(previewHeader);
-          preview.appendChild(codeBlock);
-          preview.appendChild(commentText);
-          body.appendChild(preview);
-        });
+              for (const side of sides) {
+                const key = `${filePath}:${side}`;
+                try {
+                  const response = await fetch(
+                    `/api/file?path=${encodeURIComponent(filePath)}&side=${side}`,
+                  );
+                  const data = await response.json();
+                  fileContents[key] = data.content.split('\n');
+                } catch (err) {
+                  console.error(`Failed to fetch ${key}:`, err);
+                  fileContents[key] = [];
+                }
+              }
+            }),
+          );
 
-        // Footer
-        const footer = document.createElement('div');
-        footer.className = 'submit-modal-footer';
-        footer.innerHTML = `
+          // Render each comment
+          comments.forEach((comment) => {
+            const preview = document.createElement('div');
+            preview.className = 'comment-preview';
+
+            const headerText = `${comment.file}:${comment.start_line} (${comment.side}) — ${comment.severity}`;
+            const previewHeader = document.createElement('div');
+            previewHeader.className = 'comment-preview-header';
+            previewHeader.textContent = headerText;
+
+            // Get code excerpt (line before, target line, line after)
+            const fileKey = `${comment.file}:${comment.side}`;
+            const lines = fileContents[fileKey] || [];
+            const lineIndex = comment.start_line - 1;
+            const startLine = Math.max(0, lineIndex - 1);
+            const endLine = Math.min(lines.length, lineIndex + 2);
+            const excerpt = lines.slice(startLine, endLine);
+
+            const codeBlock = document.createElement('div');
+            codeBlock.className = 'comment-preview-code';
+            excerpt.forEach((line, idx) => {
+              const lineDiv = document.createElement('div');
+              lineDiv.className = 'comment-preview-code-line';
+              if (startLine + idx === lineIndex) {
+                lineDiv.classList.add('target');
+              }
+              lineDiv.textContent = line || ' ';
+              codeBlock.appendChild(lineDiv);
+            });
+
+            const commentText = document.createElement('div');
+            commentText.className = 'comment-preview-text';
+            commentText.textContent = comment.body;
+
+            preview.appendChild(previewHeader);
+            preview.appendChild(codeBlock);
+            preview.appendChild(commentText);
+            body.appendChild(preview);
+          });
+
+          // Footer
+          const footer = document.createElement('div');
+          footer.className = 'submit-modal-footer';
+          footer.innerHTML = `
           <button class="btn-secondary cancel-submit-btn">Cancel</button>
           <button class="btn-primary confirm-submit-btn">Submit Review</button>
         `;
 
-        modal.appendChild(header);
-        modal.appendChild(body);
-        modal.appendChild(footer);
-        overlay.appendChild(modal);
-        document.body.appendChild(overlay);
+          modal.appendChild(header);
+          modal.appendChild(body);
+          modal.appendChild(footer);
+          overlay.appendChild(modal);
+          document.body.appendChild(overlay);
 
-        // Event handlers
-        const close = () => {
-          overlay.remove();
-        };
+          // Event handlers
+          const close = () => {
+            overlay.remove();
+          };
 
-        const submit = async () => {
-          const submitBtn = footer.querySelector('.confirm-submit-btn');
-          submitBtn.disabled = true;
-          submitBtn.textContent = 'Submitting...';
+          const submit = async () => {
+            const submitBtn = footer.querySelector('.confirm-submit-btn');
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Submitting...';
 
-          try {
-            await fetch('/api/complete', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ comments })
-            });
+            try {
+              await fetch('/api/complete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ comments }),
+              });
 
-            submitBtn.textContent = 'Submitted!';
-            document.getElementById('submit-review').disabled = true;
-            document.getElementById('submit-review').textContent = 'Review Submitted';
+              submitBtn.textContent = 'Submitted!';
+              document.getElementById('submit-review').disabled = true;
+              document.getElementById('submit-review').textContent = 'Review Submitted';
 
-            setTimeout(() => {
+              setTimeout(() => {
+                close();
+                // Auto-close tab if setting is enabled
+                if (this.config.auto_close_tab) {
+                  window.close();
+                }
+              }, 1000);
+            } catch (error) {
+              alert(`Failed to submit review: ${error}`);
+              submitBtn.disabled = false;
+              submitBtn.textContent = 'Submit Review';
+            }
+          };
+
+          header.querySelector('.submit-modal-close').onclick = close;
+          footer.querySelector('.cancel-submit-btn').onclick = close;
+          footer.querySelector('.confirm-submit-btn').onclick = submit;
+
+          // Close on overlay click (but not modal click)
+          overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) {
               close();
-              // Auto-close tab if setting is enabled
-              if (this.config.auto_close_tab) {
-                window.close();
-              }
-            }, 1000);
-          } catch (error) {
-            alert(`Failed to submit review: ${error}`);
-            submitBtn.disabled = false;
-            submitBtn.textContent = 'Submit Review';
-          }
-        };
+            }
+          });
 
-        header.querySelector('.submit-modal-close').onclick = close;
-        footer.querySelector('.cancel-submit-btn').onclick = close;
-        footer.querySelector('.confirm-submit-btn').onclick = submit;
-
-        // Close on overlay click (but not modal click)
-        overlay.addEventListener('click', (e) => {
-          if (e.target === overlay) {
-            close();
-          }
-        });
-
-        // Close on Escape key
-        const handleEscape = (e) => {
-          if (e.key === 'Escape') {
-            close();
-            document.removeEventListener('keydown', handleEscape);
-          }
-        };
-        document.addEventListener('keydown', handleEscape);
+          // Close on Escape key
+          const handleEscape = (e) => {
+            if (e.key === 'Escape') {
+              close();
+              document.removeEventListener('keydown', handleEscape);
+            }
+          };
+          document.addEventListener('keydown', handleEscape);
+        }
       }
-    }
 
-    // Initialize app
-    const app = new MonacoApp();
-    app.init().then(() => {
-      console.log('Monaco Editor initialized');
-    });
-  </script>
-</body>
+      // Initialize app
+      const app = new MonacoApp();
+      app.init().then(() => {
+        console.log('Monaco Editor initialized');
+      });
+    </script>
+  </body>
 </html>

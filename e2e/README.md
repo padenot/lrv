@@ -26,6 +26,15 @@ npm run test:ui
 
 # Run specific test
 npx playwright test review-workflow.spec.ts
+
+## Perf E2E (quick debug)
+
+- Scripts:
+  - `scripts/e2e-perf-init.sh` — runs the perf init test once with verbose logs. Use `--timeout 10` for fast loops, `--headed` to see the browser.
+  - `scripts/e2e-perf-loop.sh` — loops the perf init test with cleanup. Args: `--runs N`, `--timeout S`, `--headed`.
+- The server binary is built in release and passed to tests via `LRV_BIN`.
+- Logs are written to `e2e/test-results/` (server-*.log, page-*.log, perf-init.json).
+- The page declares readiness via `window.__APP_READY` after the first diff renders; app init metrics are collected as `performance.measure('appInit', ...)`.
 ```
 
 ## What These Tests Do

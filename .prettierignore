@@ -1,0 +1,11 @@
+# Build artifacts / vendor assets
+/target/
+/e2e/node_modules/
+/e2e/playwright-report/
+/e2e/test-results/
+/web/assets/vendor/
+/bench-results/
+
+# Rust and other non-web code
+Cargo.lock
+

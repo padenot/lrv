@@ -23,10 +23,10 @@ test: test-unit test-e2e
 test-unit:
     cargo test
 
-# Run e2e tests with Playwright (fast defaults)
+# Run e2e correctness tests (exclude perf)
 test-e2e:
     just build
-    cd e2e && npm test --silent -- --reporter=line
+    cd e2e && npx playwright test --reporter=line --grep-invert "Perf Bench"
 
 # Run e2e tests in headed mode (visible browser)
 test-e2e-headed:
@@ -39,6 +39,33 @@ test-e2e-ui:
 # Run perf bench across commits
 bench +args="":
     bash scripts/bench.sh {{args}}
+
+# Run only the perf tests (serial)
+test-e2e-perf:
+    cd e2e && npx playwright test tests/perf.spec.ts --reporter=line --workers=1
+
+# Perf helpers (wrap scripts)
+perf-init +args="":
+    bash scripts/e2e-perf-init.sh {{args}}
+
+perf-loop +args="":
+    bash scripts/e2e-perf-loop.sh {{args}}
+
+perf-batch +args="":
+    bash scripts/e2e-perf-batch.sh {{args}}
+
+# Theme test only
+test-theme:
+    cd e2e && LRV_BIN="$(pwd)/../target/release/lrv" npx playwright test tests/theme.spec.ts --reporter=line --workers=1
+
+# Serve current diff locally (loopback + tailscale if available)
+serve-current title="Current Diff":
+    just build-release
+    bash scripts/serve-current.sh {{title}}
+
+# Single command: build release, export diff, run perf, save/commit artifacts
+bench-release diff="0e4ff74" commit_artifacts="false" code_commits="HEAD":
+    BENCH_DIFF_COMMIT={{diff}} BENCH_COMMIT={{commit_artifacts}} bash scripts/bench.sh {{code_commits}}
 
  
 
@@ -93,6 +120,10 @@ clean:
 # Format code
 fmt:
     cargo fmt
+
+# Format web and e2e sources with Prettier (requires Node + Prettier)
+fmt-web:
+    npx --yes prettier --config .prettierrc.json --ignore-path .prettierignore --write "web/**/*.{html,js,ts,css}" "e2e/**/*.{ts,js,json}" "scripts/**/*.sh"
 
 # Check code without building
 check:

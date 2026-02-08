@@ -4,7 +4,7 @@ use axum::{
     extract::{Path as AxumPath, Query, State},
     http::{header, HeaderValue, StatusCode},
     middleware,
-    response::{Html, IntoResponse, Json, Response},
+    response::{IntoResponse, Json, Response},
     routing::{get, post},
     Router,
 };
@@ -47,7 +47,8 @@ pub fn create_router(state: AppState) -> Router {
 async fn serve_index() -> impl IntoResponse {
     match WebAssets::get("dist/index.html") {
         Some(content) => {
-            const CSP: &str = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'";
+            // Enable Monaco editor workers (blob:), inline scripts for the AMD loader, and self asset loading
+            const CSP: &str = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'";
             Response::builder()
                 .status(StatusCode::OK)
                 .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
@@ -87,7 +88,8 @@ async fn serve_asset(AxumPath(path): AxumPath<String>) -> Response {
 // Middleware: add strict security headers (CSP, frame-ancestors, etc.)
 async fn security_headers(req: axum::http::Request<axum::body::Body>, next: middleware::Next) -> Response {
     // Default CSP for non-HTML routes (allow inline for simplicity in this app)
-    const DEFAULT_CSP: &str = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'";
+    // Keep consistent with the stricter index CSP, including worker-src and blob for Monaco workers.
+    const DEFAULT_CSP: &str = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'";
 
     let mut res = next.run(req).await;
     {

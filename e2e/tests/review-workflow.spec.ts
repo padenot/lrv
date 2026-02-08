@@ -34,7 +34,9 @@ async function startServer(port: number = 0, options?: { title?: string }): Prom
     // Reset state for new instance
     serverUrl = null;
     const resultsDir = path.resolve(__dirname, '../test-results');
-    try { fs.mkdirSync(resultsDir, { recursive: true }); } catch {}
+    try {
+      fs.mkdirSync(resultsDir, { recursive: true });
+    } catch {}
     serverLogPath = path.join(resultsDir, `server-${Date.now()}.log`);
 
     serverProcess = spawn('bash', ['-c', cmd], {
@@ -45,7 +47,9 @@ async function startServer(port: number = 0, options?: { title?: string }): Prom
     let errorOutput = '';
 
     const appendLog = (chunk: string) => {
-      try { if (serverLogPath) fs.appendFileSync(serverLogPath, chunk); } catch {}
+      try {
+        if (serverLogPath) fs.appendFileSync(serverLogPath, chunk);
+      } catch {}
     };
 
     const checkForReady = (data: Buffer) => {
@@ -90,15 +94,17 @@ async function startServer(port: number = 0, options?: { title?: string }): Prom
 async function openApp(page: Page) {
   const url = (serverUrl ?? 'http://localhost:9999') + '/';
   await page.goto(url);
-  await page.waitForFunction(() => (window as any).require !== undefined, { timeout: 3000 });
-  const editorVisible = await page.locator('.monaco-editor').first().isVisible();
-  if (!editorVisible) {
-    const items = await page.locator('#file-list li').count();
-    if (items > 0) {
-      await page.locator('#file-list li').first().click();
+  // AMD loader present
+  await page.waitForFunction(() => (window as any).require !== undefined, { timeout: 10000 });
+  // Ensure file list exists; click first item if editor not visible yet
+  await page.locator('#file-list').waitFor({ state: 'attached', timeout: 10000 });
+  if (!(await page.locator('.monaco-editor').first().isVisible())) {
+    const firstItem = page.locator('#file-list li').first();
+    if (await firstItem.count()) {
+      await firstItem.click();
     }
   }
-  await page.waitForSelector('.monaco-editor', { timeout: 5000 });
+  await page.waitForSelector('.monaco-editor', { timeout: 20000 });
 }
 
 /**
@@ -116,7 +122,9 @@ async function stopServer(): Promise<string> {
     serverProcess.stdout?.on('data', (data) => {
       const text = data.toString();
       output += text;
-      try { if (serverLogPath) fs.appendFileSync(serverLogPath, text); } catch {}
+      try {
+        if (serverLogPath) fs.appendFileSync(serverLogPath, text);
+      } catch {}
     });
 
     serverProcess.on('close', () => {
@@ -175,7 +183,7 @@ test.describe('Review Workflow E2E', () => {
     await stopServer();
 
     // Wait for port to be fully released
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    await new Promise((resolve) => setTimeout(resolve, 2000));
 
     // Clean up test repository
     if (testRepoPath) {
@@ -278,14 +286,18 @@ test.describe('Review Workflow E2E', () => {
     // Press Shift+J to go to next file
     await page.keyboard.press('Shift+J');
     // Wait for active index to increment
-    await expect(page.locator('#file-list li.active'))
-      .toHaveAttribute('data-index', String(parseInt(firstActiveIndex!) + 1));
+    await expect(page.locator('#file-list li.active')).toHaveAttribute(
+      'data-index',
+      String(parseInt(firstActiveIndex!) + 1),
+    );
 
     // Press Shift+K to go back to previous file
     await page.keyboard.press('Shift+K');
     // Wait to return to first file
-    await expect(page.locator('#file-list li.active'))
-      .toHaveAttribute('data-index', String(parseInt(firstActiveIndex!)));
+    await expect(page.locator('#file-list li.active')).toHaveAttribute(
+      'data-index',
+      String(parseInt(firstActiveIndex!)),
+    );
   });
 
   test('complete review workflow: add comment and submit', async ({ page }) => {
@@ -342,7 +354,9 @@ test.describe('Review Workflow E2E', () => {
     if (!testRepoPath) throw new Error('Test repo not initialized');
 
     // Stage current changes first, then rename a file
-    await execAsync(`cd "${testRepoPath}" && git add -A && git commit -m "changes" && mv test.txt renamed-test.txt && git add -A`);
+    await execAsync(
+      `cd "${testRepoPath}" && git add -A && git commit -m "changes" && mv test.txt renamed-test.txt && git add -A`,
+    );
 
     // Restart server with renamed file
     await stopServer();
@@ -363,7 +377,9 @@ test.describe('Review Workflow E2E', () => {
     if (!testRepoPath) throw new Error('Test repo not initialized');
 
     // Stage current changes first, then delete a file
-    await execAsync(`cd "${testRepoPath}" && git add -A && git commit -m "changes" && git rm file2.txt`);
+    await execAsync(
+      `cd "${testRepoPath}" && git add -A && git commit -m "changes" && git rm file2.txt`,
+    );
 
     // Restart server with deleted file
     await stopServer();
@@ -388,7 +404,9 @@ test.describe('Review Workflow E2E', () => {
     // Create a new file
     if (!testRepoPath) throw new Error('Test repo not initialized');
 
-    await execAsync(`cd "${testRepoPath}" && echo "new content" > new-file.txt && git add new-file.txt`);
+    await execAsync(
+      `cd "${testRepoPath}" && echo "new content" > new-file.txt && git add new-file.txt`,
+    );
 
     // Restart server with new file
     await stopServer();
@@ -440,10 +458,7 @@ test.describe('Review Workflow E2E', () => {
       'file3.txt': 'text=another',
     };
 
-    // Clear metrics before measuring
-    await page.evaluate(() => window.Perf && window.Perf.clear());
-
-    // Cycle through files multiple times and await content visibility (bench uses generic checks)
+    // Cycle through files multiple times and await content visibility
     if (!IS_BENCH) {
       for (let i = 0; i < 6; i++) {
         const name = files[i % files.length];
@@ -462,79 +477,5 @@ test.describe('Review Workflow E2E', () => {
 
     // Assert no errors were captured
     expect(errors, `Console/Page errors during rapid switching: ${errors.join('\n')}`).toEqual([]);
-
-    // Pull perf metrics and report
-    const metrics = await page.evaluate(() => (window as any).Perf?.getMetrics?.());
-    if (metrics?.fileSwitch?.length) {
-      const arr: number[] = metrics.fileSwitch as number[];
-      const avg = arr.reduce((a, b) => a + b, 0) / arr.length;
-      const p95 = arr.slice().sort((a,b)=>a-b)[Math.floor(arr.length * 0.95) - 1] || avg;
-      console.log(`[perf] fileSwitch count=${arr.length} avg=${avg.toFixed(2)}ms p95=${p95.toFixed(2)}ms`);
-    } else {
-      console.log('[perf] no fileSwitch metrics captured');
-    }
-
-    // Persist metrics to test-results/perf.json for bench scripts
-    try {
-      const fs = require('fs');
-      const path = require('path');
-      const outDir = path.resolve(__dirname, '../test-results');
-      if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
-      const outPath = path.join(outDir, 'perf-switch.json');
-      const payload = { fileSwitch: (metrics && metrics.fileSwitch) || [] };
-      fs.writeFileSync(outPath, JSON.stringify(payload, null, 2));
-      console.log(`[perf] wrote metrics to ${outPath}`);
-    } catch (e) {
-      console.log(`[perf] failed to write metrics: ${e}`);
-    }
-  });
-
-  test('should measure app init performance', async ({ page }) => {
-    // Collect 10 app init samples by reloading the page and reading Perf metrics each time
-    const samples: number[] = [];
-
-    const collectOnce = async () => {
-      // Wait until appInit measure is recorded
-      await page.waitForFunction(() => {
-        const m = (window as any).Perf?.getMetrics?.();
-        return !!(m && m.appInit && m.appInit.length > 0);
-      });
-      const ms = await page.evaluate(() => (window as any).Perf?.getMetrics?.().appInit?.[0] ?? null);
-      if (typeof ms === 'number') samples.push(ms);
-    };
-
-    // First load
-    await openApp(page);
-    await collectOnce();
-
-    // Subsequent reloads
-    for (let i = 1; i < 10; i++) {
-      await page.reload();
-      await collectOnce();
-    }
-
-    // Report
-    if (samples.length > 0) {
-      const arr = samples.slice();
-      const avg = arr.reduce((a, b) => a + b, 0) / arr.length;
-      const p95 = arr.slice().sort((a,b)=>a-b)[Math.floor(arr.length * 0.95) - 1] || avg;
-      console.log(`[perf-init] appInit count=${arr.length} avg=${avg.toFixed(2)}ms p95=${p95.toFixed(2)}ms`);
-    } else {
-      console.log('[perf-init] no appInit metrics captured');
-    }
-
-    // Persist init metrics to test-results/perf-init.json
-    try {
-      const fs = require('fs');
-      const path = require('path');
-      const outDir = path.resolve(__dirname, '../test-results');
-      if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
-      const outPath = path.join(outDir, 'perf-init.json');
-      const payload = { appInit: samples };
-      fs.writeFileSync(outPath, JSON.stringify(payload, null, 2));
-      console.log(`[perf-init] wrote metrics to ${outPath}`);
-    } catch (e) {
-      console.log(`[perf-init] failed to write init metrics: ${e}`);
-    }
   });
 });

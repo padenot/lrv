@@ -7,13 +7,18 @@ set -euo pipefail
 ROOT_DIR=$(cd "$(dirname "$0")/.." && pwd)
 cd "$ROOT_DIR"
 
-COMMITS=("$@")
-if [ ${#COMMITS[@]} -eq 0 ]; then
-  COMMITS=(HEAD HEAD~5 HEAD~10)
+CODE_COMMITS=("$@")
+if [ ${#CODE_COMMITS[@]} -eq 0 ]; then
+  CODE_COMMITS=(HEAD)
+fi
+
+DIFF_COMMIT=${BENCH_DIFF_COMMIT:-}
+if [ -z "$DIFF_COMMIT" ]; then
+  DIFF_COMMIT=0e4ff74
 fi
 
 # Verify commits exist
-for c in "${COMMITS[@]}"; do
+for c in "${CODE_COMMITS[@]}"; do
   if ! git rev-parse --verify -q "$c" >/dev/null; then
     echo "Commit not found: $c" >&2
     exit 1
@@ -31,26 +36,23 @@ CURRENT_REF=$(git rev-parse --abbrev-ref HEAD || git rev-parse HEAD)
 RESULTS_DIR="$ROOT_DIR/bench-results"
 mkdir -p "$RESULTS_DIR"
 
-echo "Running perf bench for commits: ${COMMITS[*]}"
+echo "Running perf bench for code commits: ${CODE_COMMITS[*]} using diff $DIFF_COMMIT"
 
-for c in "${COMMITS[@]}"; do
+for c in "${CODE_COMMITS[@]}"; do
   echo "--- Bench at $c ---"
   git checkout -q "$c"
-  just build
-  # Optionally export a diff from a large commit to feed as input
-  if [ -n "${BENCH_DIFF_COMMIT:-}" ]; then
-    DIFF_DIR="$RESULTS_DIR/diffs"
-    mkdir -p "$DIFF_DIR"
-    DIFF_FILE="$DIFF_DIR/${BENCH_DIFF_COMMIT}.patch"
-    git show --format=format: -p "$BENCH_DIFF_COMMIT" > "$DIFF_FILE"
-    export LRV_BENCH_DIFF="$DIFF_FILE"
-    echo "[bench] Using diff from $BENCH_DIFF_COMMIT -> $DIFF_FILE"
-  fi
+  cargo build --release
+  export LRV_BIN="$ROOT_DIR/target/release/lrv"
+  # Export diff from target commit
+  DIFF_DIR="$RESULTS_DIR/diffs"
+  mkdir -p "$DIFF_DIR"
+  DIFF_FILE="$DIFF_DIR/${DIFF_COMMIT}.patch"
+  git show --format=format: -p "$DIFF_COMMIT" > "$DIFF_FILE"
+  export LRV_BENCH_DIFF="$DIFF_FILE"
+  echo "[bench] Using diff from $DIFF_COMMIT -> $DIFF_FILE"
   rm -f "$ROOT_DIR/e2e/test-results/perf-init.json" "$ROOT_DIR/e2e/test-results/perf-switch.json"
-  # App init perf (single run)
-  (cd e2e && npx playwright test -g "app init performance" --reporter=line --workers=1)
-  # File switch perf
-  (cd e2e && npx playwright test -g "rapid file switching" --reporter=line --workers=1)
+  # Run perf specs serially
+  (cd e2e && npx playwright test tests/perf.spec.ts --reporter=line --workers=1)
   # Merge results
 node - "$ROOT_DIR" <<'NODE'
 const fs = require('fs');
@@ -65,8 +67,26 @@ fs.writeFileSync(path.join(root, 'e2e/test-results/perf.json'), JSON.stringify(o
 console.log('[bench] merged to e2e/test-results/perf.json');
 NODE
   if [ -f "$ROOT_DIR/e2e/test-results/perf.json" ]; then
-    cp "$ROOT_DIR/e2e/test-results/perf.json" "$RESULTS_DIR/${c//\//_}.json"
-    echo "Saved: $RESULTS_DIR/${c//\//_}.json"
+    CODE_SHORT=$(git rev-parse --short "$c")
+    OUT_JSON="$RESULTS_DIR/${CODE_SHORT}-diff-${DIFF_COMMIT}.json"
+    cp "$ROOT_DIR/e2e/test-results/perf.json" "$OUT_JSON"
+    echo "Saved: $OUT_JSON"
+    if [ "${BENCH_COMMIT:-}" = "1" ]; then
+      node - <<NODE
+const fs=require('fs');
+const p='$OUT_JSON';
+const data=JSON.parse(fs.readFileSync(p));
+const avg=(a)=>a.length? (a.reduce((x,y)=>x+y,0)/a.length):0;
+const p95=(a)=>{ if(!a.length) return 0; const s=[...a].sort((x,y)=>x-y); return s[Math.floor(s.length*0.95)-1]||s[s.length-1]};
+const a=avg(data.appInit||[]), a95=p95(data.appInit||[]);
+const f=avg(data.fileSwitch||[]), f95=p95(data.fileSwitch||[]);
+console.log(`[bench] init avg=${a.toFixed(2)} p95=${a95.toFixed(2)} | switch avg=${f.toFixed(2)} p95=${f95.toFixed(2)}`);
+NODE
+      git add "$OUT_JSON"
+      git commit -m "bench: init/switch metrics (code $CODE_SHORT vs diff $DIFF_COMMIT)
+
+artifact: $(basename "$OUT_JSON")"
+    fi
   else
     echo "Warning: no perf.json produced for $c" >&2
   fi
