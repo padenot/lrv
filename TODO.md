@@ -9,7 +9,7 @@ This list tracks prioritized tasks for making lrv secure, self‑contained, and 
 - [x] Enforce path safety in `/api/file`:
   - [x] Reject absolute paths and any `..` components.
   - [x] Canonicalize and ensure the target remains under the project root; return 403 if not.
-- [ ] Gracefully handle missing VCS for the “old” side (return empty content with a clear message).
+- [x] Gracefully handle missing VCS for the “old” side (return empty content; UI tolerant).
 - [ ] Optional: Auth token for `--public` mode (opt-in; header or cookie). Low priority for private mesh.
 - [ ] Optional: Limit `/api/context` exposure to basename by default; full path behind a debug flag.
 
@@ -40,23 +40,32 @@ This list tracks prioritized tasks for making lrv secure, self‑contained, and 
 
 ## Content Security Policy
 - [x] Add CSP and security headers for local assets only (includes script 'unsafe-inline'/'unsafe-eval' for Monaco, and style 'unsafe-inline').
+- [x] Allow `worker-src blob:` and `script-src blob:` to enable Monaco workers.
 - [ ] Later: move inline JS/CSS to files and remove `'unsafe-inline'`/`'unsafe-eval'`.
 
 ## Diff Parsing & Rendering
 - Handle “no newline at end of file” markers gracefully.
 - Accept metadata-only changes (files with status but no hunks) for display.
 - [x] Lazy-load file contents on selection instead of fetching all at init for large diffs.
+ - [x] Tolerate missing old content (render new side only) without errors.
 
 ## Monaco Lifecycle & Performance
 - [x] Dispose previous diff editor and models on file switch.
 - [x] Dispose content widgets on close (also on file switch).
 - [x] Remove debug `console.log` or guard behind a DEBUG flag.
+- [x] Pre-apply theme (no flash) and gate body visibility until ready.
+- [x] Wait for AMD loader readiness before loading Monaco.
+- [x] Stabilize perf E2E (init + rapid) and write perf JSON outputs.
 
 ## UX & Accessibility
 - Modals: `role="dialog"`, `aria-modal="true"`, labeled headings, focus trap, restore focus on close.
 - Keyboard shortcuts shouldn’t interfere when inputs focused (mostly done; verify).
 - Show a visible banner when `--public` mode is active.
 - Show clear UI when old content is unavailable.
+- [x] Default code font to monospace (JetBrains Mono) with user override.
+- [x] Project info truncation/tooltip for long title/paths.
+- [ ] Smooth, short CSS transitions for theme/background/text changes.
+- [ ] Keyboard: brace single-line conditionals; prefer layout-agnostic detection where applicable.
 
 ## CLI & Output
 - Remove `--mode` from README or implement if desired.
@@ -75,17 +84,25 @@ This list tracks prioritized tasks for making lrv secure, self‑contained, and 
 - [x] E2E: drop `pkill`; only kill the spawned server process.
 - [x] E2E: random free port per run; set Playwright `baseURL` dynamically.
 - [x] Add an offline run to validate vendored assets (just check-offline).
+- [x] Add theme E2E (no flash + theme accent from Monaco theme defs).
+- [x] Add perf runner scripts (init/loop/batch) + just recipes.
+- [x] Add Prettier config/ignore; just fmt-web; apply formatting.
+- [ ] CI: cache Cargo/npm; run unit then E2E; optionally run with network disabled.
+- [ ] CI: perf thresholds (init mean/p95, switch mean/p95) gates.
 - [ ] CI: cache Cargo/npm; run unit then E2E; optionally run with network disabled.
 
 ## Code Hygiene
 - [x] Remove stray "Test comment" in `src/main.rs`.
 - [ ] Prefer `tracing` over `eprintln!` for server logs, except user-facing.
 - [ ] Consistent status codes and error bodies for API failures (optional).
+- [x] Remove unused imports and warnings (e.g., Html).
+- [ ] Replace ad-hoc selectors with helpers ($, $$) where it improves readability.
 
 ## Documentation
 - README: update for bind/public behavior, VCS options, vendored assets, offline behavior.
 - Security model: localhost/private mesh focus; optional token for `--public`.
 - Add licenses/links for Monaco and fonts.
+- [x] Perf E2E quick guide (docs/perf-e2e.md) with scripts/usage.
 
 ## Stretch Goals
 - `--base` revspec support for both Git and JJ.

@@ -32,22 +32,23 @@
     </style>
     <style>
       /* Dynamic theme variables - set by JavaScript based on Monaco editor theme */
-      :root {
-        /* Colors are set at runtime by applyThemeToUI() based on the selected Monaco theme */
-        --bg-primary: #1e1e1e;
-        --bg-secondary: #252526;
-        --bg-elevated: #2d2d30;
-        --border-color: #3e3e42;
-        --text-primary: #cccccc;
-        --text-secondary: #858585;
-        --text-tertiary: #6e6e6e;
-        /* --accent-color is set from the theme (e.g., Firefox DevTools Dark uses pink) */
-        --accent-color: #007acc;
-        --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-        --font-mono: 'JetBrains Mono', 'Monaco', 'Menlo', 'Consolas', monospace;
-        --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
-        --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
-      }
+    :root {
+      /* Colors are set at runtime by applyThemeToUI() based on the selected Monaco theme */
+      --bg-primary: #1e1e1e;
+      --bg-secondary: #252526;
+      --bg-elevated: #2d2d30;
+      --border-color: #3e3e42;
+      --text-primary: #cccccc;
+      --text-secondary: #858585;
+      --text-tertiary: #6e6e6e;
+      /* --accent-color is set from the theme (e.g., Firefox DevTools Dark uses pink) */
+      --accent-color: #007acc;
+      --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      --font-mono: 'JetBrains Mono', 'Monaco', 'Menlo', 'Consolas', monospace;
+      --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
+      --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
+      --ui-transition: 150ms;
+    }
 
       /* Prevent flash of default theme: hide body until UI theme is applied */
       html:not([data-ui-ready='1']) body {
@@ -101,13 +102,13 @@
         font-weight: 400;
       }
 
-      .project-info-value {
-        color: var(--text-secondary);
-        font-family: var(--font-mono);
-        white-space: nowrap;
-        text-overflow: ellipsis;
-        overflow: hidden;
-      }
+    .project-info-value {
+      color: var(--text-secondary);
+      font-family: var(--font-mono);
+      white-space: nowrap;
+      text-overflow: ellipsis;
+      overflow: hidden;
+    }
 
       .git-branch {
         color: var(--accent-color);
@@ -159,10 +160,31 @@
         opacity: 0.8;
       }
 
-      .header button:disabled {
-        background: var(--text-tertiary);
-        cursor: not-allowed;
+    .header button:disabled {
+      background: var(--text-tertiary);
+      cursor: not-allowed;
+    }
+
+    /* Smooth, short transitions for theme changes (no heavy animations) */
+    @media (prefers-reduced-motion: no-preference) {
+      body,
+      .header,
+      .sidebar,
+      .content,
+      .submit-modal,
+      .comment-badge,
+      .file-list li,
+      .project-info,
+      .settings-btn,
+      .header button,
+      .btn-primary,
+      .btn-secondary,
+      .btn-danger {
+        transition: background-color var(--ui-transition) ease,
+          color var(--ui-transition) ease,
+          border-color var(--ui-transition) ease;
       }
+    }
 
       .main {
         display: flex;
@@ -775,7 +797,7 @@
     </div>
 
     <!-- Prefer local Monaco; fall back to CDN if missing -->
-    <script>
+  <script>
       window.MONACO_VS_BASE = '/assets/vendor/monaco/min/vs';
       (function () {
         var s = document.createElement('script');
@@ -808,6 +830,10 @@
       // App readiness flag (set true when first diff is rendered)
       window.__APP_READY = false;
       // Simple performance instrumentation
+      // Small DOM helpers for readability
+      const $ = (sel, root = document) => root.querySelector(sel);
+      const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+
       window.Perf = {
         mark: (name) => {
           performance.mark(name);
@@ -1421,8 +1447,8 @@
           window.UI_THEME_DEFS['github-light'] = ghLight;
         }
 
-        renderProjectInfo() {
-          const projectInfo = document.getElementById('project-info');
+      renderProjectInfo() {
+        const projectInfo = $('#project-info');
 
           // Get just the directory name from the full path
           const dirName =
@@ -1444,33 +1470,33 @@
 
         setupUI() {
           // File list clicks
-          document.getElementById('file-list').addEventListener('click', (e) => {
-            const li = e.target.closest('li');
-            if (li) {
-              const index = parseInt(li.dataset.index);
-              this.loadFile(index);
-            }
-          });
+        $('#file-list').addEventListener('click', (e) => {
+          const li = e.target.closest('li');
+          if (li) {
+            const index = parseInt(li.dataset.index);
+            this.loadFile(index);
+          }
+        });
 
           // Settings button
-          document.getElementById('settings-btn').addEventListener('click', () => {
-            this.showSettingsModal();
-          });
+        $('#settings-btn').addEventListener('click', () => {
+          this.showSettingsModal();
+        });
 
           // Submit button
-          document.getElementById('submit-review').addEventListener('click', async () => {
-            this.showSubmitConfirmation();
-          });
+        $('#submit-review').addEventListener('click', async () => {
+          this.showSubmitConfirmation();
+        });
 
           // Toggle view
-          document.getElementById('toggle-view').addEventListener('click', () => {
-            this.isInline = !this.isInline;
-            this.loadFile(this.currentFileIndex);
-          });
+        $('#toggle-view').addEventListener('click', () => {
+          this.isInline = !this.isInline;
+          this.loadFile(this.currentFileIndex);
+        });
 
           // Stats
-          document.getElementById('stats').textContent =
-            `${this.stats.files_changed} files, +${this.stats.additions} -${this.stats.deletions}`;
+        $('#stats').textContent =
+          `${this.stats.files_changed} files, +${this.stats.additions} -${this.stats.deletions}`;
 
           // Sidebar resizer
           this.setupSidebarResizer();
@@ -1621,7 +1647,9 @@
           const monacoEndLine = hunkRange.end - offset;
 
           const modifiedEditor = this.editor.getModifiedEditor();
-          modifiedEditor.revealLineInCenter(monacoStartLine);
+          const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+          const smooth = monaco.editor.ScrollType.Smooth;
+          modifiedEditor.revealLineInCenter(monacoStartLine, reduceMotion ? monaco.editor.ScrollType.Immediate : smooth);
 
           // Highlight the focused hunk
           this.highlightFocusedHunk(monacoStartLine, monacoEndLine);
@@ -1734,7 +1762,7 @@
           if (window.DEBUG) console.log('[app] loadFile: path', file.path, 'status', file.status);
 
           // Update show full file button
-          const showFullBtn = document.getElementById('show-full-file');
+          const showFullBtn = $('#show-full-file');
           let range = this.fileRanges[file.path];
           if (!range) {
             // Initialize range and hunk ranges from metadata
@@ -1824,6 +1852,7 @@
           const mono =
             (this.config.font && String(this.config.font).trim()) ||
             "'JetBrains Mono', 'Monaco', 'Menlo', 'Consolas', monospace";
+          const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
           if (!this.editor) {
             this.editor = monaco.editor.createDiffEditor(container, {
               theme: theme,
@@ -1842,12 +1871,20 @@
                 horizontal: 'visible',
               },
             });
+            try {
+              this.editor.getModifiedEditor().updateOptions({ smoothScrolling: !reduceMotion });
+              this.editor.getOriginalEditor().updateOptions({ smoothScrolling: !reduceMotion });
+            } catch (_) {}
           } else {
             this.editor.updateOptions({
               renderSideBySide: !this.isInline,
               theme: theme,
               fontFamily: mono,
             });
+            try {
+              this.editor.getModifiedEditor().updateOptions({ smoothScrolling: !reduceMotion });
+              this.editor.getOriginalEditor().updateOptions({ smoothScrolling: !reduceMotion });
+            } catch (_) {}
           }
 
           // Lazily fetch content and slice to visible range
@@ -2223,7 +2260,7 @@
 
         async renderExpandControls() {
           // Remove existing controls
-          document.querySelectorAll('.expand-controls').forEach((el) => el.remove());
+          $$('.expand-controls').forEach((el) => el.remove());
 
           const file = this.files[this.currentFileIndex];
           const range = this.fileRanges[file.path];
@@ -2250,8 +2287,8 @@
             );
           }
 
-          const topContainer = document.getElementById('expand-top-container');
-          const bottomContainer = document.getElementById('expand-bottom-container');
+          const topContainer = $('#expand-top-container');
+          const bottomContainer = $('#expand-bottom-container');
 
           // Calculate available lines above and below current view
           // Use the maximum of old/new sides since they may have different lengths
@@ -2473,7 +2510,13 @@
                 // If we expanded at top, adjust scroll by actual lines added
                 const linesAddedAtTop = position === 'top' ? oldNewStart - newNewStart : 0;
                 const adjustedLine = scrollLineNumber + linesAddedAtTop;
-                modifiedEditor.revealLineInCenter(adjustedLine);
+                const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+                modifiedEditor.revealLineInCenter(
+                  adjustedLine,
+                  reduceMotion
+                    ? monaco.editor.ScrollType.Immediate
+                    : monaco.editor.ScrollType.Smooth,
+                );
               }
             }, 50);
           }
