@@ -310,6 +310,8 @@ body {
   height: calc(100vh - 48px);
   opacity: 0;
   transition: opacity 350ms ease;
+  position: relative;
+  z-index: 10;
 }
 
 /* Expand controls (above/below) */
@@ -319,7 +321,7 @@ body {
   left: 0;
   right: 0;
   display: none; /* JS toggles visibility based on scroll */
-  z-index: 2000; /* above Monaco layers and scrollbars */
+  z-index: 10000; /* above Monaco layers and scrollbars */
   pointer-events: none; /* re-enable on inner control */
 }
 #expand-top-container { top: 0; }
@@ -335,7 +337,7 @@ body {
   border-bottom: 1px solid var(--border-color);
   pointer-events: auto; /* clickable */
   position: relative;
-  z-index: 2001;
+  z-index: 10001;
 }
 .expand-controls.top { border-bottom: 1px solid var(--border-color); }
 .expand-controls.bottom { border-top: 1px solid var(--border-color); }
@@ -354,6 +356,8 @@ body {
   padding: 4px 12px;
   font-size: 12px;
   cursor: pointer;
+  position: relative;
+  z-index: 10002;
 }
 .expand-btn:hover {
   background: var(--border-color);
@@ -458,7 +462,15 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 3000; /* ensure over everything */
+  z-index: 30000; /* ensure over everything */
+}
+
+/* Ensure Monaco scrollbars/widgets never overdraw overlays */
+.monaco-editor .scrollbar,
+.monaco-editor .overlayWidgets,
+.monaco-editor .minimap-shadow-visible,
+.monaco-editor .decorationsOverviewRuler {
+  z-index: 1 !important;
 }
 
 .submit-modal {
