@@ -12,6 +12,7 @@ let serverProcess: ChildProcess | null = null;
 let serverUrl: string | null = null;
 let testRepoPath: string | null = null;
 let serverLogPath: string | null = null;
+const IS_BENCH = !!process.env.LRV_BENCH_DIFF;
 
 /**
  * Start the lrv server with a test diff
@@ -25,7 +26,10 @@ async function startServer(port: number = 0, options?: { title?: string }): Prom
     // Run cargo from the main repo, but execute git diff from the test repo
     const cargoPath = path.resolve(__dirname, '../../target/debug/lrv');
     const extraFlags = options?.title ? ` --title \"${options.title}\"` : '';
-    const cmd = `cd "${testRepoPath}" && git diff HEAD | "${cargoPath}" --port ${port} --no-open${extraFlags}`;
+    const benchDiff = process.env.LRV_BENCH_DIFF;
+    const cmd = benchDiff
+      ? `cd "${testRepoPath}" && cat "${benchDiff}" | "${cargoPath}" --port ${port} --no-open${extraFlags}`
+      : `cd "${testRepoPath}" && git diff HEAD | "${cargoPath}" --port ${port} --no-open${extraFlags}`;
 
     // Reset state for new instance
     serverUrl = null;
@@ -439,11 +443,21 @@ test.describe('Review Workflow E2E', () => {
     // Clear metrics before measuring
     await page.evaluate(() => window.Perf && window.Perf.clear());
 
-    // Cycle through files multiple times and await content visibility
-    for (let i = 0; i < 6; i++) {
-      const name = files[i % files.length];
-      await page.locator('#file-list li').filter({ hasText: name }).click();
-      await expect(page.locator(selectors[name])).toBeVisible();
+    // Cycle through files multiple times and await content visibility (bench uses generic checks)
+    if (!IS_BENCH) {
+      for (let i = 0; i < 6; i++) {
+        const name = files[i % files.length];
+        await page.locator('#file-list li').filter({ hasText: name }).click();
+        await expect(page.locator(selectors[name])).toBeVisible();
+      }
+    } else {
+      const itemCount = await page.locator('#file-list li').count();
+      const n = Math.min(3, itemCount);
+      for (let i = 0; i < 6; i++) {
+        const idx = i % n;
+        await page.locator('#file-list li').nth(idx).click();
+        await page.locator('.monaco-editor').first().waitFor({ timeout: 5000 });
+      }
     }
 
     // Assert no errors were captured

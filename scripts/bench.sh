@@ -36,6 +36,15 @@ for c in "${COMMITS[@]}"; do
   echo "--- Bench at $c ---"
   git checkout -q "$c"
   just build
+  # Optionally export a diff from a large commit to feed as input
+  if [ -n "${BENCH_DIFF_COMMIT:-}" ]; then
+    DIFF_DIR="$RESULTS_DIR/diffs"
+    mkdir -p "$DIFF_DIR"
+    DIFF_FILE="$DIFF_DIR/${BENCH_DIFF_COMMIT}.patch"
+    git show --format=format: -p "$BENCH_DIFF_COMMIT" > "$DIFF_FILE"
+    export LRV_BENCH_DIFF="$DIFF_FILE"
+    echo "[bench] Using diff from $BENCH_DIFF_COMMIT -> $DIFF_FILE"
+  fi
   rm -f "$ROOT_DIR/e2e/test-results/perf-init.json" "$ROOT_DIR/e2e/test-results/perf-switch.json"
   # App init perf (single run)
   (cd e2e && npx playwright test -g "app init performance" --reporter=line --workers=1)
