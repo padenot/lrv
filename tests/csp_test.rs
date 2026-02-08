@@ -6,7 +6,7 @@ async fn test_csp_header_present() {
     // minimal state
     let diff_data = lrv::types::DiffResponse { files: vec![], stats: lrv::types::DiffStats { files_changed: 0, additions: 0, deletions: 0 } };
     let config = lrv::config::UserConfig::default();
-    let context = lrv::types::ProjectContext { working_directory: std::env::current_dir().unwrap().to_string_lossy().to_string(), git_branch: None, title: None };
+    let context = lrv::types::ProjectContext { working_directory: std::env::current_dir().unwrap().to_string_lossy().to_string(), git_branch: None, title: None, is_public: false };
     let (shutdown_tx, _rx) = tokio::sync::mpsc::channel::<()>(1);
     let state = lrv::server::AppState {
         diff: std::sync::Arc::new(diff_data),
@@ -33,7 +33,7 @@ async fn test_csp_on_assets_and_api() {
     // minimal state
     let diff_data = lrv::types::DiffResponse { files: vec![], stats: lrv::types::DiffStats { files_changed: 0, additions: 0, deletions: 0 } };
     let config = lrv::config::UserConfig::default();
-    let context = lrv::types::ProjectContext { working_directory: std::env::current_dir().unwrap().to_string_lossy().to_string(), git_branch: None, title: None };
+    let context = lrv::types::ProjectContext { working_directory: std::env::current_dir().unwrap().to_string_lossy().to_string(), git_branch: None, title: None, is_public: false };
     let (shutdown_tx, _rx) = tokio::sync::mpsc::channel::<()>(1);
     let state = lrv::server::AppState {
         diff: std::sync::Arc::new(diff_data),

@@ -31,6 +31,7 @@ fn make_state_with_root(root: &str) -> lrv::server::AppState {
         working_directory: root.to_string(),
         git_branch: None,
         title: None,
+        is_public: false,
     };
     let (shutdown_tx, _rx) = mpsc::channel::<()>(1);
     lrv::server::AppState {

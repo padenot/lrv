@@ -10,6 +10,7 @@ async fn test_context_includes_title_when_set() {
         working_directory: std::env::current_dir().unwrap().to_string_lossy().to_string(),
         git_branch: None,
         title: Some("Test Title".to_string()),
+        is_public: false,
     };
     let (shutdown_tx, _rx) = tokio::sync::mpsc::channel::<()>(1);
     let state = lrv::server::AppState {
@@ -42,6 +43,7 @@ async fn test_context_title_null_when_unset() {
         working_directory: std::env::current_dir().unwrap().to_string_lossy().to_string(),
         git_branch: None,
         title: None,
+        is_public: false,
     };
     let (shutdown_tx, _rx) = tokio::sync::mpsc::channel::<()>(1);
     let state = lrv::server::AppState {
@@ -65,4 +67,3 @@ async fn test_context_title_null_when_unset() {
     assert!(v.get("title").is_some());
     assert!(v["title"].is_null());
 }
-

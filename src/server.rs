@@ -47,8 +47,8 @@ pub fn create_router(state: AppState) -> Router {
 async fn serve_index() -> impl IntoResponse {
     match WebAssets::get("dist/index.html") {
         Some(content) => {
-            // Enable Monaco editor workers (blob:), inline scripts for the AMD loader, and self asset loading
-            const CSP: &str = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'";
+            // AMD Monaco: allow eval + blob workers; still no inline scripts
+            const CSP: &str = "default-src 'self'; script-src 'self' 'unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'";
             Response::builder()
                 .status(StatusCode::OK)
                 .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
@@ -87,9 +87,8 @@ async fn serve_asset(AxumPath(path): AxumPath<String>) -> Response {
 
 // Middleware: add strict security headers (CSP, frame-ancestors, etc.)
 async fn security_headers(req: axum::http::Request<axum::body::Body>, next: middleware::Next) -> Response {
-    // Default CSP for non-HTML routes (allow inline for simplicity in this app)
-    // Keep consistent with the stricter index CSP, including worker-src and blob for Monaco workers.
-    const DEFAULT_CSP: &str = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'";
+    // Default CSP for non-HTML routes (match index CSP)
+    const DEFAULT_CSP: &str = "default-src 'self'; script-src 'self' 'unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'";
 
     let mut res = next.run(req).await;
     {
@@ -103,6 +102,8 @@ async fn security_headers(req: axum::http::Request<axum::body::Body>, next: midd
         let _ = headers.insert(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
         let _ = headers.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
         let _ = headers.insert(header::REFERRER_POLICY, HeaderValue::from_static("no-referrer"));
+        let _ = headers.insert(header::HeaderName::from_static("cross-origin-resource-policy"), HeaderValue::from_static("same-origin"));
+        let _ = headers.insert(header::HeaderName::from_static("permissions-policy"), HeaderValue::from_static("camera=() , microphone=() , geolocation=() , payment=() , usb=() , xr-spatial-tracking=()"));
         // HSTS is omitted since we bind http locally; can be enabled behind TLS/terminator
     }
     res

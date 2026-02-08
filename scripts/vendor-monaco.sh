@@ -22,14 +22,19 @@ echo "Extracting..."
 tar -xzf "${TARBALL}" -C "${TMP_DIR}"
 
 SRC_MIN_DIR="${TMP_DIR}/package/min"
+SRC_ESM_DIR="${TMP_DIR}/package/esm"
 if [ ! -d "${SRC_MIN_DIR}" ]; then
   echo "Error: expected 'package/min' in monaco tarball." >&2
   exit 1
 fi
 
 echo "Installing files..."
-rm -rf "${DEST_ROOT}/min"
+rm -rf "${DEST_ROOT}/min" "${DEST_ROOT}/esm"
 mkdir -p "${DEST_ROOT}"
 cp -a "${SRC_MIN_DIR}" "${DEST_ROOT}/min"
+if [ -d "${SRC_ESM_DIR}" ]; then
+  cp -a "${SRC_ESM_DIR}" "${DEST_ROOT}/esm"
+  echo "ESM installed at: ${DEST_ROOT}/esm"
+fi
 
-echo "Done. Loader at: ${DEST_ROOT}/min/vs/loader.js"
+echo "Done. AMD loader at: ${DEST_ROOT}/min/vs/loader.js"
