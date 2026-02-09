@@ -1395,7 +1395,7 @@ class MonacoApp {
         readOnly: true,
         originalEditable: false,
         automaticLayout: true,
-        scrollBeyondLastLine: false,
+        scrollBeyondLastLine: true,
         minimap: { enabled: true },
         glyphMargin: true,
         folding: false,
@@ -1512,10 +1512,16 @@ class MonacoApp {
         glyphMargin: true,
         folding: false,
         lineDecorationsWidth: 0,
+        scrollBeyondLastLine: true,
       });
       const me = this.editor.getModifiedEditor && this.editor.getModifiedEditor();
       const oe = this.editor.getOriginalEditor && this.editor.getOriginalEditor();
-      const opts = { smoothScrolling: !reduceMotion, glyphMargin: true, folding: false };
+      const opts = {
+        smoothScrolling: !reduceMotion,
+        glyphMargin: true,
+        folding: false,
+        scrollBeyondLastLine: true,
+      };
       if (me && me.getModel()) {
         me.updateOptions(opts);
       }
@@ -1751,7 +1757,10 @@ class MonacoApp {
           lineNumber: monacoLineNumber,
           column: 1,
         },
-        preference: [monaco.editor.ContentWidgetPositionPreference.BELOW],
+        preference: [
+          monaco.editor.ContentWidgetPositionPreference.BELOW,
+          monaco.editor.ContentWidgetPositionPreference.ABOVE,
+        ],
       }),
     };
 

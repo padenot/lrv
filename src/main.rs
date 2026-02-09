@@ -8,6 +8,7 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use lrv::netutil;
 use std::io::Read;
+use std::env;
 use std::process::Command;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex, Notify};
@@ -142,6 +143,13 @@ fn get_tailscale_ipv4s() -> Vec<String> {
     Vec::new()
 }
 
+fn is_ssh_session() -> bool {
+    // Detect common SSH environment variables
+    env::var_os("SSH_CONNECTION").is_some()
+        || env::var_os("SSH_TTY").is_some()
+        || env::var_os("SSH_CLIENT").is_some()
+}
+
 #[derive(Parser, Debug)]
 #[command(name = "lrv")]
 #[command(about = "Local code review tool for LLM agents", long_about = None)]
@@ -192,6 +200,29 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
     let args = Args::parse();
+
+    // Derive dynamic behavior based on environment
+    // If we're over SSH and a Tailscale IP is present, auto-enable tailscale bindings
+    // and avoid opening a local browser on this host.
+    let mut enable_tailscale = args.tailscale;
+    let mut disable_open = args.no_open;
+    let mut detected_ts_ips: Option<Vec<String>> = None;
+    if !enable_tailscale || !disable_open {
+        if is_ssh_session() {
+            let ts = get_tailscale_ipv4s();
+            if !ts.is_empty() {
+                if !enable_tailscale {
+                    eprintln!("Auto-enabling --tailscale (SSH + Tailscale IP detected)");
+                    enable_tailscale = true;
+                }
+                if !disable_open {
+                    eprintln!("Auto-enabling --no-open (SSH session)");
+                    disable_open = true;
+                }
+                detected_ts_ips = Some(ts);
+            }
+        }
+    }
 
     // Get diff text from stdin, file, or command
     let diff_text = if let Some(file_path) = args.file {
@@ -274,8 +305,11 @@ async fn main() -> Result<()> {
         bind_addrs.push("127.0.0.1".to_string());
     }
 
-    if args.tailscale {
-        let ts = get_tailscale_ipv4s();
+    if enable_tailscale {
+        let ts = match detected_ts_ips {
+            Some(v) => v,
+            None => get_tailscale_ipv4s(),
+        };
         if ts.is_empty() {
             eprintln!("Note: Tailscale IP not detected; is tailscale running?");
         }
@@ -338,7 +372,7 @@ async fn main() -> Result<()> {
     let url = format!("http://127.0.0.1:{}", actual_port);
 
     // Open browser
-    if !args.no_open {
+    if !disable_open {
         if let Err(e) = open::that(&url) {
             eprintln!("Failed to open browser: {}", e);
         }
