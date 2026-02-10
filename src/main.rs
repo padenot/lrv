@@ -143,6 +143,7 @@ fn get_tailscale_ipv4s() -> Vec<String> {
     Vec::new()
 }
 
+
 fn is_ssh_session() -> bool {
     // Detect common SSH environment variables
     env::var_os("SSH_CONNECTION").is_some()
@@ -283,17 +284,24 @@ async fn main() -> Result<()> {
     // Setup shutdown channel
     let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
 
+    // Lazy mode: don't preload or materialize; resolve content on demand in handlers
+
     // Create app state
+    let old_cache_capacity = diff.files.len();
     let state = AppState {
         diff: Arc::new(diff),
         comments: Arc::new(Mutex::new(Vec::new())),
         shutdown_tx: Arc::new(Mutex::new(Some(shutdown_tx))),
         config: Arc::new(Mutex::new(user_config)),
         context: Arc::new(project_context),
+        old_cache: Arc::new(Mutex::new(std::collections::HashMap::with_capacity(old_cache_capacity))),
     };
 
     // Create router (we'll clone per listener)
     let _app_for_clone = create_router(state.clone(), args.dev_log);
+
+    // Eagerly prefetch old-side contents in the background
+    tokio::spawn(crate::server::prefetch_old_files(state.clone()));
 
     // Determine bind addresses
     let mut bind_addrs: Vec<String> = Vec::new();

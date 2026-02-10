@@ -53,15 +53,77 @@ window.Perf = {
 };
 
 // Helper: fetch JSON with status check
+// For /api/file requests, show a delayed throbber if they take noticeable time
+let __fileFetchPending = 0;
+let __fileFetchDelayTimer = null;
+let __fetchSpinnerEl = null;
+function ensureFetchSpinner() {
+  try {
+    if (!__fetchSpinnerEl) {
+      const host = document.querySelector('.header .header-actions');
+      if (!host) return;
+      const s = document.createElement('span');
+      s.id = 'fetch-spinner';
+      s.className = 'fetch-spinner';
+      host.insertBefore(s, host.firstChild);
+      __fetchSpinnerEl = s;
+    }
+  } catch {}
+}
+function showFetchSpinnerDelayed() {
+  try {
+    ensureFetchSpinner();
+    if (!__fetchSpinnerEl) return;
+    if (__fileFetchDelayTimer) return; // already scheduled
+    __fileFetchDelayTimer = setTimeout(() => {
+      if (__fileFetchPending > 0) {
+        __fetchSpinnerEl.classList.add('visible');
+        try {
+          if (window.__APP && typeof window.__APP.eagerPrefetchAllFiles === 'function') {
+            window.__APP.eagerPrefetchAllFiles();
+          }
+        } catch {}
+      }
+      __fileFetchDelayTimer = null;
+    }, 400);
+  } catch {}
+}
+function hideFetchSpinnerMaybe() {
+  try {
+    if (__fileFetchPending === 0) {
+      if (__fileFetchDelayTimer) {
+        clearTimeout(__fileFetchDelayTimer);
+        __fileFetchDelayTimer = null;
+      }
+      if (__fetchSpinnerEl) {
+        __fetchSpinnerEl.classList.remove('visible');
+      }
+    }
+  } catch {}
+}
 async function fetchJSON(url, options) {
-  const res = await fetch(url, options);
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(
-      `Request failed ${res.status} ${res.statusText} at ${url}${text ? `: ${text.slice(0, 200)}` : ''}`,
-    );
+  const isFile = typeof url === 'string' && url.startsWith('/api/file');
+  if (isFile) {
+    __fileFetchPending++;
+    if (__fileFetchPending === 1) {
+      showFetchSpinnerDelayed();
+    }
   }
-  return res.json();
+  try {
+    const res = await fetch(url, options);
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(
+        `Request failed ${res.status} ${res.statusText} at ${url}${text ? `: ${text.slice(0, 200)}` : ''}`,
+      );
+    }
+    return res.json();
+  } finally {
+    if (isFile) {
+      __fileFetchPending = Math.max(0, __fileFetchPending - 1);
+      hideFetchSpinnerMaybe();
+    }
+  }
 }
 
 // Simple theme → accent mapping (use theme’s intended accent color)
@@ -218,8 +280,56 @@ class MonacoApp {
     this.originalModel = null;
     this.modifiedModel = null;
     this.scrollListenerDispose = null;
+    this._eagerPrefetchStarted = false;
+    this._commitPopoverEl = null;
+    this.currentFileIsCommit = false;
+    this._commitViewEl = null;
 
     this.commentManager.onChange(() => this.updateUI());
+  }
+
+  // When we detect slow file fetches, eagerly prefetch the rest to warm caches
+  async eagerPrefetchAllFiles() {
+    if (this._eagerPrefetchStarted) {
+      return;
+    }
+    this._eagerPrefetchStarted = true;
+    try {
+      const paths = (this.files || []).map((f) => f.path).filter(Boolean);
+      const toFetch = paths.filter((p) => !this.fileCache[p]);
+      if (toFetch.length === 0) {
+        return;
+      }
+      if (window.DEBUG) {
+        console.log('[prefetch] warming', toFetch.length, 'files');
+      }
+      const concurrency = 8;
+      let i = 0;
+      const nextBatch = () => {
+        const batch = [];
+        for (let k = 0; k < concurrency && i < toFetch.length; k++, i++) {
+          const p = toFetch[i];
+          batch.push(
+            Promise.all([
+              fetchJSON(`/api/file?path=${encodeURIComponent(p)}&side=old`),
+              fetchJSON(`/api/file?path=${encodeURIComponent(p)}&side=new`),
+            ])
+              .then(([oldData, newData]) => {
+                this.fileCache[p] = { old: oldData.content || '', new: newData.content || '' };
+              })
+              .catch(() => {})
+          );
+        }
+        return Promise.all(batch);
+      };
+      while (i < toFetch.length) {
+        // eslint-disable-next-line no-await-in-loop
+        await nextBatch();
+      }
+      if (window.DEBUG) {
+        console.log('[prefetch] done');
+      }
+    } catch {}
   }
 
   async init() {
@@ -250,6 +360,7 @@ class MonacoApp {
     if (window.DEBUG) {
       console.log('[app] init: parsed config/context/diff');
     }
+    this.diff = diffData;
     this.files = diffData.files;
     this.stats = diffData.stats;
 
@@ -705,7 +816,7 @@ class MonacoApp {
       span.setAttribute('title', t);
       span.textContent = t;
       el.appendChild(span);
-      return;
+      // fall through to optionally show commit message as well
     }
     const wd = String(this.context.working_directory || '');
     const dirName = (wd || '').split('/').pop() || wd;
@@ -724,6 +835,138 @@ class MonacoApp {
       br.textContent = String(this.context.git_branch);
       el.appendChild(br);
     }
+
+    // Optional commit message from diff (when reviewing full commits)
+    if (this.diff && (this.diff.commit_message || this.diff.commit_hash)) {
+      const sep = document.createElement('span');
+      sep.className = 'project-info-separator';
+      sep.textContent = '·';
+      el.appendChild(sep);
+      const mm = document.createElement('span');
+      mm.className = 'commit-message';
+      const rev = this.diff.commit_hash ? String(this.diff.commit_hash).substring(0, 7) + ': ' : '';
+      const firstLine = String(this.diff.commit_message || '').split('\n')[0];
+      mm.textContent = rev + firstLine;
+      if (this.diff.commit_message) { mm.title = String(this.diff.commit_message); }
+      mm.addEventListener('click', (ev) => {
+        this.showCommitMessagePopover(ev.currentTarget, String(this.diff.commit_message || ''), String(this.diff.commit_hash || ''));
+      });
+      el.appendChild(mm);
+    }
+  }
+
+  showCommitMessagePopover(anchorEl, message, rev) {
+    try {
+      // Toggle if already visible
+      if (this._commitPopoverEl) {
+        this._commitPopoverEl.remove();
+        this._commitPopoverEl = null;
+        return;
+      }
+      const pop = document.createElement('div');
+      pop.className = 'commit-popover';
+      const title = document.createElement('div');
+      title.className = 'commit-popover-title';
+      const first = (message || '').split('\n')[0] || '(no message)';
+      title.textContent = (rev ? rev + ': ' : '') + first;
+      const body = document.createElement('div');
+      body.className = 'commit-popover-body';
+      body.textContent = message || '';
+      pop.appendChild(title);
+      pop.appendChild(body);
+
+      // Inline comment box
+      const form = document.createElement('div');
+      form.style.marginTop = '10px';
+      const ta = document.createElement('textarea');
+      ta.rows = 3;
+      ta.style.width = '100%';
+      ta.placeholder = 'Comment on this commit…';
+      const controls = document.createElement('div');
+      controls.style.display = 'flex';
+      controls.style.gap = '8px';
+      controls.style.marginTop = '6px';
+      const addBtn = document.createElement('button');
+      addBtn.textContent = 'Add Comment';
+      addBtn.className = 'expand-btn';
+      const cancelBtn = document.createElement('button');
+      cancelBtn.textContent = 'Cancel';
+      cancelBtn.className = 'expand-btn';
+      controls.appendChild(addBtn);
+      controls.appendChild(cancelBtn);
+      form.appendChild(ta);
+      form.appendChild(controls);
+      pop.appendChild(form);
+      document.body.appendChild(pop);
+      // Position near the anchor
+      const r = anchorEl.getBoundingClientRect();
+      const pad = 6;
+      let top = r.bottom + pad;
+      let left = r.left;
+      // Clamp to viewport
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      // If too far right, adjust left
+      const rect = pop.getBoundingClientRect();
+      if (left + rect.width + pad > vw) {
+        left = Math.max(pad, vw - rect.width - pad);
+      }
+      if (top + rect.height + pad > vh) {
+        top = Math.max(pad, r.top - rect.height - pad);
+      }
+      pop.style.left = `${Math.max(pad, left)}px`;
+      pop.style.top = `${Math.max(pad, top)}px`;
+
+      const onDocClick = (e) => {
+        if (!pop.contains(e.target) && e.target !== anchorEl) {
+          cleanup();
+        }
+      };
+      const onEsc = (e) => {
+        if (e.key === 'Escape') {
+          cleanup();
+        }
+      };
+      const cleanup = () => {
+        if (this._commitPopoverEl) {
+          this._commitPopoverEl.remove();
+          this._commitPopoverEl = null;
+        }
+        document.removeEventListener('click', onDocClick, true);
+        document.removeEventListener('keydown', onEsc, true);
+      };
+      this._commitPopoverEl = pop;
+      setTimeout(() => {
+        document.addEventListener('click', onDocClick, true);
+        document.addEventListener('keydown', onEsc, true);
+      }, 0);
+
+      // Wire buttons
+      cancelBtn.onclick = (e) => {
+        e.preventDefault();
+        cleanup();
+      };
+      addBtn.onclick = (e) => {
+        e.preventDefault();
+        const body = (ta.value || '').trim();
+        if (!body) {
+          ta.focus();
+          return;
+        }
+        const comment = {
+          file: '(commit)',
+          start_line: 1,
+          end_line: 1,
+          side: 'new',
+          body,
+          severity: 'comment',
+        };
+        this.commentManager.addComment(comment);
+        // Optionally feedback
+        try { showNavIndicator('Commit comment added'); } catch {}
+        cleanup();
+      };
+    } catch {}
   }
 
   setupUI() {
@@ -731,8 +974,12 @@ class MonacoApp {
     $('#file-list').addEventListener('click', (e) => {
       const li = e.target.closest('li');
       if (li) {
-        const index = parseInt(li.dataset.index);
-        this.loadFile(index);
+        if (li.dataset.commit === '1') {
+          this.loadCommitView();
+        } else {
+          const index = parseInt(li.dataset.index);
+          this.loadFile(index);
+        }
       }
     });
 
@@ -1216,10 +1463,43 @@ class MonacoApp {
     const list = document.getElementById('file-list');
     list.innerHTML = '';
 
+    // Optional pseudo-file for commit (when reviewing full commits)
+    const hasCommit = !!(this.diff && (this.diff.commit_message || this.diff.commit_hash));
+    if (hasCommit) {
+      const li = document.createElement('li');
+      li.dataset.commit = '1';
+      li.className = this.currentFileIsCommit ? 'active' : '';
+
+      const left = document.createElement('span');
+      left.className = 'file-left';
+      const name = document.createElement('span');
+      name.textContent = 'Commit';
+      left.appendChild(name);
+
+      const right = document.createElement('span');
+      right.className = 'file-right';
+      const commentCount = this.commentManager.getCommentsForFile('(commit)').length;
+      if (commentCount > 0) {
+        const commentBadge = document.createElement('span');
+        commentBadge.className = 'file-comment-badge';
+        commentBadge.textContent = String(commentCount);
+        left.appendChild(commentBadge);
+      }
+
+      const status = document.createElement('span');
+      status.className = 'file-status';
+      status.textContent = 'C';
+      right.appendChild(status);
+
+      li.appendChild(left);
+      li.appendChild(right);
+      list.appendChild(li);
+    }
+
     this.files.forEach((file, index) => {
       const li = document.createElement('li');
       li.dataset.index = index;
-      li.className = index === this.currentFileIndex ? 'active' : '';
+      li.className = !this.currentFileIsCommit && index === this.currentFileIndex ? 'active' : '';
 
       // Left: name + (optional) comment count
       const left = document.createElement('span');
@@ -1272,6 +1552,7 @@ class MonacoApp {
   }
 
   async loadFile(index) {
+    this.currentFileIsCommit = false;
     if (window.DEBUG) {
       console.log('[app] loadFile: index', index);
     }
@@ -1384,6 +1665,11 @@ class MonacoApp {
 
     // Create diff editor on first run, reuse afterwards
     const container = document.getElementById('editor-container');
+    // Ensure commit view is hidden
+    if (this._commitViewEl) {
+      this._commitViewEl.style.display = 'none';
+      container.style.display = '';
+    }
     const mono =
       (this.config.font && String(this.config.font).trim()) ||
       "'JetBrains Mono', 'Monaco', 'Menlo', 'Consolas', monospace";
@@ -1654,6 +1940,122 @@ class MonacoApp {
         this.setFocusedLine(side, monacoLine, false);
       }, 100);
     }
+  }
+
+  loadCommitView() {
+    this.currentFileIsCommit = true;
+    // Hide expand controls when showing commit view
+    const topC = document.getElementById('expand-top-container');
+    const bottomC = document.getElementById('expand-bottom-container');
+    if (topC) topC.style.display = 'none';
+    if (bottomC) bottomC.style.display = 'none';
+
+    const container = document.getElementById('editor-container');
+    container.style.display = 'none';
+    if (!this._commitViewEl) {
+      const host = document.querySelector('.content');
+      const el = document.createElement('div');
+      el.className = 'commit-view';
+      el.style.padding = '16px';
+      el.style.overflow = 'auto';
+      el.style.height = 'calc(100vh - 48px)';
+      host.appendChild(el);
+      this._commitViewEl = el;
+    }
+    const el = this._commitViewEl;
+    el.innerHTML = '';
+    el.style.display = '';
+
+    const title = document.createElement('h2');
+    title.textContent = 'Commit';
+    el.appendChild(title);
+
+    const meta = document.createElement('div');
+    meta.style.color = 'var(--text-secondary)';
+    meta.style.marginBottom = '8px';
+    const rev = this.diff && this.diff.commit_hash ? String(this.diff.commit_hash) : '';
+    meta.textContent = rev;
+    el.appendChild(meta);
+
+    const msg = document.createElement('pre');
+    msg.textContent = String((this.diff && this.diff.commit_message) || '(no message)');
+    msg.style.whiteSpace = 'pre-wrap';
+    msg.style.fontFamily = 'var(--font-mono)';
+    msg.style.fontSize = '12px';
+    msg.style.padding = '10px 12px';
+    msg.style.border = '1px solid var(--border-color)';
+    msg.style.borderRadius = '6px';
+    msg.style.background = 'var(--bg-elevated)';
+    el.appendChild(msg);
+
+    const commentsHeader = document.createElement('h3');
+    commentsHeader.textContent = 'Comments';
+    commentsHeader.style.marginTop = '16px';
+    el.appendChild(commentsHeader);
+
+    const list = document.createElement('div');
+    const comments = this.commentManager.getCommentsForFile('(commit)');
+    comments.forEach((c, idx) => {
+      const row = document.createElement('div');
+      row.style.display = 'flex';
+      row.style.justifyContent = 'space-between';
+      row.style.alignItems = 'center';
+      row.style.gap = '12px';
+      row.style.padding = '6px 0';
+      const body = document.createElement('div');
+      body.style.whiteSpace = 'pre-wrap';
+      body.style.fontFamily = 'var(--font-sans)';
+      body.textContent = c.body;
+      const del = document.createElement('button');
+      del.className = 'expand-btn';
+      del.textContent = 'Delete';
+      del.onclick = () => {
+        // Find actual index within manager
+        const absIndex = this.commentManager.findComment('(commit)', c.start_line, c.side);
+        if (absIndex >= 0) {
+          this.commentManager.removeComment(absIndex);
+          this.loadCommitView();
+        }
+      };
+      row.appendChild(body);
+      row.appendChild(del);
+      list.appendChild(row);
+    });
+    el.appendChild(list);
+
+    const form = document.createElement('div');
+    form.style.marginTop = '10px';
+    const ta = document.createElement('textarea');
+    ta.rows = 3;
+    ta.style.width = '100%';
+    ta.placeholder = 'Comment on this commit…';
+    const controls = document.createElement('div');
+    controls.style.display = 'flex';
+    controls.style.gap = '8px';
+    controls.style.marginTop = '6px';
+    const addBtn = document.createElement('button');
+    addBtn.textContent = 'Add Comment';
+    addBtn.className = 'expand-btn';
+    addBtn.onclick = () => {
+      const body = (ta.value || '').trim();
+      if (!body) { ta.focus(); return; }
+      const comment = {
+        file: '(commit)',
+        start_line: 1,
+        end_line: 1,
+        side: 'new',
+        body,
+        severity: 'comment',
+      };
+      this.commentManager.addComment(comment);
+      ta.value = '';
+      this.loadCommitView();
+    };
+    controls.appendChild(addBtn);
+    form.appendChild(ta);
+    form.appendChild(controls);
+    el.appendChild(form);
+    this.renderFileList();
   }
 
   updateDecorations() {
@@ -2766,6 +3168,7 @@ class MonacoApp {
 
 // Initialize app
 const app = new MonacoApp();
+try { window.__APP = app; } catch {}
 app.init().then(() => {
   if (window.DEBUG) {
     console.log('Monaco Editor initialized');

@@ -6,6 +6,51 @@ pub fn parse_diff(diff_text: &str) -> Result<DiffResponse> {
     let mut total_additions = 0;
     let mut total_deletions = 0;
 
+    let mut commit_hash: Option<String> = None;
+    let mut commit_author: Option<String> = None;
+    let mut commit_date: Option<String> = None;
+    let mut commit_message: Option<String> = None;
+
+    let mut lines = diff_text.lines();
+    let mut line_iter = lines.clone();
+
+    // Parse commit metadata if present (from git show / jj show output)
+    if let Some(first_line) = line_iter.next() {
+        if let Some(hash) = first_line.strip_prefix("commit ") {
+            commit_hash = Some(hash.split_whitespace().next().unwrap_or(hash).to_string());
+
+            let mut message_lines = Vec::new();
+            let mut in_message = false;
+
+            for line in line_iter.by_ref() {
+                if line.starts_with("diff --git") {
+                    break;
+                }
+
+                if let Some(author) = line.strip_prefix("Author:").or_else(|| line.strip_prefix("author ")) {
+                    commit_author = Some(author.trim().to_string());
+                } else if let Some(date) = line.strip_prefix("Date:").or_else(|| line.strip_prefix("AuthorDate:")) {
+                    commit_date = Some(date.trim().to_string());
+                } else if line.is_empty() {
+                    in_message = true;
+                } else if in_message && line.starts_with("    ") {
+                    message_lines.push(line.strip_prefix("    ").unwrap_or(line));
+                }
+            }
+
+            if !message_lines.is_empty() {
+                commit_message = Some(message_lines.join("\n").trim().to_string());
+            }
+
+            // Advance the main iterator to where we stopped
+            while let Some(l) = lines.next() {
+                if l.starts_with("diff --git") {
+                    break;
+                }
+            }
+        }
+    }
+
     let mut current_file: Option<(String, Option<String>, FileStatus)> = None;
     let mut current_hunks: Vec<Hunk> = Vec::new();
     let mut current_lines: Vec<DiffLine> = Vec::new();
@@ -17,8 +62,10 @@ pub fn parse_diff(diff_text: &str) -> Result<DiffResponse> {
     let mut old_path_temp: Option<String> = None;
     let mut is_rename = false;
     let mut rename_from: Option<String> = None;
+    let mut current_old_blob: Option<String> = None;
+    let mut current_new_blob: Option<String> = None;
 
-    for line in diff_text.lines() {
+    for line in lines {
         if line.starts_with("diff --git") {
             // Save previous file
             if let Some((path, old_path, status)) = current_file.take() {
@@ -38,6 +85,8 @@ pub fn parse_diff(diff_text: &str) -> Result<DiffResponse> {
                         old_path,
                         status,
                         hunks: current_hunks,
+                        old_blob: current_old_blob.take(),
+                        new_blob: current_new_blob.take(),
                     });
                 }
                 current_hunks = Vec::new();
@@ -46,6 +95,17 @@ pub fn parse_diff(diff_text: &str) -> Result<DiffResponse> {
             old_path_temp = None;
             is_rename = false;
             rename_from = None;
+            current_old_blob = None;
+            current_new_blob = None;
+        } else if let Some(rest) = line.strip_prefix("index ") {
+            // Example: index 2d81a82fc6..0dca82f7e2 100644
+            let mut parts = rest.split_whitespace();
+            if let Some(range) = parts.next() {
+                if let Some((a, b)) = range.split_once("..") {
+                    if !a.is_empty() { current_old_blob = Some(a.to_string()); }
+                    if !b.is_empty() { current_new_blob = Some(b.to_string()); }
+                }
+            }
         } else if let Some(stripped) = line.strip_prefix("rename from ") {
             is_rename = true;
             rename_from = Some(stripped.to_string());
@@ -109,7 +169,7 @@ pub fn parse_diff(diff_text: &str) -> Result<DiffResponse> {
                 hunk_old_start = captures.0;
                 hunk_new_start = captures.1;
             }
-        } else if line.starts_with('+') && !line.starts_with("+++") {
+        } else if line.starts_with('+') && !line.starts_with("+++ ") {
             total_additions += 1;
             current_lines.push(DiffLine {
                 line_type: LineType::Add,
@@ -118,7 +178,7 @@ pub fn parse_diff(diff_text: &str) -> Result<DiffResponse> {
                 new_line: Some(new_line),
             });
             new_line += 1;
-        } else if line.starts_with('-') && !line.starts_with("---") {
+        } else if line.starts_with('-') && !line.starts_with("--- ") {
             total_deletions += 1;
             current_lines.push(DiffLine {
                 line_type: LineType::Delete,
@@ -156,6 +216,8 @@ pub fn parse_diff(diff_text: &str) -> Result<DiffResponse> {
                 old_path,
                 status,
                 hunks: current_hunks,
+                old_blob: current_old_blob,
+                new_blob: current_new_blob,
             });
         }
     }
@@ -168,6 +230,10 @@ pub fn parse_diff(diff_text: &str) -> Result<DiffResponse> {
             deletions: total_deletions,
             files_changed: file_count,
         },
+        commit_hash,
+        commit_author,
+        commit_date,
+        commit_message,
     })
 }
 

@@ -95,6 +95,23 @@ body {
   color: var(--accent-color);
 }
 
+/* Small delayed fetch spinner shown only when /api/file requests run long */
+.fetch-spinner {
+  display: none;
+  width: 14px;
+  height: 14px;
+  border: 2px solid color-mix(in srgb, var(--text-secondary), transparent 40%);
+  border-top-color: var(--accent-color);
+  border-radius: 50%;
+  animation: fetch-spin 0.8s linear infinite;
+  margin-left: 10px;
+}
+.fetch-spinner.visible { display: inline-block; }
+@keyframes fetch-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 .review-time {
   color: var(--text-secondary);
   font-size: 12px;
@@ -115,6 +132,41 @@ body {
   white-space: nowrap;
   text-overflow: ellipsis;
   overflow: hidden;
+}
+
+.commit-message {
+  color: var(--text-secondary);
+  font-size: 12px;
+  max-width: 40vw;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.commit-message:hover { text-decoration: underline; }
+
+/* Popover for full commit message */
+.commit-popover {
+  position: fixed;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  box-shadow: var(--shadow-md);
+  padding: 10px 12px;
+  z-index: 100000;
+  max-width: 60vw;
+  max-height: 50vh;
+  overflow: auto;
+}
+.commit-popover .commit-popover-title {
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.commit-popover .commit-popover-body {
+  white-space: pre-wrap;
+  font-family: var(--font-mono);
+  font-size: 12px;
 }
 
 .git-branch {

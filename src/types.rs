@@ -4,6 +4,10 @@ use serde::{Deserialize, Serialize};
 pub struct DiffResponse {
     pub files: Vec<FileDiff>,
     pub stats: DiffStats,
+    pub commit_hash: Option<String>,
+    pub commit_author: Option<String>,
+    pub commit_date: Option<String>,
+    pub commit_message: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -12,6 +16,11 @@ pub struct FileDiff {
     pub old_path: Option<String>,
     pub status: FileStatus,
     pub hunks: Vec<Hunk>,
+    // Optional Git object IDs from the diff's `index <old>..<new>` line
+    // (abbreviated or full). If present, prefer using these to load file
+    // contents for the old/new sides.
+    pub old_blob: Option<String>,
+    pub new_blob: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
