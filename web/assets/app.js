@@ -1944,11 +1944,13 @@ class MonacoApp {
 
   loadCommitView() {
     this.currentFileIsCommit = true;
-    // Hide expand controls when showing commit view
+    // Hide all UI elements that don't apply to commit view
     const topC = document.getElementById('expand-top-container');
     const bottomC = document.getElementById('expand-bottom-container');
+    const showFullBtn = document.getElementById('show-full-file');
     if (topC) topC.style.display = 'none';
     if (bottomC) bottomC.style.display = 'none';
+    if (showFullBtn) showFullBtn.style.display = 'none';
 
     const container = document.getElementById('editor-container');
     container.style.display = 'none';
@@ -1966,96 +1968,231 @@ class MonacoApp {
     el.innerHTML = '';
     el.style.display = '';
 
-    const title = document.createElement('h2');
-    title.textContent = 'Commit';
-    el.appendChild(title);
-
     const meta = document.createElement('div');
     meta.style.color = 'var(--text-secondary)';
-    meta.style.marginBottom = '8px';
+    meta.style.fontSize = '11px';
+    meta.style.marginBottom = '12px';
     const rev = this.diff && this.diff.commit_hash ? String(this.diff.commit_hash) : '';
     meta.textContent = rev;
     el.appendChild(meta);
 
-    const msg = document.createElement('pre');
-    msg.textContent = String((this.diff && this.diff.commit_message) || '(no message)');
-    msg.style.whiteSpace = 'pre-wrap';
-    msg.style.fontFamily = 'var(--font-mono)';
-    msg.style.fontSize = '12px';
-    msg.style.padding = '10px 12px';
-    msg.style.border = '1px solid var(--border-color)';
-    msg.style.borderRadius = '6px';
-    msg.style.background = 'var(--bg-elevated)';
-    el.appendChild(msg);
+    const msgText = String((this.diff && this.diff.commit_message) || '(no message)');
+    const msgLines = msgText.split('\n');
+
+    const msgContainer = document.createElement('div');
+    msgContainer.style.border = '1px solid var(--border-color)';
+    msgContainer.style.borderRadius = '4px';
+    msgContainer.style.background = 'var(--bg-elevated)';
+    msgContainer.style.fontFamily = 'var(--font-mono)';
+    msgContainer.style.fontSize = '13px';
+
+    msgLines.forEach((lineText, lineIndex) => {
+      const lineNum = lineIndex + 1;
+      const lineDiv = document.createElement('div');
+      lineDiv.style.display = 'flex';
+      lineDiv.style.lineHeight = '1.6';
+      lineDiv.style.cursor = 'pointer';
+      lineDiv.style.padding = '2px 0';
+      lineDiv.onmouseover = () => {
+        lineDiv.style.background = 'var(--bg-secondary)';
+      };
+      lineDiv.onmouseout = () => {
+        lineDiv.style.background = '';
+      };
+
+      const lineNumSpan = document.createElement('span');
+      lineNumSpan.style.display = 'inline-block';
+      lineNumSpan.style.width = '40px';
+      lineNumSpan.style.textAlign = 'right';
+      lineNumSpan.style.paddingRight = '12px';
+      lineNumSpan.style.color = 'var(--text-secondary)';
+      lineNumSpan.style.userSelect = 'none';
+      lineNumSpan.style.flexShrink = '0';
+      lineNumSpan.textContent = lineNum;
+
+      const lineContent = document.createElement('span');
+      lineContent.style.paddingRight = '12px';
+      lineContent.style.whiteSpace = 'pre-wrap';
+      lineContent.style.wordBreak = 'break-word';
+      lineContent.textContent = lineText || ' ';
+
+      lineDiv.appendChild(lineNumSpan);
+      lineDiv.appendChild(lineContent);
+
+      lineDiv.onclick = () => {
+        this.showCommitLineCommentDialog(lineNum);
+      };
+
+      msgContainer.appendChild(lineDiv);
+    });
+
+    el.appendChild(msgContainer);
 
     const commentsHeader = document.createElement('h3');
     commentsHeader.textContent = 'Comments';
-    commentsHeader.style.marginTop = '16px';
+    commentsHeader.style.marginTop = '24px';
+    commentsHeader.style.fontSize = '14px';
     el.appendChild(commentsHeader);
 
     const list = document.createElement('div');
     const comments = this.commentManager.getCommentsForFile('(commit)');
-    comments.forEach((c, idx) => {
-      const row = document.createElement('div');
-      row.style.display = 'flex';
-      row.style.justifyContent = 'space-between';
-      row.style.alignItems = 'center';
-      row.style.gap = '12px';
-      row.style.padding = '6px 0';
-      const body = document.createElement('div');
-      body.style.whiteSpace = 'pre-wrap';
-      body.style.fontFamily = 'var(--font-sans)';
-      body.textContent = c.body;
-      const del = document.createElement('button');
-      del.className = 'expand-btn';
-      del.textContent = 'Delete';
-      del.onclick = () => {
-        // Find actual index within manager
-        const absIndex = this.commentManager.findComment('(commit)', c.start_line, c.side);
-        if (absIndex >= 0) {
-          this.commentManager.removeComment(absIndex);
-          this.loadCommitView();
-        }
-      };
-      row.appendChild(body);
-      row.appendChild(del);
-      list.appendChild(row);
-    });
-    el.appendChild(list);
+    if (comments.length === 0) {
+      const empty = document.createElement('div');
+      empty.style.color = 'var(--text-secondary)';
+      empty.style.fontSize = '12px';
+      empty.style.padding = '8px 0';
+      empty.textContent = 'No comments yet. Click a line in the message above to add one.';
+      list.appendChild(empty);
+    } else {
+      comments.forEach((c, idx) => {
+        const row = document.createElement('div');
+        row.style.display = 'flex';
+        row.style.flexDirection = 'column';
+        row.style.gap = '8px';
+        row.style.padding = '12px';
+        row.style.marginBottom = '8px';
+        row.style.border = '1px solid var(--border-color)';
+        row.style.borderRadius = '4px';
+        row.style.background = 'var(--bg-elevated)';
 
-    const form = document.createElement('div');
-    form.style.marginTop = '10px';
+        const lineLabel = document.createElement('div');
+        lineLabel.style.fontSize = '11px';
+        lineLabel.style.color = 'var(--text-secondary)';
+        lineLabel.textContent = `Line ${c.start_line}`;
+
+        const bodyRow = document.createElement('div');
+        bodyRow.style.display = 'flex';
+        bodyRow.style.justifyContent = 'space-between';
+        bodyRow.style.alignItems = 'flex-start';
+        bodyRow.style.gap = '12px';
+
+        const body = document.createElement('div');
+        body.style.whiteSpace = 'pre-wrap';
+        body.style.fontFamily = 'var(--font-sans)';
+        body.style.fontSize = '13px';
+        body.style.flex = '1';
+        body.textContent = c.body;
+
+        const del = document.createElement('button');
+        del.className = 'btn-danger';
+        del.textContent = 'Delete';
+        del.style.fontSize = '11px';
+        del.style.padding = '4px 8px';
+        del.onclick = () => {
+          const absIndex = this.commentManager.findComment('(commit)', c.start_line, c.side);
+          if (absIndex >= 0) {
+            this.commentManager.removeComment(absIndex);
+            this.loadCommitView();
+          }
+        };
+
+        bodyRow.appendChild(body);
+        bodyRow.appendChild(del);
+        row.appendChild(lineLabel);
+        row.appendChild(bodyRow);
+        list.appendChild(row);
+      });
+    }
+    el.appendChild(list);
+    this.renderFileList();
+  }
+
+  showCommitLineCommentDialog(lineNum) {
+    const overlay = document.createElement('div');
+    overlay.className = 'submit-modal-overlay';
+
+    const modal = document.createElement('div');
+    modal.className = 'submit-modal';
+    modal.style.maxWidth = '600px';
+
+    const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+    const modKey = isMac ? '⌘' : 'Ctrl';
+
+    const header = document.createElement('div');
+    header.className = 'submit-modal-header';
+    header.innerHTML = `
+      <h2>Comment on Commit Message Line ${lineNum}</h2>
+      <button class="submit-modal-close" aria-label="Close">&times;</button>
+    `;
+
+    const body = document.createElement('div');
+    body.className = 'submit-modal-body';
+    body.style.padding = '20px';
+
     const ta = document.createElement('textarea');
-    ta.rows = 3;
+    ta.rows = 4;
     ta.style.width = '100%';
-    ta.placeholder = 'Comment on this commit…';
-    const controls = document.createElement('div');
-    controls.style.display = 'flex';
-    controls.style.gap = '8px';
-    controls.style.marginTop = '6px';
-    const addBtn = document.createElement('button');
-    addBtn.textContent = 'Add Comment';
-    addBtn.className = 'expand-btn';
-    addBtn.onclick = () => {
-      const body = (ta.value || '').trim();
-      if (!body) { ta.focus(); return; }
+    ta.style.fontFamily = 'var(--font-sans)';
+    ta.style.fontSize = '13px';
+    ta.style.padding = '8px';
+    ta.placeholder = 'Add your comment...';
+    ta.autofocus = true;
+    body.appendChild(ta);
+
+    const hint = document.createElement('div');
+    hint.style.fontSize = '11px';
+    hint.style.color = 'var(--text-secondary)';
+    hint.style.marginTop = '8px';
+    hint.textContent = `${modKey}+Enter to save, Escape to cancel`;
+    body.appendChild(hint);
+
+    const footer = document.createElement('div');
+    footer.className = 'submit-modal-footer';
+    footer.innerHTML = `
+      <button class="btn-secondary cancel-btn">Cancel</button>
+      <button class="btn-primary save-btn">Add Comment</button>
+    `;
+
+    modal.appendChild(header);
+    modal.appendChild(body);
+    modal.appendChild(footer);
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    const close = () => {
+      overlay.remove();
+      document.removeEventListener('keydown', handleKeydown);
+    };
+
+    const save = () => {
+      const text = (ta.value || '').trim();
+      if (!text) {
+        ta.focus();
+        return;
+      }
       const comment = {
         file: '(commit)',
-        start_line: 1,
-        end_line: 1,
+        start_line: lineNum,
+        end_line: lineNum,
         side: 'new',
-        body,
+        body: text,
         severity: 'comment',
       };
       this.commentManager.addComment(comment);
-      ta.value = '';
+      close();
       this.loadCommitView();
     };
-    controls.appendChild(addBtn);
-    form.appendChild(ta);
-    form.appendChild(controls);
-    el.appendChild(form);
-    this.renderFileList();
+
+    const handleKeydown = (e) => {
+      if (e.key === 'Escape') {
+        close();
+      } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        save();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeydown);
+
+    header.querySelector('.submit-modal-close').onclick = close;
+    footer.querySelector('.cancel-btn').onclick = close;
+    footer.querySelector('.save-btn').onclick = save;
+
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) close();
+    });
+
+    setTimeout(() => ta.focus(), 100);
   }
 
   updateDecorations() {

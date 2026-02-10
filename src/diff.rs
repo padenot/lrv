@@ -11,19 +11,18 @@ pub fn parse_diff(diff_text: &str) -> Result<DiffResponse> {
     let mut commit_date: Option<String> = None;
     let mut commit_message: Option<String> = None;
 
-    let mut lines = diff_text.lines();
-    let mut line_iter = lines.clone();
-
     // Parse commit metadata if present (from git show / jj show output)
-    if let Some(first_line) = line_iter.next() {
+    let diff_start_idx = if let Some(first_line) = diff_text.lines().next() {
         if let Some(hash) = first_line.strip_prefix("commit ") {
             commit_hash = Some(hash.split_whitespace().next().unwrap_or(hash).to_string());
 
             let mut message_lines = Vec::new();
             let mut in_message = false;
+            let mut diff_line_idx = 0;
 
-            for line in line_iter.by_ref() {
+            for (idx, line) in diff_text.lines().enumerate() {
                 if line.starts_with("diff --git") {
+                    diff_line_idx = idx;
                     break;
                 }
 
@@ -42,14 +41,13 @@ pub fn parse_diff(diff_text: &str) -> Result<DiffResponse> {
                 commit_message = Some(message_lines.join("\n").trim().to_string());
             }
 
-            // Advance the main iterator to where we stopped
-            while let Some(l) = lines.next() {
-                if l.starts_with("diff --git") {
-                    break;
-                }
-            }
+            diff_line_idx
+        } else {
+            0
         }
-    }
+    } else {
+        0
+    };
 
     let mut current_file: Option<(String, Option<String>, FileStatus)> = None;
     let mut current_hunks: Vec<Hunk> = Vec::new();
@@ -65,7 +63,7 @@ pub fn parse_diff(diff_text: &str) -> Result<DiffResponse> {
     let mut current_old_blob: Option<String> = None;
     let mut current_new_blob: Option<String> = None;
 
-    for line in lines {
+    for line in diff_text.lines().skip(diff_start_idx) {
         if line.starts_with("diff --git") {
             // Save previous file
             if let Some((path, old_path, status)) = current_file.take() {

@@ -494,13 +494,15 @@ async fn get_file_content(
     // (works for jj or any stdin-provided diff), and only then fall back to VCS.
     let content = match query.side.as_str() {
         "new" => {
-            // Prefer Git blob OID from diff if present
+            // Try Git blob OID from diff if present, fallback to filesystem
             let mut content_new = if let Some(fe) = state
                 .diff
                 .files
                 .iter()
                 .find(|f| f.path == query.path || f.old_path.as_deref() == Some(&query.path))
             {
+                let mut content = String::new();
+
                 if let Some(oid) = &fe.new_blob {
                     let output = std::process::Command::new("git")
                         .current_dir(&state.context.working_directory)
@@ -509,23 +511,23 @@ async fn get_file_content(
                         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
                     if output.status.success() {
                         if let Ok(s) = String::from_utf8(output.stdout) {
-                            s
-                        } else {
-                            String::new()
+                            content = s;
                         }
-                    } else {
-                        String::new()
                     }
-                } else {
-                    // Fallback to filesystem
+                }
+
+                // Fallback to filesystem if git cat-file failed or no blob
+                if content.is_empty() {
                     let joined = base_path.join(rel_path);
                     let file_path = std::fs::canonicalize(&joined)
                         .map_err(|_| StatusCode::NOT_FOUND)?;
                     if !file_path.starts_with(&base_canon) {
                         return Err(StatusCode::FORBIDDEN);
                     }
-                    std::fs::read_to_string(&file_path).map_err(|_| StatusCode::NOT_FOUND)?
+                    content = std::fs::read_to_string(&file_path).map_err(|_| StatusCode::NOT_FOUND)?;
                 }
+
+                content
             } else {
                 // Not part of diff: fallback to filesystem
                 let joined = base_path.join(rel_path);
