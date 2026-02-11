@@ -49,6 +49,9 @@ function prefersReducedMotion() {
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
 
+const IS_MAC = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+const MOD_KEY_LABEL = IS_MAC ? '⌘' : 'Ctrl';
+
 window.Perf = {
   mark: (name) => {
     performance.mark(name);
@@ -1003,8 +1006,7 @@ class MonacoApp {
   }
 
   matchKeyboardShortcut(e) {
-    const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
-    const modKey = isMac ? e.metaKey : e.ctrlKey;
+    const modKey = IS_MAC ? e.metaKey : e.ctrlKey;
 
     for (const shortcut of KEYBOARD_SHORTCUTS) {
       for (const keyCombo of shortcut.keys) {
@@ -2010,8 +2012,7 @@ class MonacoApp {
     modal.className = 'submit-modal';
     modal.style.maxWidth = '600px';
 
-    const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
-    const modKey = isMac ? '⌘' : 'Ctrl';
+    const modKey = MOD_KEY_LABEL;
 
     const header = document.createElement('div');
     header.className = 'submit-modal-header';
@@ -2177,8 +2178,7 @@ class MonacoApp {
     // Create the widget
     const domNode = document.createElement('div');
     domNode.className = 'inline-comment-box';
-    const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
-    const modKey = isMac ? '⌘' : 'Ctrl';
+    const modKey = MOD_KEY_LABEL;
     const deleteBtnHtml = existingComment
       ? '<button class="btn-danger delete-btn">Delete</button>'
       : '';
@@ -2601,8 +2601,6 @@ class MonacoApp {
     const modal = document.createElement('div');
     modal.className = 'submit-modal help-modal';
 
-    const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
-
     // Header
     const header = document.createElement('div');
     header.className = 'submit-modal-header';
@@ -2646,7 +2644,7 @@ class MonacoApp {
         }
 
         // Replace Mod with Cmd/Ctrl based on platform
-        const displayCombo = combo.replace('Mod', isMac ? 'Cmd' : 'Ctrl');
+        const displayCombo = combo.replace('Mod', IS_MAC ? 'Cmd' : 'Ctrl');
         const parts = displayCombo.split('+');
 
         parts.forEach((part, partIdx) => {
