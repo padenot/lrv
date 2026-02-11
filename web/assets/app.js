@@ -487,10 +487,22 @@ class MonacoApp {
     if (this.fileCache[filePath]) {
       return this.fileCache[filePath];
     }
+
     const [oldData, newData] = await Promise.all([
-      fetchJSON(`/api/file?path=${encodeURIComponent(filePath)}&side=old`),
-      fetchJSON(`/api/file?path=${encodeURIComponent(filePath)}&side=new`),
+      fetchJSON(`/api/file?path=${encodeURIComponent(filePath)}&side=old`).catch((err) => {
+        if (window.DEBUG) {
+          console.error('[app] old fetch failed', err);
+        }
+        return { content: '' };
+      }),
+      fetchJSON(`/api/file?path=${encodeURIComponent(filePath)}&side=new`).catch((err) => {
+        if (window.DEBUG) {
+          console.error('[app] new fetch failed', err);
+        }
+        return { content: '' };
+      }),
     ]);
+
     this.fileCache[filePath] = {
       old: oldData.content || '',
       new: newData.content || '',
@@ -1254,26 +1266,36 @@ class MonacoApp {
     const file = this.files[this.currentFileIndex];
     const hunks = this.fileHunks[file.path];
     if (!hunks || hunks.length === 0) {
+      this.nextFile();
       return;
     }
 
     const currentIdx = this.currentHunkIndex[file.path] || 0;
-    const nextIdx = Math.min(currentIdx + 1, hunks.length - 1);
-    this.currentHunkIndex[file.path] = nextIdx;
-    this.jumpToHunk(nextIdx);
+    if (currentIdx >= hunks.length - 1) {
+      this.nextFile();
+    } else {
+      const nextIdx = currentIdx + 1;
+      this.currentHunkIndex[file.path] = nextIdx;
+      this.jumpToHunk(nextIdx);
+    }
   }
 
   previousHunk() {
     const file = this.files[this.currentFileIndex];
     const hunks = this.fileHunks[file.path];
     if (!hunks || hunks.length === 0) {
+      this.previousFile();
       return;
     }
 
     const currentIdx = this.currentHunkIndex[file.path] || 0;
-    const prevIdx = Math.max(currentIdx - 1, 0);
-    this.currentHunkIndex[file.path] = prevIdx;
-    this.jumpToHunk(prevIdx);
+    if (currentIdx <= 0) {
+      this.previousFile();
+    } else {
+      const prevIdx = currentIdx - 1;
+      this.currentHunkIndex[file.path] = prevIdx;
+      this.jumpToHunk(prevIdx);
+    }
   }
 
   jumpToHunk(hunkIndex) {

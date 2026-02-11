@@ -225,10 +225,12 @@ test.describe('Review Workflow E2E', () => {
     // Wait for editor to be ready
     await page.locator('.monaco-editor').first().waitFor({ timeout: 7000 });
 
+    // Wait a bit for Monaco handlers to be fully registered
+    await page.waitForTimeout(500);
+
     // Click on a line number to add a comment
-    // Note: This is tricky with Monaco - we might need to click on the gutter
-    const gutter1 = page.locator('.margin .line-numbers').first();
-    await gutter1.click({ position: { x: 4, y: 4 }, force: true });
+    const lineNumber = page.locator('.modified .line-numbers').first();
+    await lineNumber.click({ position: { x: 10, y: 10 } });
 
     // Comment dialog should appear
     await expect(page.locator('.inline-comment-box')).toBeVisible({ timeout: 2000 });
@@ -306,9 +308,12 @@ test.describe('Review Workflow E2E', () => {
     // Wait for editor
     await page.locator('.monaco-editor').first().waitFor({ timeout: 10000 });
 
-    // Add a comment by clicking line number (click gutter to avoid overlay)
-    const gutter = page.locator('.margin .line-numbers').first();
-    await gutter.click({ position: { x: 4, y: 4 }, force: true });
+    // Wait for Monaco handlers to be registered
+    await page.waitForTimeout(500);
+
+    // Add a comment by clicking line number
+    const lineNumber = page.locator('.modified .line-numbers').first();
+    await lineNumber.click({ position: { x: 10, y: 10 } });
 
     await page.locator('.comment-textarea').fill('Please fix this');
     await page.locator('.save-btn').click();
