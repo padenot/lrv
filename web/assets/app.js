@@ -325,6 +325,14 @@ class MonacoApp {
     this.commentManager.onChange(() => this.updateUI());
   }
 
+  getFileOffsets(filePath) {
+    const range = this.fileRanges[filePath];
+    return {
+      newOffset: range && !range.hasFullContent ? range.new.start - 1 : 0,
+      oldOffset: range && !range.hasFullContent ? range.old.start - 1 : 0,
+    };
+  }
+
   // When we detect slow file fetches, eagerly prefetch the rest to warm caches
   async eagerPrefetchAllFiles() {
     if (this._eagerPrefetchStarted) {
@@ -1115,9 +1123,7 @@ class MonacoApp {
     }
 
     const hunkRange = hunks[hunkIndex];
-    const range = this.fileRanges[file.path];
-    const newOffset = range && !range.hasFullContent ? range.new.start - 1 : 0;
-    const oldOffset = range && !range.hasFullContent ? range.old.start - 1 : 0;
+    const { newOffset, oldOffset } = this.getFileOffsets(file.path);
 
     const reduceMotion = prefersReducedMotion();
     const smooth = monaco.editor.ScrollType.Smooth;
@@ -1224,9 +1230,7 @@ class MonacoApp {
       }
     }
     // Header indicator
-    const range = this.fileRanges[this.files[this.currentFileIndex].path];
-    const newOffset = range && !range.hasFullContent ? range.new.start - 1 : 0;
-    const oldOffset = range && !range.hasFullContent ? range.old.start - 1 : 0;
+    const { newOffset, oldOffset } = this.getFileOffsets(this.files[this.currentFileIndex].path);
     const fileLine = side === 'old' ? monacoLine + oldOffset : monacoLine + newOffset;
     showNavIndicator(`Line ${fileLine} • ${side === 'old' ? 'old' : 'new'}`);
   }
@@ -1240,9 +1244,7 @@ class MonacoApp {
     if (!hunks || hunks.length === 0) {
       return;
     }
-    const range = this.fileRanges[file.path];
-    const newOffset = range && !range.hasFullContent ? range.new.start - 1 : 0;
-    const oldOffset = range && !range.hasFullContent ? range.old.start - 1 : 0;
+    const { newOffset, oldOffset } = this.getFileOffsets(file.path);
 
     // Initialize focus if needed: start of current hunk
     let idx = this.currentHunkIndex[file.path] || 0;
@@ -1317,9 +1319,7 @@ class MonacoApp {
       return;
     }
 
-    const range = this.fileRanges[file.path];
-    const newOffset = range && !range.hasFullContent ? range.new.start - 1 : 0;
-    const oldOffset = range && !range.hasFullContent ? range.old.start - 1 : 0;
+    const { newOffset, oldOffset } = this.getFileOffsets(file.path);
 
     if (this.currentFocusedLine) {
       const { side, line } = this.currentFocusedLine;
@@ -2114,9 +2114,7 @@ class MonacoApp {
     const originalEditor = this.editor.getOriginalEditor();
 
     // Get offsets for current file
-    const range = this.fileRanges[file.path];
-    const newOffset = range && !range.hasFullContent ? range.new.start - 1 : 0;
-    const oldOffset = range && !range.hasFullContent ? range.old.start - 1 : 0;
+    const { newOffset, oldOffset } = this.getFileOffsets(file.path);
 
     // Decorations for modified (new) side
     const modifiedDecorations = comments
