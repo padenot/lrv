@@ -1907,27 +1907,7 @@ class MonacoApp {
     }
 
     // Add click handler for comments on BOTH sides (line numbers and glyph margin)
-    modifiedEditor.onMouseDown((e) => {
-      if (
-        e.target.type === monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS ||
-        e.target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN
-      ) {
-        const monacoLine = e.target.position.lineNumber;
-        const fileLineNumber = monacoLine + newOffset;
-        this.showCommentDialog(file.path, fileLineNumber, monacoLine, 'new');
-      }
-    });
-
-    originalEditor.onMouseDown((e) => {
-      if (
-        e.target.type === monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS ||
-        e.target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN
-      ) {
-        const monacoLine = e.target.position.lineNumber;
-        const fileLineNumber = monacoLine + oldOffset;
-        this.showCommentDialog(file.path, fileLineNumber, monacoLine, 'old');
-      }
-    });
+    this.setupEditorClickHandlers(file.path, modifiedEditor, originalEditor, newOffset, oldOffset);
 
     // Update decorations for existing comments
     this.updateDecorations();
@@ -1949,6 +1929,30 @@ class MonacoApp {
         this.setFocusedLine(side, monacoLine, false);
       }, 100);
     }
+  }
+
+  setupEditorClickHandlers(filePath, modifiedEditor, originalEditor, newOffset, oldOffset) {
+    modifiedEditor.onMouseDown((e) => {
+      if (
+        e.target.type === monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS ||
+        e.target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN
+      ) {
+        const monacoLine = e.target.position.lineNumber;
+        const fileLineNumber = monacoLine + newOffset;
+        this.showCommentDialog(filePath, fileLineNumber, monacoLine, 'new');
+      }
+    });
+
+    originalEditor.onMouseDown((e) => {
+      if (
+        e.target.type === monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS ||
+        e.target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN
+      ) {
+        const monacoLine = e.target.position.lineNumber;
+        const fileLineNumber = monacoLine + oldOffset;
+        this.showCommentDialog(filePath, fileLineNumber, monacoLine, 'old');
+      }
+    });
   }
 
   loadCommitView() {
