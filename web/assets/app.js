@@ -1644,21 +1644,7 @@ class MonacoApp {
 
     // Update show full file button
     const showFullBtn = $('#show-full-file');
-    let range = this.fileRanges[file.path];
-    if (!range) {
-      // Initialize range and hunk ranges from metadata
-      const { hunkRanges, oldLineStart, oldLineEnd, newLineStart, newLineEnd } =
-        computeHunkRanges(file.hunks);
-      this.fileHunks[file.path] = hunkRanges;
-      this.currentHunkIndex[file.path] = 0;
-      range = this.fileRanges[file.path] = {
-        old: { start: oldLineStart, end: oldLineEnd },
-        new: { start: newLineStart, end: newLineEnd },
-        hasFullContent: false,
-        totalOldLines: null,
-        totalNewLines: null,
-      };
-    }
+    const range = this.initFileRange(file);
     if (range && range.hasFullContent) {
       showFullBtn.style.display = 'none';
     } else {
@@ -1957,6 +1943,24 @@ class MonacoApp {
         this.setFocusedLine(side, monacoLine, false);
       }, 100);
     }
+  }
+
+  initFileRange(file) {
+    let range = this.fileRanges[file.path];
+    if (!range) {
+      const { hunkRanges, oldLineStart, oldLineEnd, newLineStart, newLineEnd } =
+        computeHunkRanges(file.hunks);
+      this.fileHunks[file.path] = hunkRanges;
+      this.currentHunkIndex[file.path] = 0;
+      range = this.fileRanges[file.path] = {
+        old: { start: oldLineStart, end: oldLineEnd },
+        new: { start: newLineStart, end: newLineEnd },
+        hasFullContent: false,
+        totalOldLines: null,
+        totalNewLines: null,
+      };
+    }
+    return range;
   }
 
   loadCommitView() {
