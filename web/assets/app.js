@@ -97,6 +97,147 @@ function computeHunkRanges(hunks) {
   };
 }
 
+const CUSTOM_THEMES = {
+  'solarized-dark': {
+    base: 'vs-dark',
+    inherit: true,
+    rules: [
+      { token: 'comment', foreground: '586e75', fontStyle: 'italic' },
+      { token: 'keyword', foreground: '859900' },
+      { token: 'number', foreground: 'd33682' },
+      { token: 'string', foreground: '2aa198' },
+      { token: 'type', foreground: 'b58900' },
+      { token: 'class', foreground: 'b58900' },
+      { token: 'function', foreground: '268bd2' },
+      { token: 'variable', foreground: '268bd2' },
+      { token: 'constant', foreground: 'd33682' },
+    ],
+    colors: {
+      'editor.background': '#002b36',
+      'editor.foreground': '#839496',
+      'editor.lineHighlightBackground': '#073642',
+      'editorCursor.foreground': '#839496',
+      'editor.selectionBackground': '#073642',
+      'editor.inactiveSelectionBackground': '#073642',
+    },
+  },
+  'solarized-light': {
+    base: 'vs',
+    inherit: true,
+    rules: [
+      { token: 'comment', foreground: '93a1a1', fontStyle: 'italic' },
+      { token: 'keyword', foreground: '859900' },
+      { token: 'number', foreground: 'd33682' },
+      { token: 'string', foreground: '2aa198' },
+      { token: 'type', foreground: 'b58900' },
+      { token: 'class', foreground: 'b58900' },
+      { token: 'function', foreground: '268bd2' },
+      { token: 'variable', foreground: '268bd2' },
+      { token: 'constant', foreground: 'd33682' },
+    ],
+    colors: {
+      'editor.background': '#fdf6e3',
+      'editor.foreground': '#657b83',
+      'editor.lineHighlightBackground': '#eee8d5',
+      'editorCursor.foreground': '#657b83',
+      'editor.selectionBackground': '#eee8d5',
+      'editor.inactiveSelectionBackground': '#eee8d5',
+    },
+  },
+  'firefox-devtools-dark': {
+    base: 'vs-dark',
+    inherit: true,
+    rules: [
+      { token: 'comment', foreground: '5c6773', fontStyle: 'italic' },
+      { token: 'keyword', foreground: 'ff7de9' },
+      { token: 'number', foreground: '75bfff' },
+      { token: 'string', foreground: '86de74' },
+      { token: 'type', foreground: '75bfff' },
+      { token: 'class', foreground: 'ff9400' },
+      { token: 'function', foreground: 'ff9400' },
+      { token: 'variable', foreground: 'b1b1b3' },
+      { token: 'constant', foreground: '75bfff' },
+    ],
+    colors: {
+      'editor.background': '#0c0c0d',
+      'editor.foreground': '#b1b1b3',
+      'editor.lineHighlightBackground': '#1c1b22',
+      'editorCursor.foreground': '#b1b1b3',
+      'editor.selectionBackground': '#2b2a33',
+      'editor.inactiveSelectionBackground': '#1c1b22',
+    },
+  },
+  'firefox-devtools-light': {
+    base: 'vs',
+    inherit: true,
+    rules: [
+      { token: 'comment', foreground: '737373', fontStyle: 'italic' },
+      { token: 'keyword', foreground: 'd92bb4' },
+      { token: 'number', foreground: '0074e8' },
+      { token: 'string', foreground: '058b00' },
+      { token: 'type', foreground: '0074e8' },
+      { token: 'class', foreground: 'c43500' },
+      { token: 'function', foreground: 'c43500' },
+      { token: 'variable', foreground: '222222' },
+      { token: 'constant', foreground: '0074e8' },
+    ],
+    colors: {
+      'editor.background': '#ffffff',
+      'editor.foreground': '#222222',
+      'editor.lineHighlightBackground': '#f5f5f5',
+      'editorCursor.foreground': '#222222',
+      'editor.selectionBackground': '#e6e6e6',
+      'editor.inactiveSelectionBackground': '#f0f0f0',
+    },
+  },
+  'github-dark': {
+    base: 'vs-dark',
+    inherit: true,
+    rules: [
+      { token: 'comment', foreground: '8b949e', fontStyle: 'italic' },
+      { token: 'keyword', foreground: 'ff7b72' },
+      { token: 'number', foreground: '79c0ff' },
+      { token: 'string', foreground: 'a5d6ff' },
+      { token: 'type', foreground: 'ffa657' },
+      { token: 'class', foreground: 'ffa657' },
+      { token: 'function', foreground: 'd2a8ff' },
+      { token: 'variable', foreground: 'ffa657' },
+      { token: 'constant', foreground: '79c0ff' },
+    ],
+    colors: {
+      'editor.background': '#0d1117',
+      'editor.foreground': '#c9d1d9',
+      'editor.lineHighlightBackground': '#161b22',
+      'editorCursor.foreground': '#c9d1d9',
+      'editor.selectionBackground': '#1f6feb',
+      'editor.inactiveSelectionBackground': '#1f6feb40',
+    },
+  },
+  'github-light': {
+    base: 'vs',
+    inherit: true,
+    rules: [
+      { token: 'comment', foreground: '6e7781', fontStyle: 'italic' },
+      { token: 'keyword', foreground: 'cf222e' },
+      { token: 'number', foreground: '0550ae' },
+      { token: 'string', foreground: '0a3069' },
+      { token: 'type', foreground: '8250df' },
+      { token: 'class', foreground: '8250df' },
+      { token: 'function', foreground: '8250df' },
+      { token: 'variable', foreground: '953800' },
+      { token: 'constant', foreground: '0550ae' },
+    ],
+    colors: {
+      'editor.background': '#ffffff',
+      'editor.foreground': '#24292f',
+      'editor.lineHighlightBackground': '#f6f8fa',
+      'editorCursor.foreground': '#24292f',
+      'editor.selectionBackground': '#0969da30',
+      'editor.inactiveSelectionBackground': '#0969da20',
+    },
+  },
+};
+
 function openModal({ title, titleId, modalClass = '', footerHtml = '', onKeydown = null }) {
   const overlay = document.createElement('div');
   overlay.className = 'submit-modal-overlay';
@@ -725,170 +866,11 @@ class MonacoApp {
   }
 
   defineCustomThemes() {
-    // Initialize theme defs registry
     window.UI_THEME_DEFS = window.UI_THEME_DEFS || {};
-
-    // Solarized Dark
-    const solarizedDark = {
-      base: 'vs-dark',
-      inherit: true,
-      rules: [
-        { token: 'comment', foreground: '586e75', fontStyle: 'italic' },
-        { token: 'keyword', foreground: '859900' },
-        { token: 'number', foreground: 'd33682' },
-        { token: 'string', foreground: '2aa198' },
-        { token: 'type', foreground: 'b58900' },
-        { token: 'class', foreground: 'b58900' },
-        { token: 'function', foreground: '268bd2' },
-        { token: 'variable', foreground: '268bd2' },
-        { token: 'constant', foreground: 'd33682' },
-      ],
-      colors: {
-        'editor.background': '#002b36',
-        'editor.foreground': '#839496',
-        'editor.lineHighlightBackground': '#073642',
-        'editorCursor.foreground': '#839496',
-        'editor.selectionBackground': '#073642',
-        'editor.inactiveSelectionBackground': '#073642',
-      },
-    };
-    monaco.editor.defineTheme('solarized-dark', solarizedDark);
-    window.UI_THEME_DEFS['solarized-dark'] = solarizedDark;
-
-    // Solarized Light
-    const solarizedLight = {
-      base: 'vs',
-      inherit: true,
-      rules: [
-        { token: 'comment', foreground: '93a1a1', fontStyle: 'italic' },
-        { token: 'keyword', foreground: '859900' },
-        { token: 'number', foreground: 'd33682' },
-        { token: 'string', foreground: '2aa198' },
-        { token: 'type', foreground: 'b58900' },
-        { token: 'class', foreground: 'b58900' },
-        { token: 'function', foreground: '268bd2' },
-        { token: 'variable', foreground: '268bd2' },
-        { token: 'constant', foreground: 'd33682' },
-      ],
-      colors: {
-        'editor.background': '#fdf6e3',
-        'editor.foreground': '#657b83',
-        'editor.lineHighlightBackground': '#eee8d5',
-        'editorCursor.foreground': '#657b83',
-        'editor.selectionBackground': '#eee8d5',
-        'editor.inactiveSelectionBackground': '#eee8d5',
-      },
-    };
-    monaco.editor.defineTheme('solarized-light', solarizedLight);
-    window.UI_THEME_DEFS['solarized-light'] = solarizedLight;
-
-    // Firefox DevTools Dark
-    const fxDark = {
-      base: 'vs-dark',
-      inherit: true,
-      rules: [
-        { token: 'comment', foreground: '5c6773', fontStyle: 'italic' },
-        { token: 'keyword', foreground: 'ff7de9' },
-        { token: 'number', foreground: '75bfff' },
-        { token: 'string', foreground: '86de74' },
-        { token: 'type', foreground: '75bfff' },
-        { token: 'class', foreground: 'ff9400' },
-        { token: 'function', foreground: 'ff9400' },
-        { token: 'variable', foreground: 'b1b1b3' },
-        { token: 'constant', foreground: '75bfff' },
-      ],
-      colors: {
-        'editor.background': '#0c0c0d',
-        'editor.foreground': '#b1b1b3',
-        'editor.lineHighlightBackground': '#1c1b22',
-        'editorCursor.foreground': '#b1b1b3',
-        'editor.selectionBackground': '#2b2a33',
-        'editor.inactiveSelectionBackground': '#1c1b22',
-      },
-    };
-    monaco.editor.defineTheme('firefox-devtools-dark', fxDark);
-    window.UI_THEME_DEFS['firefox-devtools-dark'] = fxDark;
-
-    // Firefox DevTools Light
-    const fxLight = {
-      base: 'vs',
-      inherit: true,
-      rules: [
-        { token: 'comment', foreground: '737373', fontStyle: 'italic' },
-        { token: 'keyword', foreground: 'd92bb4' },
-        { token: 'number', foreground: '0074e8' },
-        { token: 'string', foreground: '058b00' },
-        { token: 'type', foreground: '0074e8' },
-        { token: 'class', foreground: 'c43500' },
-        { token: 'function', foreground: 'c43500' },
-        { token: 'variable', foreground: '222222' },
-        { token: 'constant', foreground: '0074e8' },
-      ],
-      colors: {
-        'editor.background': '#ffffff',
-        'editor.foreground': '#222222',
-        'editor.lineHighlightBackground': '#f5f5f5',
-        'editorCursor.foreground': '#222222',
-        'editor.selectionBackground': '#e6e6e6',
-        'editor.inactiveSelectionBackground': '#f0f0f0',
-      },
-    };
-    monaco.editor.defineTheme('firefox-devtools-light', fxLight);
-    window.UI_THEME_DEFS['firefox-devtools-light'] = fxLight;
-
-    // GitHub Dark
-    const ghDark = {
-      base: 'vs-dark',
-      inherit: true,
-      rules: [
-        { token: 'comment', foreground: '8b949e', fontStyle: 'italic' },
-        { token: 'keyword', foreground: 'ff7b72' },
-        { token: 'number', foreground: '79c0ff' },
-        { token: 'string', foreground: 'a5d6ff' },
-        { token: 'type', foreground: 'ffa657' },
-        { token: 'class', foreground: 'ffa657' },
-        { token: 'function', foreground: 'd2a8ff' },
-        { token: 'variable', foreground: 'ffa657' },
-        { token: 'constant', foreground: '79c0ff' },
-      ],
-      colors: {
-        'editor.background': '#0d1117',
-        'editor.foreground': '#c9d1d9',
-        'editor.lineHighlightBackground': '#161b22',
-        'editorCursor.foreground': '#c9d1d9',
-        'editor.selectionBackground': '#1f6feb',
-        'editor.inactiveSelectionBackground': '#1f6feb40',
-      },
-    };
-    monaco.editor.defineTheme('github-dark', ghDark);
-    window.UI_THEME_DEFS['github-dark'] = ghDark;
-
-    // GitHub Light
-    const ghLight = {
-      base: 'vs',
-      inherit: true,
-      rules: [
-        { token: 'comment', foreground: '6e7781', fontStyle: 'italic' },
-        { token: 'keyword', foreground: 'cf222e' },
-        { token: 'number', foreground: '0550ae' },
-        { token: 'string', foreground: '0a3069' },
-        { token: 'type', foreground: '8250df' },
-        { token: 'class', foreground: '8250df' },
-        { token: 'function', foreground: '8250df' },
-        { token: 'variable', foreground: '953800' },
-        { token: 'constant', foreground: '0550ae' },
-      ],
-      colors: {
-        'editor.background': '#ffffff',
-        'editor.foreground': '#24292f',
-        'editor.lineHighlightBackground': '#f6f8fa',
-        'editorCursor.foreground': '#24292f',
-        'editor.selectionBackground': '#0969da30',
-        'editor.inactiveSelectionBackground': '#0969da20',
-      },
-    };
-    monaco.editor.defineTheme('github-light', ghLight);
-    window.UI_THEME_DEFS['github-light'] = ghLight;
+    Object.entries(CUSTOM_THEMES).forEach(([name, theme]) => {
+      monaco.editor.defineTheme(name, theme);
+      window.UI_THEME_DEFS[name] = theme;
+    });
   }
 
   renderProjectInfo() {
