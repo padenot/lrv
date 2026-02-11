@@ -1916,19 +1916,7 @@ class MonacoApp {
     this.setupScrollListener();
 
     // Highlight the current hunk (first hunk by default) and set focused line
-    const hunks = this.fileHunks[file.path];
-    if (hunks && hunks.length > 0) {
-      const currentIdx = this.currentHunkIndex[file.path] || 0;
-      setTimeout(() => {
-        this.jumpToHunk(currentIdx);
-        const hr = hunks[currentIdx];
-        const newOffset = this.currentOffsets ? this.currentOffsets.newOffset : 0;
-        const oldOffset = this.currentOffsets ? this.currentOffsets.oldOffset : 0;
-        const side = hr.side === 'old' ? 'old' : 'new';
-        const monacoLine = side === 'old' ? hr.start - oldOffset : hr.start - newOffset;
-        this.setFocusedLine(side, monacoLine, false);
-      }, 100);
-    }
+    this.applyInitialHunkFocus(file.path);
   }
 
   setupEditorClickHandlers(filePath, modifiedEditor, originalEditor, newOffset, oldOffset) {
@@ -1953,6 +1941,22 @@ class MonacoApp {
         this.showCommentDialog(filePath, fileLineNumber, monacoLine, 'old');
       }
     });
+  }
+
+  applyInitialHunkFocus(filePath) {
+    const hunks = this.fileHunks[filePath];
+    if (hunks && hunks.length > 0) {
+      const currentIdx = this.currentHunkIndex[filePath] || 0;
+      setTimeout(() => {
+        this.jumpToHunk(currentIdx);
+        const hr = hunks[currentIdx];
+        const newOffset = this.currentOffsets ? this.currentOffsets.newOffset : 0;
+        const oldOffset = this.currentOffsets ? this.currentOffsets.oldOffset : 0;
+        const side = hr.side === 'old' ? 'old' : 'new';
+        const monacoLine = side === 'old' ? hr.start - oldOffset : hr.start - newOffset;
+        this.setFocusedLine(side, monacoLine, false);
+      }, 100);
+    }
   }
 
   loadCommitView() {
