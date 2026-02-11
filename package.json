@@ -7,7 +7,7 @@
     "eslint-plugin-html": "^8.1.1"
   },
   "scripts": {
-    "lint:web": "eslint --ext .ts,.js,.html web e2e scripts"
+    "lint:web": "eslint web e2e scripts"
   }
 }
 

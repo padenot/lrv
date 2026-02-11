@@ -95,7 +95,7 @@ test.describe('Theme + Accent', () => {
     const newConfig = {
       color_scheme: 'firefox-devtools-dark',
       split_view: true,
-      font: 'Inter',
+      font: 'JetBrains Mono',
       auto_close_tab: false,
     };
     await page.request.put(url + 'api/config', { data: newConfig });

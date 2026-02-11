@@ -21,6 +21,30 @@ window.__APP_READY = false;
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
+const MONO_FALLBACK = "'Monaco', 'Menlo', 'Consolas', monospace";
+const DEFAULT_MONO_STACK = `'JetBrains Mono', ${MONO_FALLBACK}`;
+
+function isMonospace(fontName) {
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  ctx.font = `72px '${fontName}'`;
+  return Math.abs(ctx.measureText('m').width - ctx.measureText('i').width) < 1;
+}
+
+function monoFontStack(font) {
+  const name = (font || '').toString().trim();
+  if (!name) {
+    return DEFAULT_MONO_STACK;
+  }
+  if (name.includes(',')) {
+    return name;
+  }
+  if (!isMonospace(name)) {
+    return DEFAULT_MONO_STACK;
+  }
+  return `'${name}', ${MONO_FALLBACK}`;
+}
+
 window.Perf = {
   mark: (name) => {
     performance.mark(name);
@@ -191,7 +215,7 @@ function markAppReady() {
     obs.observe(container, { childList: true, subtree: true });
   }
 }
-// Mock diff data
+
 // Comment Manager
 class CommentManager {
   constructor() {
@@ -337,12 +361,13 @@ class MonacoApp {
       console.log('[app] init: start');
     }
     window.Perf.recordAppInitStart();
-    // Load config, context, and diff data from API
+    // Load config, context, diff data, and ensure @font-face fonts are ready
     const t0 = performance.now();
     const [configData, contextData, diffData] = await Promise.all([
       fetchJSON('/api/config'),
       fetchJSON('/api/context'),
       fetchJSON('/api/diff'),
+      document.fonts.ready,
     ]);
     if (window.DEBUG) {
       console.log('[app] init: responses received in', Math.round(performance.now() - t0), 'ms');
@@ -1670,9 +1695,7 @@ class MonacoApp {
       this._commitViewEl.style.display = 'none';
       container.style.display = '';
     }
-    const mono =
-      (this.config.font && String(this.config.font).trim()) ||
-      "'JetBrains Mono', 'Monaco', 'Menlo', 'Consolas', monospace";
+    const mono = monoFontStack(this.config.font);
     const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     if (!this.editor) {
       this.editor = monaco.editor.createDiffEditor(container, {

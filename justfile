@@ -67,25 +67,15 @@ serve-current title="Current Diff":
 bench-release diff="0e4ff74" commit_artifacts="false" code_commits="HEAD":
     BENCH_DIFF_COMMIT={{diff}} BENCH_COMMIT={{commit_artifacts}} bash scripts/bench.sh {{code_commits}}
 
- 
 
 # Setup e2e test environment
 setup-e2e:
     cd e2e && npm install && npx playwright install firefox
 
-# Build web assets (if web/ directory exists with sources)
-build-web:
-    @echo "Web assets are in web/dist/ - modify index.html directly, then rebuild"
-    @echo "Run 'just build' after editing web/dist/index.html to embed changes"
-
 # Vendor Monaco editor assets into web/assets/vendor/monaco
 # Usage: just vendor-monaco [version]
 vendor-monaco version="0.45.0":
     bash scripts/vendor-monaco.sh {{version}}
-
-# Convenience: vendor all assets we can automate (currently Monaco)
-vendor-assets:
-    just vendor-monaco
 
 # Vendor fonts into web/assets/fonts. Provide URLs or local paths via env vars or args.
 # Usage: just vendor-fonts inter_url=... geist_url=... jetbrains_url=...
@@ -134,12 +124,12 @@ fmt-all:
       echo "[fmt-all] Prettier not found in node_modules. Install with: npm i -D prettier"; \
     fi
 
-# Lint web and e2e sources with ESLint (enforces curly braces)
+# Lint web and e2e sources with ESLint (flat config, enforces curly braces)
 lint-web:
-    npx --yes eslint --ext .ts,.js,.html web e2e
+    npx --yes eslint web e2e
 
 lint-web-fix:
-    npx --yes eslint --fix --ext .ts,.js,.html web e2e
+    npx --yes eslint --fix web e2e
 
 # Check code without building
 check:
