@@ -45,6 +45,10 @@ function monoFontStack(font) {
   return `'${name}', ${MONO_FALLBACK}`;
 }
 
+function prefersReducedMotion() {
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
 window.Perf = {
   mark: (name) => {
     performance.mark(name);
@@ -1113,7 +1117,7 @@ class MonacoApp {
     const newOffset = range && !range.hasFullContent ? range.new.start - 1 : 0;
     const oldOffset = range && !range.hasFullContent ? range.old.start - 1 : 0;
 
-    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const reduceMotion = prefersReducedMotion();
     const smooth = monaco.editor.ScrollType.Smooth;
 
     if (hunkRange.side === 'old') {
@@ -1185,7 +1189,7 @@ class MonacoApp {
     this.currentFocusedLine = { side, line: monacoLine };
     const modifiedEditor = this.editor.getModifiedEditor();
     const originalEditor = this.editor.getOriginalEditor();
-    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const reduceMotion = prefersReducedMotion();
     const scrollType = reduceMotion
       ? monaco.editor.ScrollType.Immediate
       : monaco.editor.ScrollType.Smooth;
@@ -1575,7 +1579,7 @@ class MonacoApp {
       container.style.display = '';
     }
     const mono = monoFontStack(this.config.font);
-    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const reduceMotion = prefersReducedMotion();
     if (!this.editor) {
       this.editor = monaco.editor.createDiffEditor(container, {
         theme: theme,
@@ -2574,7 +2578,7 @@ class MonacoApp {
           // If we expanded at top, adjust scroll by actual lines added
           const linesAddedAtTop = position === 'top' ? oldNewStart - newNewStart : 0;
           const adjustedLine = scrollLineNumber + linesAddedAtTop;
-          const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+          const reduceMotion = prefersReducedMotion();
           modifiedEditor.revealLineInCenter(
             adjustedLine,
             reduceMotion ? monaco.editor.ScrollType.Immediate : monaco.editor.ScrollType.Smooth,
