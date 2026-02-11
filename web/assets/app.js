@@ -272,7 +272,7 @@ const CUSTOM_THEMES = {
   },
 };
 
-function openModal({ title, titleId, modalClass = '', footerHtml = '', onKeydown = null }) {
+function openModal({ title, titleId, modalClass = '', footerContent = null, onKeydown = null }) {
   const overlay = el('div', { className: 'submit-modal-overlay' });
 
   const modal = el('div', { className: `submit-modal${modalClass ? ' ' + modalClass : ''}` });
@@ -292,8 +292,13 @@ function openModal({ title, titleId, modalClass = '', footerHtml = '', onKeydown
   const body = el('div', { className: 'submit-modal-body' });
 
   const footer = el('div', { className: 'submit-modal-footer' });
-  if (footerHtml) {
-    footer.innerHTML = footerHtml;
+  if (footerContent) {
+    const nodes = Array.isArray(footerContent) ? footerContent : [footerContent];
+    nodes.forEach((node) => {
+      if (node) {
+        footer.appendChild(node);
+      }
+    });
   }
 
   modal.appendChild(header);
@@ -2133,15 +2138,15 @@ class MonacoApp {
   showCommitLineCommentDialog(lineNum) {
     const modKey = MOD_KEY_LABEL;
 
-    const footerHtml = `
-      <button class="btn-secondary cancel-btn">Cancel</button>
-      <button class="btn-primary save-btn">Add Comment</button>
-    `;
+    const footerContent = [
+      el('button', { className: 'btn-secondary cancel-btn', text: 'Cancel' }),
+      el('button', { className: 'btn-primary save-btn', text: 'Add Comment' }),
+    ];
 
     const { overlay, modal, body, footer, close } = openModal({
       title: `Comment on Commit Message Line ${lineNum}`,
       titleId: 'commit-comment-dialog',
-      footerHtml,
+      footerContent,
       onKeydown: (e) => {
         if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
           e.preventDefault();
@@ -2735,16 +2740,16 @@ class MonacoApp {
   }
 
   showSettingsModal() {
-    const footerHtml = `
-      <button class="btn-secondary cancel-btn">Cancel</button>
-      <button class="btn-primary save-btn">Save</button>
-    `;
+    const footerContent = [
+      el('button', { className: 'btn-secondary cancel-btn', text: 'Cancel' }),
+      el('button', { className: 'btn-primary save-btn', text: 'Save' }),
+    ];
 
     const { overlay, modal, body, footer, close } = openModal({
       title: 'Settings',
       titleId: 'settings-title',
       modalClass: 'help-modal',
-      footerHtml,
+      footerContent,
     });
 
     const form = el('form', { className: 'settings-form' });
@@ -2917,15 +2922,15 @@ class MonacoApp {
   async showSubmitConfirmation() {
     const comments = this.commentManager.getComments();
 
-    const footerHtml = `
-      <button class="btn-secondary cancel-submit-btn">Cancel</button>
-      <button class="btn-primary confirm-submit-btn">Submit Review</button>
-    `;
+    const footerContent = [
+      el('button', { className: 'btn-secondary cancel-submit-btn', text: 'Cancel' }),
+      el('button', { className: 'btn-primary confirm-submit-btn', text: 'Submit Review' }),
+    ];
 
     const { overlay, modal, body, footer, close } = openModal({
       title: comments.length === 0 ? 'Submit Review' : `Review Comments (${comments.length})`,
       titleId: 'submit-title',
-      footerHtml,
+      footerContent,
     });
 
     if (comments.length === 0) {
