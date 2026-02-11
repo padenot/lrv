@@ -41,6 +41,10 @@ const el = (tag, { className, text, attrs } = {}, children = null) => {
       if (child === undefined || child === null) {
         return;
       }
+      if (typeof child === 'string' || typeof child === 'number') {
+        node.appendChild(document.createTextNode(String(child)));
+        return;
+      }
       node.appendChild(child);
     });
   }
@@ -55,7 +59,7 @@ const MONO_FALLBACK = "'Monaco', 'Menlo', 'Consolas', monospace";
 const DEFAULT_MONO_STACK = `'JetBrains Mono', ${MONO_FALLBACK}`;
 
 function isMonospace(fontName) {
-  const canvas = document.createElement('canvas');
+  const canvas = el('canvas');
   const ctx = canvas.getContext('2d');
   ctx.font = `72px '${fontName}'`;
   return Math.abs(ctx.measureText('m').width - ctx.measureText('i').width) < 1;
@@ -269,24 +273,19 @@ const CUSTOM_THEMES = {
 };
 
 function openModal({ title, titleId, modalClass = '', footerHtml = '', onKeydown = null }) {
-  const overlay = document.createElement('div');
-  overlay.className = 'submit-modal-overlay';
+  const overlay = el('div', { className: 'submit-modal-overlay' });
 
-  const modal = document.createElement('div');
-  modal.className = `submit-modal${modalClass ? ' ' + modalClass : ''}`;
+  const modal = el('div', { className: `submit-modal${modalClass ? ' ' + modalClass : ''}` });
 
-  const header = document.createElement('div');
-  header.className = 'submit-modal-header';
+  const header = el('div', { className: 'submit-modal-header' });
   header.innerHTML = `
     <h2${titleId ? ` id="${titleId}"` : ''}>${title}</h2>
     <button class="submit-modal-close" aria-label="Close">&times;</button>
   `;
 
-  const body = document.createElement('div');
-  body.className = 'submit-modal-body';
+  const body = el('div', { className: 'submit-modal-body' });
 
-  const footer = document.createElement('div');
-  footer.className = 'submit-modal-footer';
+  const footer = el('div', { className: 'submit-modal-footer' });
   if (footerHtml) {
     footer.innerHTML = footerHtml;
   }
@@ -416,9 +415,7 @@ function ensureFetchSpinner() {
       if (!host) {
         return;
       }
-      const s = document.createElement('span');
-      s.id = 'fetch-spinner';
-      s.className = 'fetch-spinner';
+      const s = el('span', { className: 'fetch-spinner', attrs: { id: 'fetch-spinner' } });
       host.insertBefore(s, host.firstChild);
       __fetchSpinnerEl = s;
     }
@@ -800,7 +797,7 @@ class MonacoApp {
           const hexMap = window.UIThemeAccentsHex || {};
           const hex = hexMap[this.config.color_scheme || 'vs-dark'];
           if (hex) {
-            const norm = document.createElement('div');
+            const norm = el('div');
             norm.style.color = hex;
             document.body.appendChild(norm);
             try {
@@ -865,7 +862,7 @@ class MonacoApp {
         const kw = def.rules.find((r) => r && r.token === 'keyword' && r.foreground);
         if (kw && kw.foreground) {
           const hex = '#' + String(kw.foreground).replace(/^#/, '');
-          const norm = document.createElement('div');
+          const norm = el('div');
           norm.style.color = hex;
           document.body.appendChild(norm);
           try {
@@ -1552,35 +1549,27 @@ class MonacoApp {
 
   renderFileList() {
     const list = document.getElementById('file-list');
-    list.innerHTML = '';
+    clearEl(list);
 
     // Optional pseudo-file for commit (when reviewing full commits)
     const hasCommit = !!(this.diff && (this.diff.commit_message || this.diff.commit_hash));
     if (hasCommit) {
-      const li = document.createElement('li');
-      li.dataset.commit = '1';
-      li.className = this.currentFileIsCommit ? 'active' : '';
+      const li = el('li', {
+        className: this.currentFileIsCommit ? 'active' : '',
+        attrs: { 'data-commit': '1' },
+      });
 
-      const left = document.createElement('span');
-      left.className = 'file-left';
-      const name = document.createElement('span');
-      name.textContent = 'Commit';
-      left.appendChild(name);
+      const left = el('span', { className: 'file-left' }, [el('span', { text: 'Commit' })]);
 
-      const right = document.createElement('span');
-      right.className = 'file-right';
+      const right = el('span', { className: 'file-right' });
       const commentCount = this.commentManager.getCommentsForFile('(commit)').length;
       if (commentCount > 0) {
-        const commentBadge = document.createElement('span');
-        commentBadge.className = 'file-comment-badge';
-        commentBadge.textContent = String(commentCount);
-        left.appendChild(commentBadge);
+        left.appendChild(
+          el('span', { className: 'file-comment-badge', text: String(commentCount) }),
+        );
       }
 
-      const status = document.createElement('span');
-      status.className = 'file-status';
-      status.textContent = 'C';
-      right.appendChild(status);
+      right.appendChild(el('span', { className: 'file-status', text: 'C' }));
 
       li.appendChild(left);
       li.appendChild(right);
@@ -1588,14 +1577,14 @@ class MonacoApp {
     }
 
     this.files.forEach((file, index) => {
-      const li = document.createElement('li');
-      li.dataset.index = index;
-      li.className = !this.currentFileIsCommit && index === this.currentFileIndex ? 'active' : '';
+      const li = el('li', {
+        className: !this.currentFileIsCommit && index === this.currentFileIndex ? 'active' : '',
+        attrs: { 'data-index': index },
+      });
 
       // Left: name + (optional) comment count
-      const left = document.createElement('span');
-      left.className = 'file-left';
-      const name = document.createElement('span');
+      const left = el('span', { className: 'file-left' });
+      const name = el('span');
       // Display renames clearly as "old.txt → new.txt"
       if (file.status === 'renamed' && file.old_path) {
         name.textContent = `${file.old_path} → ${file.path}`;
@@ -1606,15 +1595,13 @@ class MonacoApp {
 
       const commentCount = this.commentManager.getCommentsForFile(file.path).length;
       if (commentCount > 0) {
-        const commentBadge = document.createElement('span');
-        commentBadge.className = 'file-comment-badge';
-        commentBadge.textContent = String(commentCount);
-        left.appendChild(commentBadge);
+        left.appendChild(
+          el('span', { className: 'file-comment-badge', text: String(commentCount) }),
+        );
       }
 
       // Right: per-file +/- and status
-      const right = document.createElement('span');
-      right.className = 'file-right';
+      const right = el('span', { className: 'file-right' });
 
       // Compute per-file additions/deletions (serde lowercases enum and renames to `type`)
       const added = (file.hunks || []).reduce(
@@ -1626,15 +1613,20 @@ class MonacoApp {
         0,
       );
 
-      const delta = document.createElement('span');
-      delta.className = 'file-delta';
-      delta.innerHTML = `<span class="delta-add">+${added}</span> <span class="delta-del">-${deleted}</span>`;
-      right.appendChild(delta);
+      right.appendChild(
+        el('span', { className: 'file-delta' }, [
+          el('span', { className: 'delta-add', text: `+${added}` }),
+          ' ',
+          el('span', { className: 'delta-del', text: `-${deleted}` }),
+        ]),
+      );
 
-      const status = document.createElement('span');
-      status.className = `file-status ${file.status}`;
-      status.textContent = file.status[0].toUpperCase();
-      right.appendChild(status);
+      right.appendChild(
+        el('span', {
+          className: `file-status ${file.status}`,
+          text: file.status[0].toUpperCase(),
+        }),
+      );
 
       li.appendChild(left);
       li.appendChild(right);
@@ -1995,30 +1987,29 @@ class MonacoApp {
     container.style.display = 'none';
     if (!this._commitViewEl) {
       const host = document.querySelector('.content');
-      const el = document.createElement('div');
-      el.className = 'commit-view';
-      el.style.padding = '16px';
-      el.style.overflow = 'auto';
-      el.style.height = 'calc(100vh - 48px)';
-      host.appendChild(el);
-      this._commitViewEl = el;
+      const viewEl = el('div', { className: 'commit-view' });
+      viewEl.style.padding = '16px';
+      viewEl.style.overflow = 'auto';
+      viewEl.style.height = 'calc(100vh - 48px)';
+      host.appendChild(viewEl);
+      this._commitViewEl = viewEl;
     }
-    const el = this._commitViewEl;
-    el.innerHTML = '';
-    el.style.display = '';
+    const viewEl = this._commitViewEl;
+    clearEl(viewEl);
+    viewEl.style.display = '';
 
-    const meta = document.createElement('div');
+    const meta = el('div');
     meta.style.color = 'var(--text-secondary)';
     meta.style.fontSize = '11px';
     meta.style.marginBottom = '12px';
     const rev = this.diff && this.diff.commit_hash ? String(this.diff.commit_hash) : '';
     meta.textContent = rev;
-    el.appendChild(meta);
+    viewEl.appendChild(meta);
 
     const msgText = String((this.diff && this.diff.commit_message) || '(no message)');
     const msgLines = msgText.split('\n');
 
-    const msgContainer = document.createElement('div');
+    const msgContainer = el('div');
     msgContainer.style.border = '1px solid var(--border-color)';
     msgContainer.style.borderRadius = '4px';
     msgContainer.style.background = 'var(--bg-elevated)';
@@ -2027,7 +2018,7 @@ class MonacoApp {
 
     msgLines.forEach((lineText, lineIndex) => {
       const lineNum = lineIndex + 1;
-      const lineDiv = document.createElement('div');
+      const lineDiv = el('div');
       lineDiv.style.display = 'flex';
       lineDiv.style.lineHeight = '1.6';
       lineDiv.style.cursor = 'pointer';
@@ -2039,7 +2030,7 @@ class MonacoApp {
         lineDiv.style.background = '';
       };
 
-      const lineNumSpan = document.createElement('span');
+      const lineNumSpan = el('span');
       lineNumSpan.style.display = 'inline-block';
       lineNumSpan.style.width = '40px';
       lineNumSpan.style.textAlign = 'right';
@@ -2049,7 +2040,7 @@ class MonacoApp {
       lineNumSpan.style.flexShrink = '0';
       lineNumSpan.textContent = lineNum;
 
-      const lineContent = document.createElement('span');
+      const lineContent = el('span');
       lineContent.style.paddingRight = '12px';
       lineContent.style.whiteSpace = 'pre-wrap';
       lineContent.style.wordBreak = 'break-word';
@@ -2065,18 +2056,17 @@ class MonacoApp {
       msgContainer.appendChild(lineDiv);
     });
 
-    el.appendChild(msgContainer);
+    viewEl.appendChild(msgContainer);
 
-    const commentsHeader = document.createElement('h3');
-    commentsHeader.textContent = 'Comments';
+    const commentsHeader = el('h3', { text: 'Comments' });
     commentsHeader.style.marginTop = '24px';
     commentsHeader.style.fontSize = '14px';
-    el.appendChild(commentsHeader);
+    viewEl.appendChild(commentsHeader);
 
-    const list = document.createElement('div');
+    const list = el('div');
     const comments = this.commentManager.getCommentsForFile('(commit)');
     if (comments.length === 0) {
-      const empty = document.createElement('div');
+      const empty = el('div');
       empty.style.color = 'var(--text-secondary)';
       empty.style.fontSize = '12px';
       empty.style.padding = '8px 0';
@@ -2084,7 +2074,7 @@ class MonacoApp {
       list.appendChild(empty);
     } else {
       comments.forEach((c, idx) => {
-        const row = document.createElement('div');
+        const row = el('div');
         row.style.display = 'flex';
         row.style.flexDirection = 'column';
         row.style.gap = '8px';
@@ -2094,27 +2084,25 @@ class MonacoApp {
         row.style.borderRadius = '4px';
         row.style.background = 'var(--bg-elevated)';
 
-        const lineLabel = document.createElement('div');
+        const lineLabel = el('div');
         lineLabel.style.fontSize = '11px';
         lineLabel.style.color = 'var(--text-secondary)';
         lineLabel.textContent = `Line ${c.start_line}`;
 
-        const bodyRow = document.createElement('div');
+        const bodyRow = el('div');
         bodyRow.style.display = 'flex';
         bodyRow.style.justifyContent = 'space-between';
         bodyRow.style.alignItems = 'flex-start';
         bodyRow.style.gap = '12px';
 
-        const body = document.createElement('div');
+        const body = el('div');
         body.style.whiteSpace = 'pre-wrap';
         body.style.fontFamily = 'var(--font-sans)';
         body.style.fontSize = '13px';
         body.style.flex = '1';
         body.textContent = c.body;
 
-        const del = document.createElement('button');
-        del.className = 'btn-danger';
-        del.textContent = 'Delete';
+        const del = el('button', { className: 'btn-danger', text: 'Delete' });
         del.style.fontSize = '11px';
         del.style.padding = '4px 8px';
         del.onclick = () => {
@@ -2132,7 +2120,7 @@ class MonacoApp {
         list.appendChild(row);
       });
     }
-    el.appendChild(list);
+    viewEl.appendChild(list);
     this.renderFileList();
   }
 
@@ -2159,7 +2147,7 @@ class MonacoApp {
     modal.style.maxWidth = '600px';
     body.style.padding = '20px';
 
-    const ta = document.createElement('textarea');
+    const ta = el('textarea');
     ta.rows = 4;
     ta.style.width = '100%';
     ta.style.fontFamily = 'var(--font-sans)';
@@ -2169,7 +2157,7 @@ class MonacoApp {
     ta.autofocus = true;
     body.appendChild(ta);
 
-    const hint = document.createElement('div');
+    const hint = el('div');
     hint.style.fontSize = '11px';
     hint.style.color = 'var(--text-secondary)';
     hint.style.marginTop = '8px';
@@ -2272,8 +2260,7 @@ class MonacoApp {
     const existingComment = existingIndex >= 0 ? this.commentManager.comments[existingIndex] : null;
 
     // Create the widget
-    const domNode = document.createElement('div');
-    domNode.className = 'inline-comment-box';
+    const domNode = el('div', { className: 'inline-comment-box' });
     const modKey = MOD_KEY_LABEL;
     const deleteBtnHtml = existingComment
       ? '<button class="btn-danger delete-btn">Delete</button>'
@@ -2551,8 +2538,7 @@ class MonacoApp {
 
   createExpandControl(position, filePath, availableLines) {
     const expandAmount = Math.min(20, availableLines);
-    const control = document.createElement('div');
-    control.className = `expand-controls ${position}`;
+    const control = el('div', { className: `expand-controls ${position}` });
     control.innerHTML = `
           <div class="expand-line"></div>
           <button class="expand-btn" data-position="${position}" data-file="${filePath}">
@@ -2687,8 +2673,7 @@ class MonacoApp {
       },
     });
 
-    const table = document.createElement('table');
-    table.className = 'shortcuts-table';
+    const table = el('table', { className: 'shortcuts-table' });
     table.innerHTML = `
       <thead>
         <tr>
@@ -2702,18 +2687,14 @@ class MonacoApp {
     const tbody = table.querySelector('tbody');
 
     KEYBOARD_SHORTCUTS.forEach((shortcut) => {
-      const row = document.createElement('tr');
+      const row = el('tr');
 
-      const keysCell = document.createElement('td');
-      const keyComboDiv = document.createElement('div');
-      keyComboDiv.className = 'key-combo';
+      const keysCell = el('td');
+      const keyComboDiv = el('div', { className: 'key-combo' });
 
       shortcut.keys.forEach((combo, idx) => {
         if (idx > 0) {
-          const orSpan = document.createElement('span');
-          orSpan.className = 'key-or';
-          orSpan.textContent = 'or';
-          keyComboDiv.appendChild(orSpan);
+          keyComboDiv.appendChild(el('span', { className: 'key-or', text: 'or' }));
         }
 
         const displayCombo = combo.replace('Mod', IS_MAC ? 'Cmd' : 'Ctrl');
@@ -2721,15 +2702,13 @@ class MonacoApp {
 
         parts.forEach((part, partIdx) => {
           if (partIdx > 0) {
-            const plus = document.createElement('span');
-            plus.textContent = '+';
+            const plus = el('span', { text: '+' });
             plus.style.margin = '0 2px';
             plus.style.color = '#888';
             keyComboDiv.appendChild(plus);
           }
 
-          const key = document.createElement('span');
-          key.className = 'key';
+          const key = el('span', { className: 'key' });
           const displayKey = part
             .replace('ArrowDown', '↓')
             .replace('ArrowUp', '↑')
@@ -2741,8 +2720,7 @@ class MonacoApp {
 
       keysCell.appendChild(keyComboDiv);
 
-      const actionCell = document.createElement('td');
-      actionCell.textContent = shortcut.description;
+      const actionCell = el('td', { text: shortcut.description });
 
       row.appendChild(keysCell);
       row.appendChild(actionCell);
@@ -2765,8 +2743,7 @@ class MonacoApp {
       footerHtml,
     });
 
-    const form = document.createElement('form');
-    form.className = 'settings-form';
+    const form = el('form', { className: 'settings-form' });
 
     let currentColorScheme = this.config.color_scheme || 'vs-dark';
     const legacyThemeMap = {
@@ -2913,8 +2890,7 @@ class MonacoApp {
     });
 
     if (comments.length === 0) {
-      const noCommentsMsg = document.createElement('p');
-      noCommentsMsg.textContent = 'No comments. Submit to approve this review.';
+      const noCommentsMsg = el('p', { text: 'No comments. Submit to approve this review.' });
       noCommentsMsg.style.padding = '20px';
       noCommentsMsg.style.textAlign = 'center';
       noCommentsMsg.style.color = 'var(--text-secondary)';
@@ -2951,13 +2927,10 @@ class MonacoApp {
     );
 
     comments.forEach((comment) => {
-      const preview = document.createElement('div');
-      preview.className = 'comment-preview';
+      const preview = el('div', { className: 'comment-preview' });
 
       const headerText = `${comment.file}:${comment.start_line} (${comment.side}) — ${comment.severity}`;
-      const previewHeader = document.createElement('div');
-      previewHeader.className = 'comment-preview-header';
-      previewHeader.textContent = headerText;
+      const previewHeader = el('div', { className: 'comment-preview-header', text: headerText });
 
       const fileKey = `${comment.file}:${comment.side}`;
       const lines = fileContents[fileKey] || [];
@@ -2966,11 +2939,9 @@ class MonacoApp {
       const endLine = Math.min(lines.length, lineIndex + 2);
       const excerpt = lines.slice(startLine, endLine);
 
-      const codeBlock = document.createElement('div');
-      codeBlock.className = 'comment-preview-code';
+      const codeBlock = el('div', { className: 'comment-preview-code' });
       excerpt.forEach((line, idx) => {
-        const lineDiv = document.createElement('div');
-        lineDiv.className = 'comment-preview-code-line';
+        const lineDiv = el('div', { className: 'comment-preview-code-line' });
         if (startLine + idx === lineIndex) {
           lineDiv.classList.add('target');
         }
@@ -2978,9 +2949,7 @@ class MonacoApp {
         codeBlock.appendChild(lineDiv);
       });
 
-      const commentText = document.createElement('div');
-      commentText.className = 'comment-preview-text';
-      commentText.textContent = comment.body;
+      const commentText = el('div', { className: 'comment-preview-text', text: comment.body });
 
       preview.appendChild(previewHeader);
       preview.appendChild(codeBlock);
