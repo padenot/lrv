@@ -97,6 +97,107 @@ function computeHunkRanges(hunks) {
   };
 }
 
+function openModal({ title, titleId, modalClass = '', footerHtml = '', onKeydown = null }) {
+  const overlay = document.createElement('div');
+  overlay.className = 'submit-modal-overlay';
+
+  const modal = document.createElement('div');
+  modal.className = `submit-modal${modalClass ? ' ' + modalClass : ''}`;
+
+  const header = document.createElement('div');
+  header.className = 'submit-modal-header';
+  header.innerHTML = `
+    <h2${titleId ? ` id="${titleId}"` : ''}>${title}</h2>
+    <button class="submit-modal-close" aria-label="Close">&times;</button>
+  `;
+
+  const body = document.createElement('div');
+  body.className = 'submit-modal-body';
+
+  const footer = document.createElement('div');
+  footer.className = 'submit-modal-footer';
+  if (footerHtml) {
+    footer.innerHTML = footerHtml;
+  }
+
+  modal.appendChild(header);
+  modal.appendChild(body);
+  modal.appendChild(footer);
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+
+  const previouslyFocused = document.activeElement;
+  modal.setAttribute('role', 'dialog');
+  modal.setAttribute('aria-modal', 'true');
+  if (titleId) {
+    modal.setAttribute('aria-labelledby', titleId);
+  }
+
+  const focusable = () =>
+    Array.from(
+      modal.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'),
+    ).filter((el) => !el.hasAttribute('disabled'));
+
+  const onTrap = (e) => {
+    if (e.key === 'Tab') {
+      const nodes = focusable();
+      if (nodes.length === 0) {
+        return;
+      }
+      const first = nodes[0];
+      const last = nodes[nodes.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
+  };
+
+  document.addEventListener('keydown', onTrap);
+
+  const close = () => {
+    overlay.remove();
+    document.removeEventListener('keydown', onTrap);
+    if (onKeydown) {
+      document.removeEventListener('keydown', onKeydown);
+    }
+    if (previouslyFocused && previouslyFocused.focus) {
+      previouslyFocused.focus();
+    }
+  };
+
+  header.querySelector('.submit-modal-close').onclick = close;
+
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) {
+      close();
+    }
+  });
+
+  const handleEscape = (e) => {
+    if (e.key === 'Escape') {
+      close();
+    }
+  };
+  document.addEventListener('keydown', handleEscape);
+
+  if (onKeydown) {
+    document.addEventListener('keydown', onKeydown);
+  }
+
+  setTimeout(() => {
+    const f = focusable()[0];
+    if (f) {
+      f.focus();
+    }
+  }, 0);
+
+  return { overlay, modal, body, footer, close };
+}
+
 window.Perf = {
   mark: (name) => {
     performance.mark(name);
@@ -2004,24 +2105,26 @@ class MonacoApp {
   }
 
   showCommitLineCommentDialog(lineNum) {
-    const overlay = document.createElement('div');
-    overlay.className = 'submit-modal-overlay';
-
-    const modal = document.createElement('div');
-    modal.className = 'submit-modal';
-    modal.style.maxWidth = '600px';
-
     const modKey = MOD_KEY_LABEL;
 
-    const header = document.createElement('div');
-    header.className = 'submit-modal-header';
-    header.innerHTML = `
-      <h2>Comment on Commit Message Line ${lineNum}</h2>
-      <button class="submit-modal-close" aria-label="Close">&times;</button>
+    const footerHtml = `
+      <button class="btn-secondary cancel-btn">Cancel</button>
+      <button class="btn-primary save-btn">Add Comment</button>
     `;
 
-    const body = document.createElement('div');
-    body.className = 'submit-modal-body';
+    const { overlay, modal, body, footer, close } = openModal({
+      title: `Comment on Commit Message Line ${lineNum}`,
+      titleId: 'commit-comment-dialog',
+      footerHtml,
+      onKeydown: (e) => {
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+          e.preventDefault();
+          save();
+        }
+      },
+    });
+
+    modal.style.maxWidth = '600px';
     body.style.padding = '20px';
 
     const ta = document.createElement('textarea');
@@ -2040,24 +2143,6 @@ class MonacoApp {
     hint.style.marginTop = '8px';
     hint.textContent = `${modKey}+Enter to save, Escape to cancel`;
     body.appendChild(hint);
-
-    const footer = document.createElement('div');
-    footer.className = 'submit-modal-footer';
-    footer.innerHTML = `
-      <button class="btn-secondary cancel-btn">Cancel</button>
-      <button class="btn-primary save-btn">Add Comment</button>
-    `;
-
-    modal.appendChild(header);
-    modal.appendChild(body);
-    modal.appendChild(footer);
-    overlay.appendChild(modal);
-    document.body.appendChild(overlay);
-
-    const close = () => {
-      overlay.remove();
-      document.removeEventListener('keydown', handleKeydown);
-    };
 
     const save = () => {
       const text = (ta.value || '').trim();
@@ -2078,26 +2163,8 @@ class MonacoApp {
       this.loadCommitView();
     };
 
-    const handleKeydown = (e) => {
-      if (e.key === 'Escape') {
-        close();
-      } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-        e.preventDefault();
-        save();
-      }
-    };
-
-    document.addEventListener('keydown', handleKeydown);
-
-    header.querySelector('.submit-modal-close').onclick = close;
     footer.querySelector('.cancel-btn').onclick = close;
     footer.querySelector('.save-btn').onclick = save;
-
-    overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) {
-        close();
-      }
-    });
 
     setTimeout(() => ta.focus(), 100);
   }
@@ -2576,36 +2643,29 @@ class MonacoApp {
   }
 
   showKeyboardHelp() {
-    const overlay = document.createElement('div');
-    overlay.className = 'submit-modal-overlay';
-
-    const modal = document.createElement('div');
-    modal.className = 'submit-modal help-modal';
-
-    // Header
-    const header = document.createElement('div');
-    header.className = 'submit-modal-header';
-    const titleId = 'kb-help-title';
-    header.innerHTML = `
-          <h2 id="${titleId}">Keyboard Shortcuts</h2>
-          <button class="submit-modal-close" aria-label="Close">&times;</button>
-        `;
-
-    // Body
-    const body = document.createElement('div');
-    body.className = 'submit-modal-body';
+    const { overlay, modal, body, close } = openModal({
+      title: 'Keyboard Shortcuts',
+      titleId: 'kb-help-title',
+      modalClass: 'help-modal',
+      onKeydown: (e) => {
+        if (e.key === '?') {
+          e.preventDefault();
+          close();
+        }
+      },
+    });
 
     const table = document.createElement('table');
     table.className = 'shortcuts-table';
     table.innerHTML = `
-          <thead>
-            <tr>
-              <th>Shortcut</th>
-              <th>Action</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        `;
+      <thead>
+        <tr>
+          <th>Shortcut</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    `;
 
     const tbody = table.querySelector('tbody');
 
@@ -2624,7 +2684,6 @@ class MonacoApp {
           keyComboDiv.appendChild(orSpan);
         }
 
-        // Replace Mod with Cmd/Ctrl based on platform
         const displayCombo = combo.replace('Mod', IS_MAC ? 'Cmd' : 'Ctrl');
         const parts = displayCombo.split('+');
 
@@ -2639,7 +2698,6 @@ class MonacoApp {
 
           const key = document.createElement('span');
           key.className = 'key';
-          // Format key names for display
           const displayKey = part
             .replace('ArrowDown', '↓')
             .replace('ArrowUp', '↑')
@@ -2660,101 +2718,24 @@ class MonacoApp {
     });
 
     body.appendChild(table);
-
-    modal.appendChild(header);
-    modal.appendChild(body);
-    overlay.appendChild(modal);
-    document.body.appendChild(overlay);
-
-    // A11y/focus management
-    const previouslyFocused = document.activeElement;
-    modal.setAttribute('role', 'dialog');
-    modal.setAttribute('aria-modal', 'true');
-    modal.setAttribute('aria-labelledby', titleId);
-    const focusable = () =>
-      Array.from(
-        modal.querySelectorAll(
-          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
-        ),
-      ).filter((el) => !el.hasAttribute('disabled'));
-    const onTrap = (e) => {
-      if (e.key === 'Tab') {
-        const nodes = focusable();
-        if (nodes.length === 0) {
-          return;
-        }
-        const first = nodes[0];
-        const last = nodes[nodes.length - 1];
-        if (e.shiftKey && document.activeElement === first) {
-          e.preventDefault();
-          last.focus();
-        } else if (!e.shiftKey && document.activeElement === last) {
-          e.preventDefault();
-          first.focus();
-        }
-      }
-    };
-    document.addEventListener('keydown', onTrap);
-    setTimeout(() => {
-      const f = modal.querySelector('.submit-modal-close') || focusable()[0];
-      if (f) {
-        f.focus();
-      }
-    }, 0);
-
-    // Event handlers
-    const close = () => {
-      overlay.remove();
-      document.removeEventListener('keydown', onTrap);
-      if (previouslyFocused && previouslyFocused.focus) {
-        previouslyFocused.focus();
-      }
-    };
-
-    header.querySelector('.submit-modal-close').onclick = close;
-
-    // Close on overlay click
-    overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) {
-        close();
-      }
-    });
-
-    // Close on Escape or ?
-    const handleClose = (e) => {
-      if (e.key === 'Escape' || e.key === '?') {
-        e.preventDefault();
-        close();
-        document.removeEventListener('keydown', handleClose);
-      }
-    };
-    document.addEventListener('keydown', handleClose);
   }
 
   showSettingsModal() {
-    const overlay = document.createElement('div');
-    overlay.className = 'submit-modal-overlay';
+    const footerHtml = `
+      <button class="btn-secondary cancel-btn">Cancel</button>
+      <button class="btn-primary save-btn">Save</button>
+    `;
 
-    const modal = document.createElement('div');
-    modal.className = 'submit-modal help-modal';
-
-    // Header
-    const header = document.createElement('div');
-    header.className = 'submit-modal-header';
-    const titleId = 'settings-title';
-    header.innerHTML = `
-          <h2 id="${titleId}">Settings</h2>
-          <button class="submit-modal-close" aria-label="Close">&times;</button>
-        `;
-
-    // Body
-    const body = document.createElement('div');
-    body.className = 'submit-modal-body';
+    const { overlay, modal, body, footer, close } = openModal({
+      title: 'Settings',
+      titleId: 'settings-title',
+      modalClass: 'help-modal',
+      footerHtml,
+    });
 
     const form = document.createElement('form');
     form.className = 'settings-form';
 
-    // Migrate old color scheme names to new ones
     let currentColorScheme = this.config.color_scheme || 'vs-dark';
     const legacyThemeMap = {
       dark: 'vs-dark',
@@ -2780,115 +2761,54 @@ class MonacoApp {
     }
 
     form.innerHTML = `
-          <div class="settings-field">
-            <label for="color-scheme">Theme</label>
-            <select id="color-scheme" name="color_scheme">
-              <optgroup label="Standard">
-                <option value="vs-dark">VS Dark</option>
-                <option value="vs">VS Light</option>
-                <option value="hc-black">High Contrast Dark</option>
-                <option value="hc-light">High Contrast Light</option>
-              </optgroup>
-              <optgroup label="GitHub">
-                <option value="github-dark">GitHub Dark</option>
-                <option value="github-light">GitHub Light</option>
-              </optgroup>
-              <optgroup label="Firefox DevTools">
-                <option value="firefox-devtools-dark">Firefox DevTools Dark</option>
-                <option value="firefox-devtools-light">Firefox DevTools Light</option>
-              </optgroup>
-              <optgroup label="Solarized">
-                <option value="solarized-dark">Solarized Dark</option>
-                <option value="solarized-light">Solarized Light</option>
-              </optgroup>
-            </select>
-          </div>
+      <div class="settings-field">
+        <label for="color-scheme">Theme</label>
+        <select id="color-scheme" name="color_scheme">
+          <optgroup label="Standard">
+            <option value="vs-dark">VS Dark</option>
+            <option value="vs">VS Light</option>
+            <option value="hc-black">High Contrast Dark</option>
+            <option value="hc-light">High Contrast Light</option>
+          </optgroup>
+          <optgroup label="GitHub">
+            <option value="github-dark">GitHub Dark</option>
+            <option value="github-light">GitHub Light</option>
+          </optgroup>
+          <optgroup label="Firefox DevTools">
+            <option value="firefox-devtools-dark">Firefox DevTools Dark</option>
+            <option value="firefox-devtools-light">Firefox DevTools Light</option>
+          </optgroup>
+          <optgroup label="Solarized">
+            <option value="solarized-dark">Solarized Dark</option>
+            <option value="solarized-light">Solarized Light</option>
+          </optgroup>
+        </select>
+      </div>
 
-          <div class="settings-field">
-            <label for="font">Editor Font</label>
-            <input type="text" id="font" name="font" value="${currentFont}" placeholder="JetBrains Mono">
-          </div>
+      <div class="settings-field">
+        <label for="font">Editor Font</label>
+        <input type="text" id="font" name="font" value="${currentFont}" placeholder="JetBrains Mono">
+      </div>
 
-          <div class="settings-field">
-            <label for="split-view">Split View</label>
-            <div class="checkbox-wrapper">
-              <input type="checkbox" id="split-view" name="split_view" ${currentSplitView ? 'checked' : ''}>
-              <span>Show original and modified side-by-side</span>
-            </div>
-          </div>
+      <div class="settings-field">
+        <label for="split-view">Split View</label>
+        <div class="checkbox-wrapper">
+          <input type="checkbox" id="split-view" name="split_view" ${currentSplitView ? 'checked' : ''}>
+          <span>Show original and modified side-by-side</span>
+        </div>
+      </div>
 
-          <div class="settings-field">
-            <label for="auto-close-tab">Auto-Close Tab</label>
-            <div class="checkbox-wrapper">
-              <input type="checkbox" id="auto-close-tab" name="auto_close_tab" ${currentAutoCloseTab ? 'checked' : ''}>
-              <span>Automatically close tab after submitting review</span>
-            </div>
-          </div>
-        `;
+      <div class="settings-field">
+        <label for="auto-close-tab">Auto-Close Tab</label>
+        <div class="checkbox-wrapper">
+          <input type="checkbox" id="auto-close-tab" name="auto_close_tab" ${currentAutoCloseTab ? 'checked' : ''}>
+          <span>Automatically close tab after submitting review</span>
+        </div>
+      </div>
+    `;
 
     body.appendChild(form);
-
-    // Set dropdown values after adding to DOM
     form.querySelector('#color-scheme').value = currentColorScheme;
-
-    // Footer
-    const footer = document.createElement('div');
-    footer.className = 'submit-modal-footer';
-    footer.innerHTML = `
-          <button class="btn-secondary cancel-btn">Cancel</button>
-          <button class="btn-primary save-btn">Save</button>
-        `;
-
-    modal.appendChild(header);
-    modal.appendChild(body);
-    modal.appendChild(footer);
-    overlay.appendChild(modal);
-    document.body.appendChild(overlay);
-
-    // A11y/focus management
-    const previouslyFocused = document.activeElement;
-    modal.setAttribute('role', 'dialog');
-    modal.setAttribute('aria-modal', 'true');
-    modal.setAttribute('aria-labelledby', titleId);
-    const focusable = () =>
-      Array.from(
-        modal.querySelectorAll(
-          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
-        ),
-      ).filter((el) => !el.hasAttribute('disabled'));
-    const initial = modal.querySelector('#color-scheme') || focusable()[0];
-    const onTrap = (e) => {
-      if (e.key === 'Tab') {
-        const nodes = focusable();
-        if (nodes.length === 0) {
-          return;
-        }
-        const first = nodes[0];
-        const last = nodes[nodes.length - 1];
-        if (e.shiftKey && document.activeElement === first) {
-          e.preventDefault();
-          last.focus();
-        } else if (!e.shiftKey && document.activeElement === last) {
-          e.preventDefault();
-          first.focus();
-        }
-      }
-    };
-    document.addEventListener('keydown', onTrap);
-    setTimeout(() => {
-      if (initial) {
-        initial.focus();
-      }
-    }, 0);
-
-    // Event handlers
-    const close = () => {
-      overlay.remove();
-      document.removeEventListener('keydown', onTrap);
-      if (previouslyFocused && previouslyFocused.focus) {
-        previouslyFocused.focus();
-      }
-    };
 
     const save = async () => {
       const saveBtn = footer.querySelector('.save-btn');
@@ -2913,7 +2833,6 @@ class MonacoApp {
         if (response.ok) {
           this.config = newConfig;
           this.isInline = !this.config.split_view;
-          // Apply theme to Monaco + UI from theme definition
           try {
             monaco.editor.setTheme(this.config.color_scheme || 'vs-dark');
           } catch {}
@@ -2922,7 +2841,6 @@ class MonacoApp {
 
           setTimeout(() => {
             close();
-            // Reload editor to apply new settings
             this.loadFile(this.currentFileIndex);
           }, 500);
         } else {
@@ -2937,59 +2855,30 @@ class MonacoApp {
       }
     };
 
-    header.querySelector('.submit-modal-close').onclick = close;
     footer.querySelector('.cancel-btn').onclick = close;
     footer.querySelector('.save-btn').onclick = save;
 
-    // Close on overlay click
-    overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) {
-        close();
+    setTimeout(() => {
+      const initial = form.querySelector('#color-scheme');
+      if (initial) {
+        initial.focus();
       }
-    });
-
-    // Close on Escape key
-    const handleEscape = (e) => {
-      if (e.key === 'Escape') {
-        close();
-        document.removeEventListener('keydown', handleEscape);
-      }
-    };
-    document.addEventListener('keydown', handleEscape);
+    }, 0);
   }
 
   async showSubmitConfirmation() {
     const comments = this.commentManager.getComments();
 
-    // Create overlay
-    const overlay = document.createElement('div');
-    overlay.className = 'submit-modal-overlay';
+    const footerHtml = `
+      <button class="btn-secondary cancel-submit-btn">Cancel</button>
+      <button class="btn-primary confirm-submit-btn">Submit Review</button>
+    `;
 
-    const modal = document.createElement('div');
-    modal.className = 'submit-modal';
-
-    // Header
-    const header = document.createElement('div');
-    header.className = 'submit-modal-header';
-    header.innerHTML = `
-          <h2>${comments.length === 0 ? 'Submit Review' : `Review Comments (${comments.length})`}</h2>
-          <button class="submit-modal-close">&times;</button>
-        `;
-    // A11y: ensure heading has an id and close button has a label
-    try {
-      const h2 = header.querySelector('h2');
-      if (h2) {
-        h2.id = 'submit-title';
-      }
-      const closeBtn = header.querySelector('.submit-modal-close');
-      if (closeBtn) {
-        closeBtn.setAttribute('aria-label', 'Close');
-      }
-    } catch {}
-
-    // Body
-    const body = document.createElement('div');
-    body.className = 'submit-modal-body';
+    const { overlay, modal, body, footer, close } = openModal({
+      title: comments.length === 0 ? 'Submit Review' : `Review Comments (${comments.length})`,
+      titleId: 'submit-title',
+      footerHtml,
+    });
 
     if (comments.length === 0) {
       const noCommentsMsg = document.createElement('p');
@@ -3000,7 +2889,6 @@ class MonacoApp {
       body.appendChild(noCommentsMsg);
     }
 
-    // Group comments by file
     const commentsByFile = {};
     comments.forEach((comment) => {
       if (!commentsByFile[comment.file]) {
@@ -3009,7 +2897,6 @@ class MonacoApp {
       commentsByFile[comment.file].push(comment);
     });
 
-    // Fetch file contents for all files
     const fileContents = {};
     await Promise.all(
       Object.keys(commentsByFile).map(async (filePath) => {
@@ -3031,7 +2918,6 @@ class MonacoApp {
       }),
     );
 
-    // Render each comment
     comments.forEach((comment) => {
       const preview = document.createElement('div');
       preview.className = 'comment-preview';
@@ -3041,7 +2927,6 @@ class MonacoApp {
       previewHeader.className = 'comment-preview-header';
       previewHeader.textContent = headerText;
 
-      // Get code excerpt (line before, target line, line after)
       const fileKey = `${comment.file}:${comment.side}`;
       const lines = fileContents[fileKey] || [];
       const lineIndex = comment.start_line - 1;
@@ -3071,67 +2956,6 @@ class MonacoApp {
       body.appendChild(preview);
     });
 
-    // Footer
-    const footer = document.createElement('div');
-    footer.className = 'submit-modal-footer';
-    footer.innerHTML = `
-          <button class="btn-secondary cancel-submit-btn">Cancel</button>
-          <button class="btn-primary confirm-submit-btn">Submit Review</button>
-        `;
-
-    modal.appendChild(header);
-    modal.appendChild(body);
-    modal.appendChild(footer);
-    overlay.appendChild(modal);
-    document.body.appendChild(overlay);
-
-    // A11y/focus trap & dialog attrs
-    const previouslyFocused = document.activeElement;
-    try {
-      modal.setAttribute('role', 'dialog');
-      modal.setAttribute('aria-modal', 'true');
-      modal.setAttribute('aria-labelledby', 'submit-title');
-    } catch {}
-    const focusable = () =>
-      Array.from(
-        modal.querySelectorAll(
-          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
-        ),
-      ).filter((el) => !el.hasAttribute('disabled'));
-    const onTrap = (e) => {
-      if (e.key === 'Tab') {
-        const nodes = focusable();
-        if (nodes.length === 0) {
-          return;
-        }
-        const first = nodes[0];
-        const last = nodes[nodes.length - 1];
-        if (e.shiftKey && document.activeElement === first) {
-          e.preventDefault();
-          last.focus();
-        } else if (!e.shiftKey && document.activeElement === last) {
-          e.preventDefault();
-          first.focus();
-        }
-      }
-    };
-    document.addEventListener('keydown', onTrap);
-    setTimeout(() => {
-      const f = modal.querySelector('.confirm-submit-btn');
-      if (f) {
-        f.focus();
-      }
-    }, 0);
-
-    // Event handlers
-    const close = () => {
-      overlay.remove();
-      document.removeEventListener('keydown', onTrap);
-      if (previouslyFocused && previouslyFocused.focus) {
-        previouslyFocused.focus();
-      }
-    };
-
     const submit = async () => {
       const submitBtn = footer.querySelector('.confirm-submit-btn');
       submitBtn.disabled = true;
@@ -3153,7 +2977,6 @@ class MonacoApp {
 
         setTimeout(() => {
           close();
-          // Auto-close tab if setting is enabled
           if (this.config.auto_close_tab) {
             window.close();
           }
@@ -3165,25 +2988,15 @@ class MonacoApp {
       }
     };
 
-    header.querySelector('.submit-modal-close').onclick = close;
     footer.querySelector('.cancel-submit-btn').onclick = close;
     footer.querySelector('.confirm-submit-btn').onclick = submit;
 
-    // Close on overlay click (but not modal click)
-    overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) {
-        close();
+    setTimeout(() => {
+      const f = footer.querySelector('.confirm-submit-btn');
+      if (f) {
+        f.focus();
       }
-    });
-
-    // Close on Escape key
-    const handleEscape = (e) => {
-      if (e.key === 'Escape') {
-        close();
-        document.removeEventListener('keydown', handleEscape);
-      }
-    };
-    document.addEventListener('keydown', handleEscape);
+    }, 0);
   }
 }
 
