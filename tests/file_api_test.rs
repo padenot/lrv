@@ -25,6 +25,10 @@ fn make_state_with_root(root: &str) -> lrv::server::AppState {
             additions: 0,
             deletions: 0,
         },
+        commit_hash: None,
+        commit_author: None,
+        commit_date: None,
+        commit_message: None,
     };
     let config = lrv::config::UserConfig::default();
     let context = lrv::types::ProjectContext {
@@ -40,6 +44,7 @@ fn make_state_with_root(root: &str) -> lrv::server::AppState {
         shutdown_tx: Arc::new(Mutex::new(Some(shutdown_tx))),
         config: Arc::new(Mutex::new(config)),
         context: Arc::new(context),
+        old_cache: std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
     }
 }
 
@@ -52,7 +57,7 @@ async fn test_file_read_new_ok() {
     fs::write(&file, "hello world").unwrap();
 
     let state = make_state_with_root(root.to_str().unwrap());
-    let app = lrv::server::create_router(state);
+    let app = lrv::server::create_router(state, false);
 
     let uri = "/api/file?path=subdir/file.txt&side=new".to_string();
     let res = app
@@ -74,7 +79,7 @@ async fn test_file_read_new_ok() {
 async fn test_file_read_missing_404() {
     let root = make_temp_dir();
     let state = make_state_with_root(root.to_str().unwrap());
-    let app = lrv::server::create_router(state);
+    let app = lrv::server::create_router(state, false);
 
     let uri = "/api/file?path=does/not/exist.txt&side=new";
     let res = app
@@ -93,7 +98,7 @@ async fn test_file_read_traversal_rejected_parentdir() {
     let _ = fs::write(&outside, "nope");
 
     let state = make_state_with_root(root.to_str().unwrap());
-    let app = lrv::server::create_router(state);
+    let app = lrv::server::create_router(state, false);
 
     let uri = "/api/file?path=../evil.txt&side=new";
     let res = app
@@ -113,7 +118,7 @@ async fn test_file_read_absolute_rejected() {
     fs::write(&abs, "abs").unwrap();
 
     let state = make_state_with_root(root.to_str().unwrap());
-    let app = lrv::server::create_router(state);
+    let app = lrv::server::create_router(state, false);
 
     let uri = format!("/api/file?path={}&side=new", abs.to_str().unwrap());
     let res = app
@@ -132,7 +137,7 @@ async fn test_file_read_old_side_without_git_repo_ok() {
     fs::write(&file, "newcontent").unwrap();
 
     let state = make_state_with_root(root.to_str().unwrap());
-    let app = lrv::server::create_router(state);
+    let app = lrv::server::create_router(state, false);
     let uri = "/api/file?path=foo.txt&side=old";
     let res = app
         .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())

@@ -29,6 +29,10 @@ fn test_appstate_required_fields() {
             additions: 0,
             deletions: 0,
         },
+        commit_hash: None,
+        commit_author: None,
+        commit_date: None,
+        commit_message: None,
     };
 
     let config = lrv::config::UserConfig::default();
@@ -48,6 +52,7 @@ fn test_appstate_required_fields() {
         shutdown_tx: std::sync::Arc::new(tokio::sync::Mutex::new(Some(shutdown_tx))),
         config: std::sync::Arc::new(tokio::sync::Mutex::new(config)),
         context: std::sync::Arc::new(context),
+        old_cache: std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
     };
 
     // Verify context is accessible

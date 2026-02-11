@@ -11,6 +11,10 @@ async fn test_context_includes_title_when_set() {
             additions: 0,
             deletions: 0,
         },
+        commit_hash: None,
+        commit_author: None,
+        commit_date: None,
+        commit_message: None,
     };
     let config = lrv::config::UserConfig::default();
     let context = lrv::types::ProjectContext {
@@ -29,9 +33,10 @@ async fn test_context_includes_title_when_set() {
         shutdown_tx: std::sync::Arc::new(tokio::sync::Mutex::new(Some(shutdown_tx))),
         config: std::sync::Arc::new(tokio::sync::Mutex::new(config)),
         context: std::sync::Arc::new(context),
+        old_cache: std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
     };
 
-    let app = lrv::server::create_router(state);
+    let app = lrv::server::create_router(state, false);
 
     let res = app
         .oneshot(
@@ -64,6 +69,10 @@ async fn test_context_title_null_when_unset() {
             additions: 0,
             deletions: 0,
         },
+        commit_hash: None,
+        commit_author: None,
+        commit_date: None,
+        commit_message: None,
     };
     let config = lrv::config::UserConfig::default();
     let context = lrv::types::ProjectContext {
@@ -82,9 +91,10 @@ async fn test_context_title_null_when_unset() {
         shutdown_tx: std::sync::Arc::new(tokio::sync::Mutex::new(Some(shutdown_tx))),
         config: std::sync::Arc::new(tokio::sync::Mutex::new(config)),
         context: std::sync::Arc::new(context),
+        old_cache: std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
     };
 
-    let app = lrv::server::create_router(state);
+    let app = lrv::server::create_router(state, false);
 
     let res = app
         .oneshot(

@@ -7,12 +7,18 @@ fn test_diff_response_structure() {
             old_path: None,
             status: lrv::types::FileStatus::Modified,
             hunks: vec![],
+            old_blob: None,
+            new_blob: None,
         }],
         stats: lrv::types::DiffStats {
             files_changed: 1,
             additions: 10,
             deletions: 5,
         },
+        commit_hash: None,
+        commit_author: None,
+        commit_date: None,
+        commit_message: None,
     };
 
     assert_eq!(response.files.len(), 1);

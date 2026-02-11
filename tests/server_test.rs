@@ -11,6 +11,10 @@ fn test_app_state_construction() {
             additions: 0,
             deletions: 0,
         },
+        commit_hash: None,
+        commit_author: None,
+        commit_date: None,
+        commit_message: None,
     };
 
     let config = lrv::config::UserConfig::default();
@@ -30,6 +34,7 @@ fn test_app_state_construction() {
         shutdown_tx: Arc::new(Mutex::new(Some(shutdown_tx))),
         config: Arc::new(Mutex::new(config)),
         context: Arc::new(context),
+        old_cache: std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
     };
 }
 
@@ -43,6 +48,10 @@ fn test_create_router() {
             additions: 0,
             deletions: 0,
         },
+        commit_hash: None,
+        commit_author: None,
+        commit_date: None,
+        commit_message: None,
     };
 
     let config = lrv::config::UserConfig::default();
@@ -64,10 +73,11 @@ fn test_create_router() {
         shutdown_tx: Arc::new(Mutex::new(Some(shutdown_tx))),
         config: Arc::new(Mutex::new(config)),
         context: Arc::new(context),
+        old_cache: std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
     };
 
     // Should not panic
-    let _router = lrv::server::create_router(state);
+    let _router = lrv::server::create_router(state, false);
 }
 
 /// Test that comments can be stored in AppState

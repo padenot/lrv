@@ -11,6 +11,10 @@ async fn test_csp_header_present() {
             additions: 0,
             deletions: 0,
         },
+        commit_hash: None,
+        commit_author: None,
+        commit_date: None,
+        commit_message: None,
     };
     let config = lrv::config::UserConfig::default();
     let context = lrv::types::ProjectContext {
@@ -29,9 +33,10 @@ async fn test_csp_header_present() {
         shutdown_tx: std::sync::Arc::new(tokio::sync::Mutex::new(Some(shutdown_tx))),
         config: std::sync::Arc::new(tokio::sync::Mutex::new(config)),
         context: std::sync::Arc::new(context),
+        old_cache: std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
     };
 
-    let app = lrv::server::create_router(state);
+    let app = lrv::server::create_router(state, false);
 
     let res = app
         .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
@@ -53,6 +58,10 @@ async fn test_csp_on_assets_and_api() {
             additions: 0,
             deletions: 0,
         },
+        commit_hash: None,
+        commit_author: None,
+        commit_date: None,
+        commit_message: None,
     };
     let config = lrv::config::UserConfig::default();
     let context = lrv::types::ProjectContext {
@@ -71,9 +80,10 @@ async fn test_csp_on_assets_and_api() {
         shutdown_tx: std::sync::Arc::new(tokio::sync::Mutex::new(Some(shutdown_tx))),
         config: std::sync::Arc::new(tokio::sync::Mutex::new(config)),
         context: std::sync::Arc::new(context),
+        old_cache: std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
     };
 
-    let app = lrv::server::create_router(state);
+    let app = lrv::server::create_router(state, false);
 
     // Assets route (will 404 for random file but should include headers)
     let res_assets = app

@@ -8,6 +8,18 @@ Local code review tool for LLM agents. A Rust CLI that reads a unified diff (fro
 
 VCS-agnostic: works with git, jj, hg, or any tool that produces unified diff format.
 
+## Running lrv
+
+ALWAYS use `cargo run --bin lrv --` to run the dev binary, NEVER use the installed `lrv` binary.
+
+Examples:
+```bash
+git diff | cargo run --bin lrv --
+git show HEAD^ | cargo run --bin lrv --  # show a specific commit (use git show, not git diff)
+jj diff --git | cargo run --bin lrv --
+jj show --git -r <change> | cargo run --bin lrv --
+```
+
 ## Build & Test
 
 ```bash

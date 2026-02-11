@@ -85,7 +85,9 @@ function ensureFetchSpinner() {
   try {
     if (!__fetchSpinnerEl) {
       const host = document.querySelector('.header .header-actions');
-      if (!host) return;
+      if (!host) {
+        return;
+      }
       const s = document.createElement('span');
       s.id = 'fetch-spinner';
       s.className = 'fetch-spinner';
@@ -97,8 +99,12 @@ function ensureFetchSpinner() {
 function showFetchSpinnerDelayed() {
   try {
     ensureFetchSpinner();
-    if (!__fetchSpinnerEl) return;
-    if (__fileFetchDelayTimer) return; // already scheduled
+    if (!__fetchSpinnerEl) {
+      return;
+    }
+    if (__fileFetchDelayTimer) {
+      return;
+    } // already scheduled
     __fileFetchDelayTimer = setTimeout(() => {
       if (__fileFetchPending > 0) {
         __fetchSpinnerEl.classList.add('visible');
@@ -341,13 +347,12 @@ class MonacoApp {
               .then(([oldData, newData]) => {
                 this.fileCache[p] = { old: oldData.content || '', new: newData.content || '' };
               })
-              .catch(() => {})
+              .catch(() => {}),
           );
         }
         return Promise.all(batch);
       };
       while (i < toFetch.length) {
-        // eslint-disable-next-line no-await-in-loop
         await nextBatch();
       }
       if (window.DEBUG) {
@@ -479,140 +484,6 @@ class MonacoApp {
         });
       });
     });
-  }
-
-  async convertHunksToDiff(diffData) {
-    // Convert hunk-based diff to full file content format for Monaco
-    const files = await Promise.all(
-      diffData.files.map(async (file) => {
-        // Get the actual file content to properly pad and align
-        const f0 = performance.now();
-        const [oldResponse, newResponse] = await Promise.all([
-          fetch(`/api/file?path=${encodeURIComponent(file.path)}&side=old`)
-            .then((r) => {
-              if (window.DEBUG) {
-                console.log('[net] /api/file old', file.path, r.status);
-              }
-              return r;
-            })
-            .catch((e) => {
-              console.error('[net] /api/file old failed', file.path, e);
-              throw e;
-            }),
-          fetch(`/api/file?path=${encodeURIComponent(file.path)}&side=new`)
-            .then((r) => {
-              if (window.DEBUG) {
-                console.log('[net] /api/file new', file.path, r.status);
-              }
-              return r;
-            })
-            .catch((e) => {
-              console.error('[net] /api/file new failed', file.path, e);
-              throw e;
-            }),
-        ]);
-        if (window.DEBUG) {
-          console.log(
-            '[net] /api/file pair completed for',
-            file.path,
-            Math.round(performance.now() - f0) + 'ms',
-          );
-        }
-
-        let oldData = { content: '' };
-        let newData = { content: '' };
-        try {
-          if (oldResponse.ok) {
-            oldData = await oldResponse.json();
-          }
-        } catch (e) {
-          /* ignore */
-        }
-        try {
-          if (newResponse.ok) {
-            newData = await newResponse.json();
-          }
-        } catch (e) {
-          /* ignore */
-        }
-
-        const oldAllLines = oldData.content.split('\n');
-        const newAllLines = newData.content.split('\n');
-
-        // Find the range covered by hunks
-        let oldLineStart = Infinity;
-        let oldLineEnd = 0;
-        let newLineStart = Infinity;
-        let newLineEnd = 0;
-
-        // Track hunk ranges for keyboard navigation; include new-side and deletion-only old-side ranges
-        const hunkRanges = [];
-
-        file.hunks.forEach((hunk) => {
-          // New-side focus range
-          const newLines = hunk.lines.filter((l) => l.new_line).map((l) => l.new_line);
-          if (newLines.length > 0) {
-            hunkRanges.push({
-              side: 'new',
-              start: Math.min(...newLines),
-              end: Math.max(...newLines),
-            });
-          }
-          // Old-side (deletions) focus range
-          const deletedOldLines = hunk.lines
-            .filter((l) => l.old_line && l.type === 'delete')
-            .map((l) => l.old_line);
-          if (deletedOldLines.length > 0) {
-            hunkRanges.push({
-              side: 'old',
-              start: Math.min(...deletedOldLines),
-              end: Math.max(...deletedOldLines),
-            });
-          }
-
-          hunk.lines.forEach((line) => {
-            if (line.old_line) {
-              oldLineStart = Math.min(oldLineStart, line.old_line);
-              oldLineEnd = Math.max(oldLineEnd, line.old_line);
-            }
-            if (line.new_line) {
-              newLineStart = Math.min(newLineStart, line.new_line);
-              newLineEnd = Math.max(newLineEnd, line.new_line);
-            }
-          });
-        });
-
-        // Store hunk ranges
-        this.fileHunks[file.path] = hunkRanges;
-        this.currentHunkIndex[file.path] = 0;
-
-        // Extract just the visible range from the actual files
-        const oldContent = oldAllLines.slice(oldLineStart - 1, oldLineEnd).join('\n');
-        const newContent = newAllLines.slice(newLineStart - 1, newLineEnd).join('\n');
-
-        // Track the visible range for this file
-        this.fileRanges[file.path] = {
-          old: { start: oldLineStart, end: oldLineEnd },
-          new: { start: newLineStart, end: newLineEnd },
-          hasFullContent: false,
-          totalOldLines: oldAllLines.length,
-          totalNewLines: newAllLines.length,
-        };
-
-        return {
-          path: file.path,
-          old_path: file.old_path,
-          status: file.status,
-          old_content: oldContent,
-          new_content: newContent,
-        };
-      }),
-    );
-
-    return {
-      files,
-      stats: diffData.stats,
-    };
   }
 
   applyThemeToUI(themeName) {
@@ -872,9 +743,15 @@ class MonacoApp {
       const rev = this.diff.commit_hash ? String(this.diff.commit_hash).substring(0, 7) + ': ' : '';
       const firstLine = String(this.diff.commit_message || '').split('\n')[0];
       mm.textContent = rev + firstLine;
-      if (this.diff.commit_message) { mm.title = String(this.diff.commit_message); }
+      if (this.diff.commit_message) {
+        mm.title = String(this.diff.commit_message);
+      }
       mm.addEventListener('click', (ev) => {
-        this.showCommitMessagePopover(ev.currentTarget, String(this.diff.commit_message || ''), String(this.diff.commit_hash || ''));
+        this.showCommitMessagePopover(
+          ev.currentTarget,
+          String(this.diff.commit_message || ''),
+          String(this.diff.commit_hash || ''),
+        );
       });
       el.appendChild(mm);
     }
@@ -988,7 +865,9 @@ class MonacoApp {
         };
         this.commentManager.addComment(comment);
         // Optionally feedback
-        try { showNavIndicator('Commit comment added'); } catch {}
+        try {
+          showNavIndicator('Commit comment added');
+        } catch {}
         cleanup();
       };
     } catch {}
@@ -1838,13 +1717,6 @@ class MonacoApp {
         oe.updateOptions(opts);
       }
     } catch (_) {}
-    // Offsets for line/hunk navigation helpers
-    try {
-      this.currentOffsets = {
-        newOffset: newStart > 0 ? newStart - 1 : 0,
-        oldOffset: oldStart > 0 ? oldStart - 1 : 0,
-      };
-    } catch {}
     // Store offsets for line/hunk navigation helpers
     this.currentOffsets = {
       newOffset: newStart > 0 ? newStart - 1 : 0,
@@ -1971,9 +1843,15 @@ class MonacoApp {
     const topC = document.getElementById('expand-top-container');
     const bottomC = document.getElementById('expand-bottom-container');
     const showFullBtn = document.getElementById('show-full-file');
-    if (topC) topC.style.display = 'none';
-    if (bottomC) bottomC.style.display = 'none';
-    if (showFullBtn) showFullBtn.style.display = 'none';
+    if (topC) {
+      topC.style.display = 'none';
+    }
+    if (bottomC) {
+      bottomC.style.display = 'none';
+    }
+    if (showFullBtn) {
+      showFullBtn.style.display = 'none';
+    }
 
     const container = document.getElementById('editor-container');
     container.style.display = 'none';
@@ -2212,7 +2090,9 @@ class MonacoApp {
     footer.querySelector('.save-btn').onclick = save;
 
     overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) close();
+      if (e.target === overlay) {
+        close();
+      }
     });
 
     setTimeout(() => ta.focus(), 100);
@@ -2286,8 +2166,6 @@ class MonacoApp {
       this.currentWidgetEditor = null;
     }
 
-    const sideLabel = side === 'new' ? 'Modified' : 'Original';
-
     // Check for existing comment
     const existingIndex = this.commentManager.findComment(file, fileLineNumber, side);
     const existingComment = existingIndex >= 0 ? this.commentManager.comments[existingIndex] : null;
@@ -2301,7 +2179,7 @@ class MonacoApp {
       ? '<button class="btn-danger delete-btn">Delete</button>'
       : '';
     domNode.innerHTML = `
-          <h3>Line ${fileLineNumber} (${sideLabel})${existingComment ? ' - Edit' : ''}</h3>
+          <h3>Line ${fileLineNumber}${existingComment ? ' - Edit' : ''}</h3>
           <textarea class="comment-textarea" placeholder="Add your comment..." autofocus></textarea>
           <div class="comment-actions">
             <span class="shortcut-hint">${modKey}+Enter to save</span>
@@ -3328,7 +3206,9 @@ class MonacoApp {
 
 // Initialize app
 const app = new MonacoApp();
-try { window.__APP = app; } catch {}
+try {
+  window.__APP = app;
+} catch {}
 app.init().then(() => {
   if (window.DEBUG) {
     console.log('Monaco Editor initialized');
