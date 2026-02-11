@@ -277,11 +277,17 @@ function openModal({ title, titleId, modalClass = '', footerHtml = '', onKeydown
 
   const modal = el('div', { className: `submit-modal${modalClass ? ' ' + modalClass : ''}` });
 
-  const header = el('div', { className: 'submit-modal-header' });
-  header.innerHTML = `
-    <h2${titleId ? ` id="${titleId}"` : ''}>${title}</h2>
-    <button class="submit-modal-close" aria-label="Close">&times;</button>
-  `;
+  const header = el('div', { className: 'submit-modal-header' }, [
+    el(
+      'h2',
+      titleId ? { text: title, attrs: { id: titleId } } : { text: title },
+    ),
+    el('button', {
+      className: 'submit-modal-close',
+      text: '×',
+      attrs: { 'aria-label': 'Close' },
+    }),
+  ]);
 
   const body = el('div', { className: 'submit-modal-body' });
 
@@ -2262,19 +2268,22 @@ class MonacoApp {
     // Create the widget
     const domNode = el('div', { className: 'inline-comment-box' });
     const modKey = MOD_KEY_LABEL;
-    const deleteBtnHtml = existingComment
-      ? '<button class="btn-danger delete-btn">Delete</button>'
-      : '';
-    domNode.innerHTML = `
-          <h3>Line ${fileLineNumber}${existingComment ? ' - Edit' : ''}</h3>
-          <textarea class="comment-textarea" placeholder="Add your comment..." autofocus></textarea>
-          <div class="comment-actions">
-            <span class="shortcut-hint">${modKey}+Enter to save</span>
-            ${deleteBtnHtml}
-            <button class="btn-secondary cancel-btn">Cancel</button>
-            <button class="btn-primary save-btn">Save</button>
-          </div>
-        `;
+    const title = el('h3', {
+      text: `Line ${fileLineNumber}${existingComment ? ' - Edit' : ''}`,
+    });
+    const textarea = el('textarea', {
+      className: 'comment-textarea',
+      attrs: { placeholder: 'Add your comment...', autofocus: true },
+    });
+    const actions = el('div', { className: 'comment-actions' }, [
+      el('span', { className: 'shortcut-hint', text: `${modKey}+Enter to save` }),
+      existingComment ? el('button', { className: 'btn-danger delete-btn', text: 'Delete' }) : null,
+      el('button', { className: 'btn-secondary cancel-btn', text: 'Cancel' }),
+      el('button', { className: 'btn-primary save-btn', text: 'Save' }),
+    ]);
+    domNode.appendChild(title);
+    domNode.appendChild(textarea);
+    domNode.appendChild(actions);
 
     const widget = {
       getId: () => 'inline.comment.widget',
@@ -2297,8 +2306,7 @@ class MonacoApp {
 
     const saveBtn = domNode.querySelector('.save-btn');
     const cancelBtn = domNode.querySelector('.cancel-btn');
-    const textarea = domNode.querySelector('.comment-textarea');
-    if (existingComment && textarea) {
+    if (existingComment) {
       textarea.value = existingComment.body || '';
     }
 
@@ -2428,8 +2436,8 @@ class MonacoApp {
     if (availableAbove === 0 && availableBelow === 0) {
       range.hasFullContent = true;
       document.getElementById('show-full-file').style.display = 'none';
-      topContainer.innerHTML = '';
-      bottomContainer.innerHTML = '';
+      clearEl(topContainer);
+      clearEl(bottomContainer);
       bottomContainer.style.display = 'none';
       if (window.DEBUG) {
         console.log(`Already showing full file`);
@@ -2444,8 +2452,8 @@ class MonacoApp {
     }
 
     // Clear previous controls
-    topContainer.innerHTML = '';
-    bottomContainer.innerHTML = '';
+    clearEl(topContainer);
+    clearEl(bottomContainer);
 
     // Add expand controls
     if (availableAbove > 0) {
@@ -2538,14 +2546,17 @@ class MonacoApp {
 
   createExpandControl(position, filePath, availableLines) {
     const expandAmount = Math.min(20, availableLines);
-    const control = el('div', { className: `expand-controls ${position}` });
-    control.innerHTML = `
-          <div class="expand-line"></div>
-          <button class="expand-btn" data-position="${position}" data-file="${filePath}">
-            ↕ Expand ${position === 'top' ? 'Above' : 'Below'} (+${expandAmount} line${expandAmount === 1 ? '' : 's'})
-          </button>
-          <div class="expand-line"></div>
-        `;
+    const control = el('div', { className: `expand-controls ${position}` }, [
+      el('div', { className: 'expand-line' }),
+      el('button', {
+        className: 'expand-btn',
+        attrs: { 'data-position': position, 'data-file': filePath },
+        text: `↕ Expand ${position === 'top' ? 'Above' : 'Below'} (+${expandAmount} line${
+          expandAmount === 1 ? '' : 's'
+        })`,
+      }),
+      el('div', { className: 'expand-line' }),
+    ]);
 
     const btn = control.querySelector('.expand-btn');
     btn.onclick = () => this.expandLines(position, filePath);
@@ -2673,18 +2684,11 @@ class MonacoApp {
       },
     });
 
-    const table = el('table', { className: 'shortcuts-table' });
-    table.innerHTML = `
-      <thead>
-        <tr>
-          <th>Shortcut</th>
-          <th>Action</th>
-        </tr>
-      </thead>
-      <tbody></tbody>
-    `;
-
-    const tbody = table.querySelector('tbody');
+    const thead = el('thead', {}, [
+      el('tr', {}, [el('th', { text: 'Shortcut' }), el('th', { text: 'Action' })]),
+    ]);
+    const tbody = el('tbody');
+    const table = el('table', { className: 'shortcuts-table' }, [thead, tbody]);
 
     KEYBOARD_SHORTCUTS.forEach((shortcut) => {
       const row = el('tr');
@@ -2769,52 +2773,87 @@ class MonacoApp {
       });
     }
 
-    form.innerHTML = `
-      <div class="settings-field">
-        <label for="color-scheme">Theme</label>
-        <select id="color-scheme" name="color_scheme">
-          <optgroup label="Standard">
-            <option value="vs-dark">VS Dark</option>
-            <option value="vs">VS Light</option>
-            <option value="hc-black">High Contrast Dark</option>
-            <option value="hc-light">High Contrast Light</option>
-          </optgroup>
-          <optgroup label="GitHub">
-            <option value="github-dark">GitHub Dark</option>
-            <option value="github-light">GitHub Light</option>
-          </optgroup>
-          <optgroup label="Firefox DevTools">
-            <option value="firefox-devtools-dark">Firefox DevTools Dark</option>
-            <option value="firefox-devtools-light">Firefox DevTools Light</option>
-          </optgroup>
-          <optgroup label="Solarized">
-            <option value="solarized-dark">Solarized Dark</option>
-            <option value="solarized-light">Solarized Light</option>
-          </optgroup>
-        </select>
-      </div>
+    const opt = (value, text) => el('option', { attrs: { value }, text });
+    const optGroup = (label, options) =>
+      el(
+        'optgroup',
+        { attrs: { label } },
+        options.map(([value, text]) => opt(value, text)),
+      );
 
-      <div class="settings-field">
-        <label for="font">Editor Font</label>
-        <input type="text" id="font" name="font" value="${currentFont}" placeholder="JetBrains Mono">
-      </div>
+    const colorSelect = el('select', { attrs: { id: 'color-scheme', name: 'color_scheme' } }, [
+      optGroup('Standard', [
+        ['vs-dark', 'VS Dark'],
+        ['vs', 'VS Light'],
+        ['hc-black', 'High Contrast Dark'],
+        ['hc-light', 'High Contrast Light'],
+      ]),
+      optGroup('GitHub', [
+        ['github-dark', 'GitHub Dark'],
+        ['github-light', 'GitHub Light'],
+      ]),
+      optGroup('Firefox DevTools', [
+        ['firefox-devtools-dark', 'Firefox DevTools Dark'],
+        ['firefox-devtools-light', 'Firefox DevTools Light'],
+      ]),
+      optGroup('Solarized', [
+        ['solarized-dark', 'Solarized Dark'],
+        ['solarized-light', 'Solarized Light'],
+      ]),
+    ]);
 
-      <div class="settings-field">
-        <label for="split-view">Split View</label>
-        <div class="checkbox-wrapper">
-          <input type="checkbox" id="split-view" name="split_view" ${currentSplitView ? 'checked' : ''}>
-          <span>Show original and modified side-by-side</span>
-        </div>
-      </div>
+    const themeField = el('div', { className: 'settings-field' }, [
+      el('label', { attrs: { for: 'color-scheme' }, text: 'Theme' }),
+      colorSelect,
+    ]);
 
-      <div class="settings-field">
-        <label for="auto-close-tab">Auto-Close Tab</label>
-        <div class="checkbox-wrapper">
-          <input type="checkbox" id="auto-close-tab" name="auto_close_tab" ${currentAutoCloseTab ? 'checked' : ''}>
-          <span>Automatically close tab after submitting review</span>
-        </div>
-      </div>
-    `;
+    const fontField = el('div', { className: 'settings-field' }, [
+      el('label', { attrs: { for: 'font' }, text: 'Editor Font' }),
+      el('input', {
+        attrs: {
+          type: 'text',
+          id: 'font',
+          name: 'font',
+          value: currentFont,
+          placeholder: 'JetBrains Mono',
+        },
+      }),
+    ]);
+
+    const splitViewField = el('div', { className: 'settings-field' }, [
+      el('label', { attrs: { for: 'split-view' }, text: 'Split View' }),
+      el('div', { className: 'checkbox-wrapper' }, [
+        el('input', {
+          attrs: {
+            type: 'checkbox',
+            id: 'split-view',
+            name: 'split_view',
+            checked: currentSplitView,
+          },
+        }),
+        el('span', { text: 'Show original and modified side-by-side' }),
+      ]),
+    ]);
+
+    const autoCloseField = el('div', { className: 'settings-field' }, [
+      el('label', { attrs: { for: 'auto-close-tab' }, text: 'Auto-Close Tab' }),
+      el('div', { className: 'checkbox-wrapper' }, [
+        el('input', {
+          attrs: {
+            type: 'checkbox',
+            id: 'auto-close-tab',
+            name: 'auto_close_tab',
+            checked: currentAutoCloseTab,
+          },
+        }),
+        el('span', { text: 'Automatically close tab after submitting review' }),
+      ]),
+    ]);
+
+    form.appendChild(themeField);
+    form.appendChild(fontField);
+    form.appendChild(splitViewField);
+    form.appendChild(autoCloseField);
 
     body.appendChild(form);
     form.querySelector('#color-scheme').value = currentColorScheme;
