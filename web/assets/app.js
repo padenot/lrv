@@ -1604,23 +1604,65 @@ class MonacoApp {
     });
   }
 
-  async loadFile(index) {
-    this.currentFileIsCommit = false;
-    if (window.DEBUG) {
-      console.log('[app] loadFile: index', index);
-    }
-    window.Perf.recordFileSwitchStart();
-    this.currentFileIndex = index;
-    const file = this.files[index];
-    if (window.DEBUG) {
-      console.log('[app] loadFile: path', file.path, 'status', file.status);
-    }
+  setupEditorClickHandlers(file, newOffset, oldOffset) {
+    const modifiedEditor = this.editor.getModifiedEditor();
+    const originalEditor = this.editor.getOriginalEditor();
 
-    // Update show full file button
-    const showFullBtn = $('#show-full-file');
+    modifiedEditor.onMouseDown((e) => {
+      if (
+        e.target.type === monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS ||
+        e.target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN
+      ) {
+        const monacoLine = e.target.position.lineNumber;
+        const fileLineNumber = monacoLine + newOffset;
+        this.showCommentDialog(file.path, fileLineNumber, monacoLine, 'new');
+      }
+    });
+
+    originalEditor.onMouseDown((e) => {
+      if (
+        e.target.type === monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS ||
+        e.target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN
+      ) {
+        const monacoLine = e.target.position.lineNumber;
+        const fileLineNumber = monacoLine + oldOffset;
+        this.showCommentDialog(file.path, fileLineNumber, monacoLine, 'old');
+      }
+    });
+  }
+
+  async prepareFileContent(file, range) {
+    await this.fetchFilePair(file.path);
+    const oldAll = (this.fileCache[file.path].old || '').split('\n');
+    const newAll = (this.fileCache[file.path].new || '').split('\n');
+    if (range.totalOldLines == null) {
+      range.totalOldLines = oldAll.length;
+    }
+    if (range.totalNewLines == null) {
+      range.totalNewLines = newAll.length;
+    }
+    let oldStart = typeof range.old.start === 'number' && range.old.start > 0 ? range.old.start : 1;
+    let oldEnd = range.old.end && range.old.end >= oldStart ? range.old.end : oldAll.length;
+    let newStart = typeof range.new.start === 'number' && range.new.start > 0 ? range.new.start : 1;
+    let newEnd = range.new.end && range.new.end >= newStart ? range.new.end : newAll.length;
+    if (range.hasFullContent) {
+      oldStart = 1;
+      oldEnd = oldAll.length;
+      newStart = 1;
+      newEnd = newAll.length;
+    }
+    const oldContent = oldAll
+      .slice(Math.max(0, oldStart - 1), Math.max(oldStart - 1, oldEnd))
+      .join('\n');
+    const newContent = newAll
+      .slice(Math.max(0, newStart - 1), Math.max(newStart - 1, newEnd))
+      .join('\n');
+    return { oldContent, newContent };
+  }
+
+  initFileRange(file) {
     let range = this.fileRanges[file.path];
     if (!range) {
-      // Initialize range and hunk ranges from metadata
       const { hunkRanges, oldLineStart, oldLineEnd, newLineStart, newLineEnd } =
         computeHunkRanges(file.hunks);
       this.fileHunks[file.path] = hunkRanges;
@@ -1633,6 +1675,23 @@ class MonacoApp {
         totalNewLines: null,
       };
     }
+    return range;
+  }
+
+  async loadFile(index) {
+    this.currentFileIsCommit = false;
+    if (window.DEBUG) {
+      console.log('[app] loadFile: index', index);
+    }
+    window.Perf.recordFileSwitchStart();
+    this.currentFileIndex = index;
+    const file = this.files[index];
+    if (window.DEBUG) {
+      console.log('[app] loadFile: path', file.path, 'status', file.status);
+    }
+
+    const showFullBtn = $('#show-full-file');
+    const range = this.initFileRange(file);
     if (range && range.hasFullContent) {
       showFullBtn.style.display = 'none';
     } else {
@@ -1720,32 +1779,7 @@ class MonacoApp {
       // Defer diff editor option updates until after models are bound
     }
 
-    // Lazily fetch content and slice to visible range
-    await this.fetchFilePair(file.path);
-    const oldAll = (this.fileCache[file.path].old || '').split('\n');
-    const newAll = (this.fileCache[file.path].new || '').split('\n');
-    if (range.totalOldLines == null) {
-      range.totalOldLines = oldAll.length;
-    }
-    if (range.totalNewLines == null) {
-      range.totalNewLines = newAll.length;
-    }
-    let oldStart = typeof range.old.start === 'number' && range.old.start > 0 ? range.old.start : 1;
-    let oldEnd = range.old.end && range.old.end >= oldStart ? range.old.end : oldAll.length;
-    let newStart = typeof range.new.start === 'number' && range.new.start > 0 ? range.new.start : 1;
-    let newEnd = range.new.end && range.new.end >= newStart ? range.new.end : newAll.length;
-    if (range.hasFullContent) {
-      oldStart = 1;
-      oldEnd = oldAll.length;
-      newStart = 1;
-      newEnd = newAll.length;
-    }
-    const oldContent = oldAll
-      .slice(Math.max(0, oldStart - 1), Math.max(oldStart - 1, oldEnd))
-      .join('\n');
-    const newContent = newAll
-      .slice(Math.max(0, newStart - 1), Math.max(newStart - 1, newEnd))
-      .join('\n');
+    const { oldContent, newContent } = await this.prepareFileContent(file, range);
 
     // Show/hide banner when old content is unavailable but new content exists
     try {
@@ -1880,28 +1914,7 @@ class MonacoApp {
       originalEditor.updateOptions({ lineNumbers: 'on' });
     }
 
-    // Add click handler for comments on BOTH sides (line numbers and glyph margin)
-    modifiedEditor.onMouseDown((e) => {
-      if (
-        e.target.type === monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS ||
-        e.target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN
-      ) {
-        const monacoLine = e.target.position.lineNumber;
-        const fileLineNumber = monacoLine + newOffset;
-        this.showCommentDialog(file.path, fileLineNumber, monacoLine, 'new');
-      }
-    });
-
-    originalEditor.onMouseDown((e) => {
-      if (
-        e.target.type === monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS ||
-        e.target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN
-      ) {
-        const monacoLine = e.target.position.lineNumber;
-        const fileLineNumber = monacoLine + oldOffset;
-        this.showCommentDialog(file.path, fileLineNumber, monacoLine, 'old');
-      }
-    });
+    this.setupEditorClickHandlers(file, newOffset, oldOffset);
 
     // Update decorations for existing comments
     this.updateDecorations();
@@ -1909,7 +1922,10 @@ class MonacoApp {
     // Setup scroll listener to show/hide bottom expand control
     this.setupScrollListener();
 
-    // Highlight the current hunk (first hunk by default) and set focused line
+    this.applyInitialHunkFocus(file);
+  }
+
+  applyInitialHunkFocus(file) {
     const hunks = this.fileHunks[file.path];
     if (hunks && hunks.length > 0) {
       const currentIdx = this.currentHunkIndex[file.path] || 0;
