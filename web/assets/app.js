@@ -158,9 +158,13 @@ function openModal({ title, titleId, modalClass = '', footerHtml = '', onKeydown
 
   document.addEventListener('keydown', onTrap);
 
+  let handleEscape;
   const close = () => {
     overlay.remove();
     document.removeEventListener('keydown', onTrap);
+    if (handleEscape) {
+      document.removeEventListener('keydown', handleEscape);
+    }
     if (onKeydown) {
       document.removeEventListener('keydown', onKeydown);
     }
@@ -169,15 +173,7 @@ function openModal({ title, titleId, modalClass = '', footerHtml = '', onKeydown
     }
   };
 
-  header.querySelector('.submit-modal-close').onclick = close;
-
-  overlay.addEventListener('click', (e) => {
-    if (e.target === overlay) {
-      close();
-    }
-  });
-
-  const handleEscape = (e) => {
+  handleEscape = (e) => {
     if (e.key === 'Escape') {
       close();
     }
@@ -187,6 +183,14 @@ function openModal({ title, titleId, modalClass = '', footerHtml = '', onKeydown
   if (onKeydown) {
     document.addEventListener('keydown', onKeydown);
   }
+
+  header.querySelector('.submit-modal-close').onclick = close;
+
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) {
+      close();
+    }
+  });
 
   setTimeout(() => {
     const f = focusable()[0];
