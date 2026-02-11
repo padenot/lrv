@@ -52,6 +52,51 @@ function prefersReducedMotion() {
 const IS_MAC = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
 const MOD_KEY_LABEL = IS_MAC ? '⌘' : 'Ctrl';
 
+function computeHunkRanges(hunks) {
+  let oldLineStart = Infinity,
+    oldLineEnd = 0,
+    newLineStart = Infinity,
+    newLineEnd = 0;
+  const hunkRanges = [];
+  (hunks || []).forEach((hunk) => {
+    const newLines = hunk.lines.filter((l) => l.new_line).map((l) => l.new_line);
+    if (newLines.length > 0) {
+      hunkRanges.push({
+        side: 'new',
+        start: Math.min(...newLines),
+        end: Math.max(...newLines),
+      });
+    }
+    const deletedOldLines = hunk.lines
+      .filter((l) => l.old_line && l.type === 'delete')
+      .map((l) => l.old_line);
+    if (deletedOldLines.length > 0) {
+      hunkRanges.push({
+        side: 'old',
+        start: Math.min(...deletedOldLines),
+        end: Math.max(...deletedOldLines),
+      });
+    }
+    hunk.lines.forEach((line) => {
+      if (line.old_line) {
+        oldLineStart = Math.min(oldLineStart, line.old_line);
+        oldLineEnd = Math.max(oldLineEnd, line.old_line);
+      }
+      if (line.new_line) {
+        newLineStart = Math.min(newLineStart, line.new_line);
+        newLineEnd = Math.max(newLineEnd, line.new_line);
+      }
+    });
+  });
+  return {
+    hunkRanges,
+    oldLineStart,
+    oldLineEnd,
+    newLineStart,
+    newLineEnd,
+  };
+}
+
 window.Perf = {
   mark: (name) => {
     performance.mark(name);
@@ -1493,41 +1538,8 @@ class MonacoApp {
     let range = this.fileRanges[file.path];
     if (!range) {
       // Initialize range and hunk ranges from metadata
-      let oldLineStart = Infinity,
-        oldLineEnd = 0,
-        newLineStart = Infinity,
-        newLineEnd = 0;
-      const hunkRanges = [];
-      (file.hunks || []).forEach((hunk) => {
-        const newLines = hunk.lines.filter((l) => l.new_line).map((l) => l.new_line);
-        if (newLines.length > 0) {
-          hunkRanges.push({
-            side: 'new',
-            start: Math.min(...newLines),
-            end: Math.max(...newLines),
-          });
-        }
-        const deletedOldLines = hunk.lines
-          .filter((l) => l.old_line && l.type === 'delete')
-          .map((l) => l.old_line);
-        if (deletedOldLines.length > 0) {
-          hunkRanges.push({
-            side: 'old',
-            start: Math.min(...deletedOldLines),
-            end: Math.max(...deletedOldLines),
-          });
-        }
-        hunk.lines.forEach((line) => {
-          if (line.old_line) {
-            oldLineStart = Math.min(oldLineStart, line.old_line);
-            oldLineEnd = Math.max(oldLineEnd, line.old_line);
-          }
-          if (line.new_line) {
-            newLineStart = Math.min(newLineStart, line.new_line);
-            newLineEnd = Math.max(newLineEnd, line.new_line);
-          }
-        });
-      });
+      const { hunkRanges, oldLineStart, oldLineEnd, newLineStart, newLineEnd } =
+        computeHunkRanges(file.hunks);
       this.fileHunks[file.path] = hunkRanges;
       this.currentHunkIndex[file.path] = 0;
       range = this.fileRanges[file.path] = {
