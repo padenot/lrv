@@ -20,6 +20,36 @@ window.__APP_READY = false;
 // Small DOM helpers for readability
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+const el = (tag, { className, text, attrs } = {}, children = null) => {
+  const node = document.createElement(tag);
+  if (className) {
+    node.className = className;
+  }
+  if (text !== undefined && text !== null) {
+    node.textContent = String(text);
+  }
+  if (attrs) {
+    Object.entries(attrs).forEach(([key, value]) => {
+      if (value === undefined || value === null || value === false) {
+        return;
+      }
+      node.setAttribute(key, value === true ? '' : String(value));
+    });
+  }
+  if (children) {
+    children.forEach((child) => {
+      if (child === undefined || child === null) {
+        return;
+      }
+      node.appendChild(child);
+    });
+  }
+  return node;
+};
+const clearEl = (node) => {
+  node.textContent = '';
+  return node;
+};
 
 const MONO_FALLBACK = "'Monaco', 'Menlo', 'Consolas', monospace";
 const DEFAULT_MONO_STACK = `'JetBrains Mono', ${MONO_FALLBACK}`;
@@ -874,46 +904,34 @@ class MonacoApp {
   }
 
   renderProjectInfo() {
-    const el = $('#project-info');
-    if (!el) {
+    const container = $('#project-info');
+    if (!container) {
       return;
     }
-    el.textContent = '';
+    clearEl(container);
     if (this.context && this.context.title) {
       const t = String(this.context.title);
-      const span = document.createElement('span');
-      span.className = 'project-info-value';
-      span.setAttribute('title', t);
-      span.textContent = t;
-      el.appendChild(span);
+      container.appendChild(
+        el('span', { className: 'project-info-value', text: t, attrs: { title: t } }),
+      );
       // fall through to optionally show commit message as well
     }
     const wd = String(this.context.working_directory || '');
     const dirName = (wd || '').split('/').pop() || wd;
-    const dirSpan = document.createElement('span');
-    dirSpan.className = 'project-info-value';
-    dirSpan.setAttribute('title', wd);
-    dirSpan.textContent = dirName;
-    el.appendChild(dirSpan);
+    container.appendChild(
+      el('span', { className: 'project-info-value', text: dirName, attrs: { title: wd } }),
+    );
     if (this.context.git_branch) {
-      const sep = document.createElement('span');
-      sep.className = 'project-info-separator';
-      sep.textContent = '·';
-      el.appendChild(sep);
-      const br = document.createElement('span');
-      br.className = 'project-info-value git-branch';
-      br.textContent = String(this.context.git_branch);
-      el.appendChild(br);
+      container.appendChild(el('span', { className: 'project-info-separator', text: '·' }));
+      container.appendChild(
+        el('span', { className: 'project-info-value git-branch', text: this.context.git_branch }),
+      );
     }
 
     // Optional commit message from diff (when reviewing full commits)
     if (this.diff && (this.diff.commit_message || this.diff.commit_hash)) {
-      const sep = document.createElement('span');
-      sep.className = 'project-info-separator';
-      sep.textContent = '·';
-      el.appendChild(sep);
-      const mm = document.createElement('span');
-      mm.className = 'commit-message';
+      container.appendChild(el('span', { className: 'project-info-separator', text: '·' }));
+      const mm = el('span', { className: 'commit-message' });
       const rev = this.diff.commit_hash ? String(this.diff.commit_hash).substring(0, 7) + ': ' : '';
       const firstLine = String(this.diff.commit_message || '').split('\n')[0];
       mm.textContent = rev + firstLine;
@@ -927,7 +945,7 @@ class MonacoApp {
           String(this.diff.commit_hash || ''),
         );
       });
-      el.appendChild(mm);
+      container.appendChild(mm);
     }
   }
 
@@ -939,35 +957,29 @@ class MonacoApp {
         this._commitPopoverEl = null;
         return;
       }
-      const pop = document.createElement('div');
-      pop.className = 'commit-popover';
-      const title = document.createElement('div');
-      title.className = 'commit-popover-title';
+      const pop = el('div', { className: 'commit-popover' });
       const first = (message || '').split('\n')[0] || '(no message)';
-      title.textContent = (rev ? rev + ': ' : '') + first;
-      const body = document.createElement('div');
-      body.className = 'commit-popover-body';
-      body.textContent = message || '';
+      const title = el('div', {
+        className: 'commit-popover-title',
+        text: (rev ? rev + ': ' : '') + first,
+      });
+      const body = el('div', { className: 'commit-popover-body', text: message || '' });
       pop.appendChild(title);
       pop.appendChild(body);
 
       // Inline comment box
-      const form = document.createElement('div');
+      const form = el('div');
       form.style.marginTop = '10px';
-      const ta = document.createElement('textarea');
+      const ta = el('textarea');
       ta.rows = 3;
       ta.style.width = '100%';
       ta.placeholder = 'Comment on this commit…';
-      const controls = document.createElement('div');
+      const controls = el('div');
       controls.style.display = 'flex';
       controls.style.gap = '8px';
       controls.style.marginTop = '6px';
-      const addBtn = document.createElement('button');
-      addBtn.textContent = 'Add Comment';
-      addBtn.className = 'expand-btn';
-      const cancelBtn = document.createElement('button');
-      cancelBtn.textContent = 'Cancel';
-      cancelBtn.className = 'expand-btn';
+      const addBtn = el('button', { className: 'expand-btn', text: 'Add Comment' });
+      const cancelBtn = el('button', { className: 'expand-btn', text: 'Cancel' });
       controls.appendChild(addBtn);
       controls.appendChild(cancelBtn);
       form.appendChild(ta);
