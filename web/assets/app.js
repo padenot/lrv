@@ -333,6 +333,21 @@ class MonacoApp {
     };
   }
 
+  async fetchFilePair(filePath) {
+    if (this.fileCache[filePath]) {
+      return this.fileCache[filePath];
+    }
+    const [oldData, newData] = await Promise.all([
+      fetchJSON(`/api/file?path=${encodeURIComponent(filePath)}&side=old`),
+      fetchJSON(`/api/file?path=${encodeURIComponent(filePath)}&side=new`),
+    ]);
+    this.fileCache[filePath] = {
+      old: oldData.content || '',
+      new: newData.content || '',
+    };
+    return this.fileCache[filePath];
+  }
+
   // When we detect slow file fetches, eagerly prefetch the rest to warm caches
   async eagerPrefetchAllFiles() {
     if (this._eagerPrefetchStarted) {
@@ -1611,35 +1626,7 @@ class MonacoApp {
     }
 
     // Lazily fetch content and slice to visible range
-    if (!this.fileCache[file.path]) {
-      if (window.DEBUG) {
-        console.log('[app] fetching file contents for', file.path);
-      }
-      const [oldResponse, newResponse] = await Promise.all([
-        fetch(`/api/file?path=${encodeURIComponent(file.path)}&side=old`),
-        fetch(`/api/file?path=${encodeURIComponent(file.path)}&side=new`),
-      ]);
-      let oldData = { content: '' },
-        newData = { content: '' };
-      if (oldResponse.ok) {
-        oldData = await oldResponse.json();
-      } else {
-        console.error('[app] old fetch not ok', oldResponse.status);
-      }
-      if (newResponse.ok) {
-        newData = await newResponse.json();
-      } else {
-        console.error('[app] new fetch not ok', newResponse.status);
-      }
-      this.fileCache[file.path] = { old: oldData.content, new: newData.content };
-      if (window.DEBUG) {
-        console.log(
-          '[app] fetched lengths old/new',
-          this.fileCache[file.path].old.length,
-          this.fileCache[file.path].new.length,
-        );
-      }
-    }
+    await this.fetchFilePair(file.path);
     const oldAll = (this.fileCache[file.path].old || '').split('\n');
     const newAll = (this.fileCache[file.path].new || '').split('\n');
     if (range.totalOldLines == null) {
@@ -2277,14 +2264,7 @@ class MonacoApp {
   async loadFullFile(index) {
     const file = this.files[index];
 
-    // Ensure cache exists
-    if (!this.fileCache[file.path]) {
-      const [oldData, newData] = await Promise.all([
-        fetchJSON(`/api/file?path=${encodeURIComponent(file.path)}&side=old`),
-        fetchJSON(`/api/file?path=${encodeURIComponent(file.path)}&side=new`),
-      ]);
-      this.fileCache[file.path] = { old: oldData.content, new: newData.content };
-    }
+    await this.fetchFilePair(file.path);
 
     // Update tracking BEFORE reloading
     const range = this.fileRanges[file.path];
@@ -2453,14 +2433,9 @@ class MonacoApp {
 
   async fetchFileLengths(filePath) {
     const range = this.fileRanges[filePath];
-
-    const [oldData, newData] = await Promise.all([
-      fetchJSON(`/api/file?path=${encodeURIComponent(filePath)}&side=old`),
-      fetchJSON(`/api/file?path=${encodeURIComponent(filePath)}&side=new`),
-    ]);
-
-    range.totalOldLines = oldData.content.split('\n').length;
-    range.totalNewLines = newData.content.split('\n').length;
+    const { old, new: newContent } = await this.fetchFilePair(filePath);
+    range.totalOldLines = old.split('\n').length;
+    range.totalNewLines = newContent.split('\n').length;
   }
 
   createExpandControl(position, filePath, availableLines) {
@@ -2496,13 +2471,9 @@ class MonacoApp {
     }
 
     // Fetch the full file content
-    const [oldData, newData] = await Promise.all([
-      fetchJSON(`/api/file?path=${encodeURIComponent(filePath)}&side=old`),
-      fetchJSON(`/api/file?path=${encodeURIComponent(filePath)}&side=new`),
-    ]);
-
-    const oldLines = oldData.content.split('\n');
-    const newLines = newData.content.split('\n');
+    const { old, new: newContent } = await this.fetchFilePair(filePath);
+    const oldLines = old.split('\n');
+    const newLines = newContent.split('\n');
 
     if (window.DEBUG) {
       console.log(`File lengths: old ${oldLines.length}, new ${newLines.length}`);
