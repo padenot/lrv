@@ -254,10 +254,13 @@ test.describe('Review Workflow E2E', () => {
     // Wait for page to load
     await page.locator('.monaco-editor').first().waitFor({ timeout: 5000 });
 
-    // Press ? to show help
-    await page.keyboard.press('?');
+    // Click on the header to focus the page without triggering Monaco
+    await page.locator('.header').click();
 
-    // Help modal should appear (use more specific selector for the heading)
+    // Press ? to show help (Shift+Slash to match keyboard code detection)
+    await page.keyboard.press('Shift+Slash');
+
+    // Help modal should appear
     await expect(page.locator('.submit-modal h2:has-text("Keyboard Shortcuts")')).toBeVisible();
 
     // Should show some shortcuts
