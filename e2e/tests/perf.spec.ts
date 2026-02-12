@@ -18,6 +18,38 @@ if (!fs.existsSync(outDir)) {
   } catch {}
 }
 
+function computeStats(values: number[]): {
+  n: number;
+  mean: number | null;
+  median: number | null;
+  p95: number | null;
+  min: number | null;
+  max: number | null;
+} {
+  const n = values.length;
+  if (n === 0) {
+    return { n: 0, mean: null, median: null, p95: null, min: null, max: null };
+  }
+  const sorted = [...values].sort((a, b) => a - b);
+  const mean = values.reduce((a, b) => a + b, 0) / n;
+  const percentile = (p: number): number => {
+    const idx = (n - 1) * p;
+    const lo = Math.floor(idx);
+    const hi = Math.ceil(idx);
+    if (lo === hi) return sorted[lo];
+    const t = idx - lo;
+    return sorted[lo] * (1 - t) + sorted[hi] * t;
+  };
+  return {
+    n,
+    mean,
+    median: percentile(0.5),
+    p95: percentile(0.95),
+    min: sorted[0],
+    max: sorted[n - 1],
+  };
+}
+
 async function startServer(port: number = 0): Promise<void> {
   if (!testRepoPath) throw new Error('Test repo not initialized');
   return new Promise((resolve, reject) => {
@@ -26,7 +58,7 @@ async function startServer(port: number = 0): Promise<void> {
       if (envBin && envBin.length > 0) {
         return path.isAbsolute(envBin) ? envBin : path.resolve(__dirname, '../../', envBin);
       }
-      return path.resolve(__dirname, '../../target/debug/lrv');
+      return path.resolve(__dirname, '../../target/release/lrv');
     })();
     const benchDiff = process.env.LRV_BENCH_DIFF;
     const cmd = benchDiff
@@ -135,11 +167,19 @@ test.describe('Perf Bench', () => {
     });
     const url = (serverUrl ?? 'http://localhost:9999') + '/';
     const samples: number[] = [];
+    const navToDiffVisible: number[] = [];
     for (let i = 0; i < 10; i++) {
       console.log(`[iter] start ${i}`);
+      const navStart = process.hrtime.bigint();
       await page.goto(url + `?r=${Date.now()}-${i}`, { waitUntil: 'load' });
       // App is ready when it declares readiness after first diff
       try {
+        await page.waitForFunction(
+          () => document.querySelectorAll('.monaco-editor .view-lines .view-line').length > 0,
+          { timeout: 60000 },
+        );
+        const navEnd = process.hrtime.bigint();
+        navToDiffVisible.push(Number(navEnd - navStart) / 1_000_000);
         await page.waitForFunction(() => (window as any).__APP_READY === true, { timeout: 60000 });
         await page.waitForFunction(() => performance.getEntriesByName('appInit').length > 0, {
           timeout: 10000,
@@ -162,17 +202,37 @@ test.describe('Perf Bench', () => {
         return arr.length ? arr[arr.length - 1] : null;
       });
       if (typeof ms === 'number') samples.push(ms);
-      console.log(`[iter] end ${i} ms=${ms}`);
+      const navMs = navToDiffVisible.length ? navToDiffVisible[navToDiffVisible.length - 1] : null;
+      console.log(`[iter] end ${i} appInit=${ms} navToDiffVisible=${navMs}`);
     }
     // Persist
     try {
       const outDir = path.resolve(__dirname, '../test-results');
       if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
       const outPath = path.join(outDir, 'perf-init.json');
-      fs.writeFileSync(outPath, JSON.stringify({ appInit: samples }, null, 2));
+      const coldNavToDiffVisible = navToDiffVisible.length > 0 ? navToDiffVisible[0] : null;
+      const warmNavToDiffVisible = navToDiffVisible.slice(1);
+      const summary = {
+        primaryMetric: 'navToDiffVisible',
+        navToDiffVisible: {
+          coldMs: coldNavToDiffVisible,
+          warmMs: warmNavToDiffVisible,
+          coldStats: computeStats(coldNavToDiffVisible == null ? [] : [coldNavToDiffVisible]),
+          warmStats: computeStats(warmNavToDiffVisible),
+          overallStats: computeStats(navToDiffVisible),
+        },
+        appInit: {
+          overallStats: computeStats(samples),
+        },
+      };
+      fs.writeFileSync(
+        outPath,
+        JSON.stringify({ appInit: samples, navToDiffVisible, coldNavToDiffVisible, summary }, null, 2),
+      );
       console.log(`[perf-init] wrote metrics to ${outPath}`);
     } catch {}
     expect(samples.length).toBe(10);
+    expect(navToDiffVisible.length).toBe(10);
   });
 
   test('rapid file switching perf', async ({ page }) => {

@@ -60,8 +60,20 @@ const path = require('path');
 const root = process.argv[2];
 const initPath = path.join(root, 'e2e/test-results/perf-init.json');
 const switchPath = path.join(root, 'e2e/test-results/perf-switch.json');
-const out = { appInit: [], fileSwitch: [] };
-try { Object.assign(out, { appInit: JSON.parse(fs.readFileSync(initPath)).appInit || [] }); } catch {}
+const out = { appInit: [], navToDiffVisible: [], coldNavToDiffVisible: null, fileSwitch: [] };
+try {
+  const init = JSON.parse(fs.readFileSync(initPath));
+  Object.assign(out, {
+    appInit: init.appInit || [],
+    navToDiffVisible: init.navToDiffVisible || [],
+    coldNavToDiffVisible:
+      typeof init.coldNavToDiffVisible === 'number'
+        ? init.coldNavToDiffVisible
+        : Array.isArray(init.navToDiffVisible) && typeof init.navToDiffVisible[0] === 'number'
+          ? init.navToDiffVisible[0]
+          : null,
+  });
+} catch {}
 try { Object.assign(out, { fileSwitch: JSON.parse(fs.readFileSync(switchPath)).fileSwitch || [] }); } catch {}
 fs.writeFileSync(path.join(root, 'e2e/test-results/perf.json'), JSON.stringify(out, null, 2));
 console.log('[bench] merged to e2e/test-results/perf.json');
@@ -78,9 +90,11 @@ const p='$OUT_JSON';
 const data=JSON.parse(fs.readFileSync(p));
 const avg=(a)=>a.length? (a.reduce((x,y)=>x+y,0)/a.length):0;
 const p95=(a)=>{ if(!a.length) return 0; const s=[...a].sort((x,y)=>x-y); return s[Math.floor(s.length*0.95)-1]||s[s.length-1]};
+const cold = typeof data.coldNavToDiffVisible === 'number' ? data.coldNavToDiffVisible : 0;
+const nav=avg(data.navToDiffVisible||[]), nav95=p95(data.navToDiffVisible||[]);
 const a=avg(data.appInit||[]), a95=p95(data.appInit||[]);
 const f=avg(data.fileSwitch||[]), f95=p95(data.fileSwitch||[]);
-console.log(`[bench] init avg=${a.toFixed(2)} p95=${a95.toFixed(2)} | switch avg=${f.toFixed(2)} p95=${f95.toFixed(2)}`);
+console.log(`[bench] cold nav=${cold.toFixed(2)} | nav avg=${nav.toFixed(2)} p95=${nav95.toFixed(2)} | appInit avg=${a.toFixed(2)} p95=${a95.toFixed(2)} | switch avg=${f.toFixed(2)} p95=${f95.toFixed(2)}`);
 NODE
       git add "$OUT_JSON"
       git commit -m "bench: init/switch metrics (code $CODE_SHORT vs diff $DIFF_COMMIT)

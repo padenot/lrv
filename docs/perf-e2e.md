@@ -1,11 +1,12 @@
 Perf E2E — Quick Guide
 
 What we measure
-- App init time: time until first diff is rendered and the user can interact (window.__APP_READY true). Collected via performance.measure('appInit').
+- Navigation to visible diff (`navToDiffVisible`): wall-clock time from right before navigation to the first visible Monaco diff line.
+- App init time (`appInit`): internal app timing collected via performance.measure('appInit').
 
 How tests work
 - Build release binary, create a temp git repo with a known diff, start the real server on port 0.
-- Parse the URL from server output, drive a real browser (Playwright, Firefox), and wait for __APP_READY.
+- Parse the URL from server output, drive a real browser (Playwright, Firefox), and wait for first visible diff lines.
 - Persist metrics to e2e/test-results/perf-init.json; also dump server/page logs for debugging.
 
 Scripts
@@ -16,8 +17,12 @@ Scripts
 Outputs
 - e2e/test-results/server-*.log: server stdout/stderr lines.
 - e2e/test-results/page-*.log: page console/network/errors.
-- e2e/test-results/perf-init.json: { appInit: [ms, ...] } per test invocation.
-- e2e/test-results/perf-batch.json: aggregated stats across runs.
+- e2e/test-results/perf-init.json:
+  - `navToDiffVisible`: raw per-iteration wall-clock times
+  - `coldNavToDiffVisible`: first iteration (cold-start) time
+  - `summary`: cold/warm/overall stats (primary metric is cold `navToDiffVisible`)
+  - `appInit`: raw internal app init times
+- e2e/test-results/perf-batch.json: aggregated stats across runs, primary metric `navToDiffVisible.cold`.
 
 Notes
 - Binary path is injected via LRV_BIN; CSP allows Monaco workers; the page logs init milestones and network timings.

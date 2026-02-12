@@ -42,7 +42,7 @@ bench +args="":
 
 # Run only the perf tests (serial)
 test-e2e-perf:
-    cd e2e && npx playwright test tests/perf.spec.ts --reporter=line --workers=1
+    cd e2e && LRV_BIN="$(pwd)/../target/release/lrv" npx playwright test tests/perf.spec.ts --reporter=line --workers=1
 
 # Perf helpers (wrap scripts)
 perf-init +args="":

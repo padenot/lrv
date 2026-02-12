@@ -43,7 +43,7 @@ for i in $(seq 1 "$RUNS"); do
   if [[ -f "$E2E_DIR/test-results/perf-init.json" ]]; then
     cp "$E2E_DIR/test-results/perf-init.json" "$RUN_JSON_DIR/perf-init-run-${i}.json"
   else
-    echo '{"appInit":[]}' > "$RUN_JSON_DIR/perf-init-run-${i}.json"
+    echo '{"appInit":[],"navToDiffVisible":[]}' > "$RUN_JSON_DIR/perf-init-run-${i}.json"
   fi
 done
 
@@ -55,22 +55,68 @@ const runs = fs.readdirSync(dir).filter(f=>/^perf-init-run-\d+\.json$/.test(f)).
   const na=+a.match(/(\d+)/)[1], nb=+b.match(/(\d+)/)[1];
   return na-nb;
 });
-const runArrays = runs.map(f=>{
-  try { const j = JSON.parse(fs.readFileSync(path.join(dir,f),'utf8')); return Array.isArray(j.appInit)? j.appInit : []; } catch { return []; }
+const runData = runs.map(f=>{
+  try {
+    const j = JSON.parse(fs.readFileSync(path.join(dir,f),'utf8'));
+    return {
+      appInit: Array.isArray(j.appInit) ? j.appInit : [],
+      navToDiffVisible: Array.isArray(j.navToDiffVisible) ? j.navToDiffVisible : [],
+    };
+  } catch {
+    return { appInit: [], navToDiffVisible: [] };
+  }
 });
-const a = runArrays.flat();
-const avg = a.length ? a.reduce((x,y)=>x+y,0)/a.length : 0;
-const sorted = [...a].sort((x,y)=>x-y);
-const p = q => a.length ? sorted[Math.max(0, Math.min(sorted.length-1, Math.floor(sorted.length*q)-1))] : 0;
+const stats = (arr) => {
+  if (!arr.length) return { n: 0, mean: null, p50: null, p90: null, p95: null, p99: null, min: null, max: null };
+  const sorted = [...arr].sort((x,y)=>x-y);
+  const mean = arr.reduce((x,y)=>x+y,0)/arr.length;
+  const p = q => {
+    const i = (arr.length - 1) * q;
+    const lo = Math.floor(i), hi = Math.ceil(i);
+    if (lo === hi) return sorted[lo];
+    const t = i - lo;
+    return sorted[lo] * (1 - t) + sorted[hi] * t;
+  };
+  return {
+    n: arr.length,
+    mean,
+    p50: p(0.50),
+    p90: p(0.90),
+    p95: p(0.95),
+    p99: p(0.99),
+    min: sorted[0],
+    max: sorted[sorted.length - 1],
+  };
+};
+const appInitRuns = runData.map(r => r.appInit);
+const navRuns = runData.map(r => r.navToDiffVisible);
+const appInitAll = appInitRuns.flat();
+const navAll = navRuns.flat();
+const navCold = navRuns.map(a => a[0]).filter(v => Number.isFinite(v));
+const navWarm = navRuns.flatMap(a => a.slice(1));
 const out = {
-  runs: runArrays,
-  count: a.length,
-  mean: avg,
-  p50: p(0.50), p90: p(0.90), p95: p(0.95), p99: p(0.99),
-  min: a.length ? sorted[0] : 0,
-  max: a.length ? sorted[sorted.length-1] : 0
+  primaryMetric: 'navToDiffVisible.cold',
+  runs: {
+    appInit: appInitRuns,
+    navToDiffVisible: navRuns,
+  },
+  navToDiffVisible: {
+    cold: stats(navCold),
+    warm: stats(navWarm),
+    overall: stats(navAll),
+  },
+  appInit: {
+    overall: stats(appInitAll),
+  }
 };
 fs.writeFileSync(outPath, JSON.stringify(out, null, 2));
 console.log('[batch] Wrote', outPath);
-console.log(`[batch] n=${out.count} mean=${out.mean.toFixed(2)} p50=${out.p50.toFixed(2)} p90=${out.p90.toFixed(2)} p95=${out.p95.toFixed(2)} p99=${out.p99.toFixed(2)} min=${out.min.toFixed(2)} max=${out.max.toFixed(2)}`);
+const c = out.navToDiffVisible.cold;
+const w = out.navToDiffVisible.warm;
+console.log(
+  `[batch] primary cold navToDiffVisible n=${c.n} mean=${c.mean?.toFixed(2)} p95=${c.p95?.toFixed(2)} min=${c.min?.toFixed(2)} max=${c.max?.toFixed(2)}`
+);
+console.log(
+  `[batch] warm navToDiffVisible n=${w.n} mean=${w.mean?.toFixed(2)} p95=${w.p95?.toFixed(2)}`
+);
 NODE
