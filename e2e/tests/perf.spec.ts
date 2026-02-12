@@ -50,6 +50,32 @@ function computeStats(values: number[]): {
   };
 }
 
+type PerfTimelineEntry = {
+  name: string;
+  entryType: string;
+  startTime: number;
+  duration: number;
+};
+
+function formatTimeline(entries: PerfTimelineEntry[]): string {
+  return entries
+    .map((e) => {
+      const t = `${e.startTime.toFixed(1)}ms`.padStart(8);
+      const k = e.entryType === 'measure' ? 'MEASURE' : 'MARK   ';
+      const d = e.entryType === 'measure' ? ` (+${e.duration.toFixed(1)}ms)` : '';
+      return `${t} ${k} ${e.name}${d}`;
+    })
+    .join('\n');
+}
+
+function findMark(entries: PerfTimelineEntry[], name: string): PerfTimelineEntry | null {
+  return entries.find((e) => e.entryType === 'mark' && e.name === name) || null;
+}
+
+function findMeasure(entries: PerfTimelineEntry[], name: string): PerfTimelineEntry | null {
+  return entries.find((e) => e.entryType === 'measure' && e.name === name) || null;
+}
+
 async function startServer(port: number = 0): Promise<void> {
   if (!testRepoPath) throw new Error('Test repo not initialized');
   return new Promise((resolve, reject) => {
@@ -168,7 +194,13 @@ test.describe('Perf Bench', () => {
     const url = (serverUrl ?? 'http://localhost:9999') + '/';
     const samples: number[] = [];
     const navToDiffVisible: number[] = [];
-    for (let i = 0; i < 10; i++) {
+    const navToDiffVisibleHarness: number[] = [];
+    const initTimelines: PerfTimelineEntry[][] = [];
+    const iterations = (() => {
+      const raw = Number.parseInt(process.env.LRV_PERF_INIT_ITERATIONS || '1', 10);
+      return Number.isFinite(raw) && raw > 0 ? raw : 1;
+    })();
+    for (let i = 0; i < iterations; i++) {
       console.log(`[iter] start ${i}`);
       const navStart = process.hrtime.bigint();
       await page.goto(url + `?r=${Date.now()}-${i}`, { waitUntil: 'load' });
@@ -179,7 +211,7 @@ test.describe('Perf Bench', () => {
           { timeout: 60000 },
         );
         const navEnd = process.hrtime.bigint();
-        navToDiffVisible.push(Number(navEnd - navStart) / 1_000_000);
+        navToDiffVisibleHarness.push(Number(navEnd - navStart) / 1_000_000);
         await page.waitForFunction(() => (window as any).__APP_READY === true, { timeout: 60000 });
         await page.waitForFunction(() => performance.getEntriesByName('appInit').length > 0, {
           timeout: 10000,
@@ -201,9 +233,58 @@ test.describe('Perf Bench', () => {
         const arr = (window as any).Perf?.getMetrics?.().appInit || [];
         return arr.length ? arr[arr.length - 1] : null;
       });
+      const timelineResult = await page.evaluate(() => {
+        const keep = (name: string): boolean =>
+          name === 'appInit' ||
+          name === 'fileSwitch' ||
+          name.startsWith('page:') ||
+          name.startsWith('init:') ||
+          name.startsWith('loadFile:');
+        const marks = performance.getEntriesByType('mark');
+        const measures = performance.getEntriesByType('measure');
+        const timeline = [...marks, ...measures]
+          .filter((e) => keep(e.name))
+          .map((e) => ({
+            name: e.name,
+            entryType: e.entryType,
+            startTime: e.startTime,
+            duration: e.duration || 0,
+          }))
+          .sort((a, b) => a.startTime - b.startTime);
+        const firstLine = timeline.find((e) => e.entryType === 'mark' && e.name === 'init:first-line-visible');
+        return { timeline, firstLineMs: firstLine ? firstLine.startTime : null };
+      });
+      const timeline = timelineResult.timeline;
+      initTimelines.push(timeline);
+      if (typeof timelineResult.firstLineMs === 'number') {
+        navToDiffVisible.push(timelineResult.firstLineMs);
+      }
       if (typeof ms === 'number') samples.push(ms);
       const navMs = navToDiffVisible.length ? navToDiffVisible[navToDiffVisible.length - 1] : null;
-      console.log(`[iter] end ${i} appInit=${ms} navToDiffVisible=${navMs}`);
+      const navHarnessMs = navToDiffVisibleHarness.length
+        ? navToDiffVisibleHarness[navToDiffVisibleHarness.length - 1]
+        : null;
+      console.log(
+        `[iter] end ${i} appInit=${ms} navToDiffVisible(browser)=${navMs} navToDiffVisibleHarness=${navHarnessMs}`,
+      );
+      const timelineText = formatTimeline(timeline);
+      console.log(`[timeline][iter ${i}]\n${timelineText}`);
+      w(`[timeline][iter ${i}]\n${timelineText}`);
+      const navToLine = navMs;
+      const initStart = findMark(timeline, 'init:start');
+      const initEnd = findMark(timeline, 'init:end');
+      const firstLine = findMark(timeline, 'init:first-line-visible');
+      const initTotal = findMeasure(timeline, 'init:total');
+      const preInit = initStart ? initStart.startTime : null;
+      const initDur = initTotal ? initTotal.duration : initStart && initEnd ? initEnd.startTime - initStart.startTime : null;
+      const postInitToLine =
+        firstLine && initEnd ? Math.max(0, firstLine.startTime - initEnd.startTime) : null;
+      console.log(
+        `[timeline-summary][iter ${i}] navToDiffVisible(browser)=${navToLine} navToDiffVisibleHarness=${navHarnessMs} preInit=${preInit} init=${initDur} postInitToLine=${postInitToLine} firstLine=${firstLine?.startTime ?? null}`,
+      );
+      w(
+        `[timeline-summary][iter ${i}] navToDiffVisible(browser)=${navToLine} navToDiffVisibleHarness=${navHarnessMs} preInit=${preInit} init=${initDur} postInitToLine=${postInitToLine} firstLine=${firstLine?.startTime ?? null}`,
+      );
     }
     // Persist
     try {
@@ -227,12 +308,24 @@ test.describe('Perf Bench', () => {
       };
       fs.writeFileSync(
         outPath,
-        JSON.stringify({ appInit: samples, navToDiffVisible, coldNavToDiffVisible, summary }, null, 2),
+        JSON.stringify(
+          {
+            appInit: samples,
+            navToDiffVisible,
+            navToDiffVisibleHarness,
+            coldNavToDiffVisible,
+            summary,
+            initTimelines,
+          },
+          null,
+          2,
+        ),
       );
       console.log(`[perf-init] wrote metrics to ${outPath}`);
     } catch {}
-    expect(samples.length).toBe(10);
-    expect(navToDiffVisible.length).toBe(10);
+    expect(samples.length).toBe(iterations);
+    expect(navToDiffVisible.length).toBe(iterations);
+    expect(navToDiffVisibleHarness.length).toBe(iterations);
   });
 
   test('rapid file switching perf', async ({ page }) => {

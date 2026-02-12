@@ -1,7 +1,8 @@
 Perf E2E — Quick Guide
 
 What we measure
-- Navigation to visible diff (`navToDiffVisible`): wall-clock time from right before navigation to the first visible Monaco diff line.
+- Navigation to visible diff (`navToDiffVisible`): browser-side time from script start to the first visible Monaco diff line (`init:first-line-visible`).
+- Navigation to visible diff harness (`navToDiffVisibleHarness`): Playwright wall-clock from before `page.goto` to first visible line (includes automation overhead).
 - App init time (`appInit`): internal app timing collected via performance.measure('appInit').
 
 How tests work

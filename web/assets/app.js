@@ -16,6 +16,23 @@ try {
 window.DEBUG = false;
 // App readiness flag (set true when first diff is rendered)
 window.__APP_READY = false;
+try {
+  performance.mark('page:script-start');
+  window.addEventListener(
+    'DOMContentLoaded',
+    () => {
+      performance.mark('page:dom-content-loaded');
+    },
+    { once: true },
+  );
+  window.addEventListener(
+    'load',
+    () => {
+      performance.mark('page:load-event');
+    },
+    { once: true },
+  );
+} catch {}
 // Simple performance instrumentation
 // Small DOM helpers for readability
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -534,7 +551,28 @@ function markAppReady() {
   }
   const hasLines = document.querySelectorAll('.monaco-editor .view-lines .view-line').length > 0;
   if (hasLines) {
+    try {
+      if (performance.getEntriesByName('init:first-line-visible').length === 0) {
+        window.Perf.mark('init:first-line-visible');
+        if (performance.getEntriesByName('init:start').length > 0) {
+          window.Perf.measure('init:to-first-line-visible', 'init:start', 'init:first-line-visible');
+        }
+        if (performance.getEntriesByName('page:script-start').length > 0) {
+          window.Perf.measure(
+            'page:script-to-first-line-visible',
+            'page:script-start',
+            'init:first-line-visible',
+          );
+        }
+      }
+    } catch {}
     window.__APP_READY = true;
+    try {
+      window.Perf.mark('init:app-ready');
+      if (performance.getEntriesByName('appInit').length > 0) {
+        window.Perf.measure('init:app-ready-after-appInit', 'appInitEnd', 'init:app-ready');
+      }
+    } catch {}
     if (window.DEBUG) {
       console.log('[app] APP_READY: diff lines visible');
     }
@@ -547,7 +585,28 @@ function markAppReady() {
     }
     const obs = new MutationObserver(() => {
       if (document.querySelectorAll('.monaco-editor .view-lines .view-line').length > 0) {
+        try {
+          if (performance.getEntriesByName('init:first-line-visible').length === 0) {
+            window.Perf.mark('init:first-line-visible');
+            if (performance.getEntriesByName('init:start').length > 0) {
+              window.Perf.measure('init:to-first-line-visible', 'init:start', 'init:first-line-visible');
+            }
+            if (performance.getEntriesByName('page:script-start').length > 0) {
+              window.Perf.measure(
+                'page:script-to-first-line-visible',
+                'page:script-start',
+                'init:first-line-visible',
+              );
+            }
+          }
+        } catch {}
         window.__APP_READY = true;
+        try {
+          window.Perf.mark('init:app-ready');
+          if (performance.getEntriesByName('appInit').length > 0) {
+            window.Perf.measure('init:app-ready-after-appInit', 'appInitEnd', 'init:app-ready');
+          }
+        } catch {}
         if (window.DEBUG) {
           console.log('[app] APP_READY: observer saw first line');
         }
@@ -737,7 +796,14 @@ class MonacoApp {
       console.log('[app] init: start');
     }
     window.Perf.recordAppInitStart();
+    window.Perf.mark('init:start');
+    try {
+      if (performance.getEntriesByName('page:script-start').length > 0) {
+        window.Perf.measure('page:script-to-init-start', 'page:script-start', 'init:start');
+      }
+    } catch {}
     // Load config, context, diff data, and ensure @font-face fonts are ready
+    window.Perf.mark('init:fetch:start');
     const t0 = performance.now();
     const [configData, contextData, diffData] = await Promise.all([
       fetchJSON('/api/config'),
@@ -745,6 +811,8 @@ class MonacoApp {
       fetchJSON('/api/diff'),
       document.fonts.ready,
     ]);
+    window.Perf.mark('init:fetch:end');
+    window.Perf.measure('init:fetch', 'init:fetch:start', 'init:fetch:end');
     if (window.DEBUG) {
       console.log('[app] init: responses received in', Math.round(performance.now() - t0), 'ms');
     }
@@ -769,6 +837,7 @@ class MonacoApp {
     this.isInline = !this.config.split_view;
 
     // Wait for AMD loader to be ready
+    window.Perf.mark('init:amd-wait:start');
     await new Promise((resolve, reject) => {
       const start = performance.now();
       const timer = setInterval(() => {
@@ -782,6 +851,8 @@ class MonacoApp {
         }
       }, 25);
     });
+    window.Perf.mark('init:amd-wait:end');
+    window.Perf.measure('init:amd-wait', 'init:amd-wait:start', 'init:amd-wait:end');
     window.require.config({
       paths: { vs: window.MONACO_VS_BASE || '/assets/vendor/monaco/min/vs' },
     });
@@ -793,7 +864,10 @@ class MonacoApp {
     } catch {}
 
     return new Promise((resolve) => {
+      window.Perf.mark('init:monaco:load:start');
       window.require(['vs/editor/editor.main'], () => {
+        window.Perf.mark('init:monaco:load:end');
+        window.Perf.measure('init:monaco:load', 'init:monaco:load:start', 'init:monaco:load:end');
         if (window.DEBUG) {
           console.log('[app] monaco loaded');
         }
@@ -824,20 +898,38 @@ class MonacoApp {
             } catch {}
           }
         } catch {}
+        window.Perf.mark('init:ui-setup:start');
         this.setupUI();
+        window.Perf.mark('init:ui-setup:end');
+        window.Perf.measure('init:ui-setup', 'init:ui-setup:start', 'init:ui-setup:end');
+        window.Perf.mark('init:file-list:render:start');
         this.renderFileList();
+        window.Perf.mark('init:file-list:render:end');
+        window.Perf.measure('init:file-list:render', 'init:file-list:render:start', 'init:file-list:render:end');
         if (window.DEBUG) {
           console.log('[app] calling loadFile(0)');
         }
+        window.Perf.mark('init:first-file:load:start');
         Promise.resolve(this.loadFile(0)).then(() => {
+          window.Perf.mark('init:first-file:load:end');
+          window.Perf.measure('init:first-file:load', 'init:first-file:load:start', 'init:first-file:load:end');
           // Set review timestamp
           document.getElementById('review-time').textContent = new Date().toLocaleString();
           // Set project info
           this.renderProjectInfo();
           // Wait for paint and record init end
+          window.Perf.mark('init:final-paint-wait:start');
           requestAnimationFrame(() =>
             requestAnimationFrame(() => {
+              window.Perf.mark('init:final-paint-wait:end');
+              window.Perf.measure(
+                'init:final-paint-wait',
+                'init:final-paint-wait:start',
+                'init:final-paint-wait:end',
+              );
               window.Perf.recordAppInitEnd();
+              window.Perf.mark('init:end');
+              window.Perf.measure('init:total', 'init:start', 'init:end');
               // Minimal perf log (gated behind DEBUG)
               try {
                 if (window.DEBUG) {
@@ -1650,6 +1742,7 @@ class MonacoApp {
     if (window.DEBUG) {
       console.log('[app] loadFile: index', index);
     }
+    window.Perf.mark('loadFile:start');
     window.Perf.recordFileSwitchStart();
     this.currentFileIndex = index;
     const file = this.files[index];
@@ -1748,7 +1841,10 @@ class MonacoApp {
     }
 
     // Lazily fetch content and slice to visible range
+    window.Perf.mark('loadFile:fetch:start');
     await this.fetchFilePair(file.path);
+    window.Perf.mark('loadFile:fetch:end');
+    window.Perf.measure('loadFile:fetch', 'loadFile:fetch:start', 'loadFile:fetch:end');
     const oldAll = (this.fileCache[file.path].old || '').split('\n');
     const newAll = (this.fileCache[file.path].new || '').split('\n');
     if (range.totalOldLines == null) {
@@ -1788,8 +1884,11 @@ class MonacoApp {
         oldBanner.style.display = show ? '' : 'none';
       }
     } catch (_) {}
+    window.Perf.mark('loadFile:models:start');
     this.originalModel = monaco.editor.createModel(oldContent, language);
     this.modifiedModel = monaco.editor.createModel(newContent, language);
+    window.Perf.mark('loadFile:models:end');
+    window.Perf.measure('loadFile:models', 'loadFile:models:start', 'loadFile:models:end');
     if (window.DEBUG) {
       console.log(
         '[app] models created for',
@@ -1802,10 +1901,13 @@ class MonacoApp {
       );
     }
 
+    window.Perf.mark('loadFile:setModel:start');
     this.editor.setModel({
       original: this.originalModel,
       modified: this.modifiedModel,
     });
+    window.Perf.mark('loadFile:setModel:end');
+    window.Perf.measure('loadFile:setModel', 'loadFile:setModel:start', 'loadFile:setModel:end');
     // Now that models are bound, update diff editor + sub-editors
     try {
       this.editor.updateOptions({
@@ -1837,14 +1939,16 @@ class MonacoApp {
       newOffset: newStart > 0 ? newStart - 1 : 0,
       oldOffset: oldStart > 0 ? oldStart - 1 : 0,
     };
-    try {
-      window.__APP_READY = true;
-    } catch (e) {}
 
     // Record end after the new models are set and painted
+    window.Perf.mark('loadFile:paint-wait:start');
     requestAnimationFrame(() =>
       requestAnimationFrame(() => {
+        window.Perf.mark('loadFile:paint-wait:end');
+        window.Perf.measure('loadFile:paint-wait', 'loadFile:paint-wait:start', 'loadFile:paint-wait:end');
         window.Perf.recordFileSwitchEnd();
+        window.Perf.mark('loadFile:end');
+        window.Perf.measure('loadFile:total', 'loadFile:start', 'loadFile:end');
         try {
           if (window.DEBUG) {
             const e = performance.getEntriesByName('fileSwitch');
