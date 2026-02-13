@@ -7,8 +7,8 @@ mod types;
 use anyhow::{Context, Result};
 use clap::Parser;
 use lrv::netutil;
-use std::io::Read;
 use std::env;
+use std::io::Read;
 use std::process::Command;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex, Notify};
@@ -109,38 +109,36 @@ fn get_network_interfaces() -> Vec<String> {
     interfaces
 }
 
-// Parse a whitespace-separated list of IPs and return Tailscale IPv4s (100.64.0.0/10)
-fn get_tailscale_ipv4s() -> Vec<String> {
-    // Prefer `tailscale ip -4` if available
-    if let Ok(output) = Command::new("tailscale").args(["ip", "-4"]).output() {
-        if output.status.success() {
-            if let Ok(text) = String::from_utf8(output.stdout) {
-                let ips: Vec<String> = text
-                    .lines()
-                    .map(|s| s.trim())
-                    .filter(|s| !s.is_empty())
-                    .map(|s| s.to_string())
-                    .collect();
-                if !ips.is_empty() {
-                    return ips;
-                }
+fn push_unique_ip(list: &mut Vec<String>, ip: String) {
+    if !list.iter().any(|x| x == &ip) {
+        list.push(ip);
+    }
+}
+
+fn parse_ips_from_env_value(value: &str) -> Vec<String> {
+    let normalized = value.replace(',', " ");
+    netutil::filter_tailscale_ipv4s(&normalized)
+}
+
+// Environment-only detection for Tailscale addresses.
+fn get_tailscale_ipv4s_from_env() -> Vec<String> {
+    let mut out = Vec::new();
+
+    for key in ["LRV_TAILSCALE_IPS", "TAILSCALE_IPS", "LRV_TAILSCALE_IP", "TAILSCALE_IP"] {
+        if let Ok(v) = env::var(key) {
+            for ip in parse_ips_from_env_value(&v) {
+                push_unique_ip(&mut out, ip);
             }
         }
     }
 
-    // Fallback: parse hostname -I and filter 100.64/10
-    #[cfg(target_os = "linux")]
-    {
-        if let Ok(output) = Command::new("hostname").args(["-I"]).output() {
-            if let Ok(text) = String::from_utf8(output.stdout) {
-                let ips = netutil::filter_tailscale_ipv4s(&text);
-                if !ips.is_empty() {
-                    return ips;
-                }
-            }
+    if let Ok(ssh_conn) = env::var("SSH_CONNECTION") {
+        if let Some(ip) = netutil::tailscale_server_ip_from_ssh_connection(&ssh_conn) {
+            push_unique_ip(&mut out, ip);
         }
     }
-    Vec::new()
+
+    out
 }
 
 
@@ -202,18 +200,18 @@ async fn main() -> Result<()> {
 
     let args = Args::parse();
 
-    // Derive dynamic behavior based on environment
-    // If we're over SSH and a Tailscale IP is present, auto-enable tailscale bindings
-    // and avoid opening a local browser on this host.
+    // Derive dynamic behavior based on environment.
+    // If we're over SSH and a Tailscale IP is present in env, auto-enable tailscale
+    // bindings and avoid opening a local browser on this host.
     let mut enable_tailscale = args.tailscale;
     let mut disable_open = args.no_open;
     let mut detected_ts_ips: Option<Vec<String>> = None;
     if !enable_tailscale || !disable_open {
         if is_ssh_session() {
-            let ts = get_tailscale_ipv4s();
+            let ts = get_tailscale_ipv4s_from_env();
             if !ts.is_empty() {
                 if !enable_tailscale {
-                    eprintln!("Auto-enabling --tailscale (SSH + Tailscale IP detected)");
+                    eprintln!("Auto-enabling --tailscale (SSH + Tailscale IP from env)");
                     enable_tailscale = true;
                 }
                 if !disable_open {
@@ -316,10 +314,12 @@ async fn main() -> Result<()> {
     if enable_tailscale {
         let ts = match detected_ts_ips {
             Some(v) => v,
-            None => get_tailscale_ipv4s(),
+            None => get_tailscale_ipv4s_from_env(),
         };
         if ts.is_empty() {
-            eprintln!("Note: Tailscale IP not detected; is tailscale running?");
+            eprintln!(
+                "Note: Tailscale IP not found in env; set LRV_TAILSCALE_IPS/TAILSCALE_IPS or rely on SSH_CONNECTION"
+            );
         }
         for ip in ts {
             if !bind_addrs.contains(&ip) {
