@@ -246,6 +246,12 @@ function detectLanguageFromPathAndContent(path, content) {
 
 const IS_MAC = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
 const MOD_KEY_LABEL = IS_MAC ? '⌘' : 'Ctrl';
+const MONACO_HIDE_UNCHANGED = {
+  enabled: true,
+  contextLineCount: 3,
+  minimumLineCount: 3,
+  revealLineCount: 20,
+};
 
 function computeHunkRanges(hunks) {
   let oldLineStart = Infinity,
@@ -1894,16 +1900,14 @@ class MonacoApp {
       console.log('[app] loadFile: path', file.path, 'status', file.status);
     }
 
-    // Update show full file button
+    // Monaco handles unchanged-region collapsing; custom expand/full controls are disabled.
     const showFullBtn = $('#show-full-file');
     const range = this.initFileRange(file);
-    if (range && range.hasFullContent) {
+    if (range) {
+      range.hasFullContent = true;
+    }
+    if (showFullBtn) {
       showFullBtn.style.display = 'none';
-    } else {
-      showFullBtn.style.display = 'block';
-      showFullBtn.disabled = false;
-      showFullBtn.textContent = `Show Full File`;
-      showFullBtn.onclick = () => this.loadFullFile(index);
     }
 
     this.renderFileList();
@@ -1958,6 +1962,7 @@ class MonacoApp {
         fontFamily: mono,
         lineNumbers: 'on',
         renderOverviewRuler: true,
+        hideUnchangedRegions: MONACO_HIDE_UNCHANGED,
         scrollbar: {
           vertical: 'visible',
           horizontal: 'visible',
@@ -1970,7 +1975,7 @@ class MonacoApp {
       // Defer diff editor option updates until after models are bound
     }
 
-    // Lazily fetch content and slice to visible range
+    // Fetch full content and let Monaco hide unchanged regions in-view
     window.Perf.mark('loadFile:fetch:start');
     await this.fetchFilePair(file.path);
     window.Perf.mark('loadFile:fetch:end');
@@ -1983,22 +1988,10 @@ class MonacoApp {
     if (range.totalNewLines == null) {
       range.totalNewLines = newAll.length;
     }
-    let oldStart = typeof range.old.start === 'number' && range.old.start > 0 ? range.old.start : 1;
-    let oldEnd = range.old.end && range.old.end >= oldStart ? range.old.end : oldAll.length;
-    let newStart = typeof range.new.start === 'number' && range.new.start > 0 ? range.new.start : 1;
-    let newEnd = range.new.end && range.new.end >= newStart ? range.new.end : newAll.length;
-    if (range.hasFullContent) {
-      oldStart = 1;
-      oldEnd = oldAll.length;
-      newStart = 1;
-      newEnd = newAll.length;
-    }
-    const oldContent = oldAll
-      .slice(Math.max(0, oldStart - 1), Math.max(oldStart - 1, oldEnd))
-      .join('\n');
-    const newContent = newAll
-      .slice(Math.max(0, newStart - 1), Math.max(newStart - 1, newEnd))
-      .join('\n');
+    const oldStart = 1;
+    const newStart = 1;
+    const oldContent = this.fileCache[file.path].old || '';
+    const newContent = this.fileCache[file.path].new || '';
     const detectionPath = file.path || file.old_path || '';
     const language = detectLanguageFromPathAndContent(
       detectionPath,
@@ -2053,6 +2046,7 @@ class MonacoApp {
         folding: false,
         lineDecorationsWidth: 0,
         scrollBeyondLastLine: true,
+        hideUnchangedRegions: MONACO_HIDE_UNCHANGED,
       });
       const me = this.editor.getModifiedEditor && this.editor.getModifiedEditor();
       const oe = this.editor.getOriginalEditor && this.editor.getOriginalEditor();
@@ -2128,23 +2122,8 @@ class MonacoApp {
     let newOffset = 0;
     let oldOffset = 0;
 
-    if (range && !range.hasFullContent) {
-      newOffset = range.new.start - 1;
-      oldOffset = range.old.start - 1;
-
-      modifiedEditor.updateOptions({
-        lineNumbers: (lineNumber) => (lineNumber + newOffset).toString(),
-        lineNumbersMinChars: 4,
-      });
-
-      originalEditor.updateOptions({
-        lineNumbers: (lineNumber) => (lineNumber + oldOffset).toString(),
-        lineNumbersMinChars: 4,
-      });
-    } else {
-      modifiedEditor.updateOptions({ lineNumbers: 'on' });
-      originalEditor.updateOptions({ lineNumbers: 'on' });
-    }
+    modifiedEditor.updateOptions({ lineNumbers: 'on' });
+    originalEditor.updateOptions({ lineNumbers: 'on' });
 
     // Add click handler for comments on BOTH sides (line numbers and glyph margin)
     this.setupEditorClickHandlers(file.path, modifiedEditor, originalEditor, newOffset, oldOffset);
@@ -2638,6 +2617,8 @@ class MonacoApp {
 
     const file = this.files[this.currentFileIndex];
     const range = this.fileRanges[file.path];
+    const topContainer = $('#expand-top-container');
+    const bottomContainer = $('#expand-bottom-container');
 
     if (window.DEBUG) {
       console.log(`renderExpandControls for ${file.path}`);
@@ -2645,6 +2626,14 @@ class MonacoApp {
     }
 
     if (!range || range.hasFullContent) {
+      if (topContainer) {
+        clearEl(topContainer);
+        topContainer.style.display = 'none';
+      }
+      if (bottomContainer) {
+        clearEl(bottomContainer);
+        bottomContainer.style.display = 'none';
+      }
       if (window.DEBUG) {
         console.log(`Skipping: ${!range ? 'no range' : 'has full content'}`);
       }
@@ -2662,9 +2651,6 @@ class MonacoApp {
         `Current range: old ${range.old.start}-${range.old.end}, new ${range.new.start}-${range.new.end}`,
       );
     }
-
-    const topContainer = $('#expand-top-container');
-    const bottomContainer = $('#expand-bottom-container');
 
     // Calculate available lines above and below current view
     // Use the maximum of old/new sides since they may have different lengths
