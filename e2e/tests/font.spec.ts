@@ -33,8 +33,6 @@ async function startServer(port: number = 0): Promise<void> {
       const m = t.match(/http:\/\/[^\s]+:\d+/);
       if (m && !serverUrl) {
         serverUrl = m[0];
-      }
-      if (output.includes('Available at:')) {
         setTimeout(resolve, 200);
       }
     };

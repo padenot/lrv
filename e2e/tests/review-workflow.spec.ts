@@ -56,14 +56,10 @@ async function startServer(port: number = 0, options?: { title?: string }): Prom
       const text = data.toString();
       output += text;
       appendLog(text);
-      // Capture first URL for dynamic base
+      // Capture first URL; its presence means the server is ready
       const urlMatch = text.match(/http:\/\/[^\s]+:\d+/);
       if (urlMatch && !serverUrl) {
         serverUrl = urlMatch[0];
-      }
-      // Server is ready when we see the "Available at:" message
-      if (output.includes('Available at:')) {
-        // Give it a moment to fully initialize
         setTimeout(resolve, 500);
       }
     };

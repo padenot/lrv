@@ -2000,6 +2000,8 @@ class MonacoApp {
       if (oe.getModel()) {
         oe.updateOptions(opts);
       }
+      me.setScrollTop(0);
+      oe.setScrollTop(0);
     } catch (_) {}
     // Record end after the new models are set and painted
     window.Perf.mark('loadFile:paint-wait:start');
