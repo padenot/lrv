@@ -11,9 +11,13 @@ pub fn parse_diff(diff_text: &str) -> Result<DiffResponse> {
     let mut commit_date: Option<String> = None;
     let mut commit_message: Option<String> = None;
 
-    // Parse commit metadata if present (from git show / jj show output)
+    // Parse commit metadata if present (from git show / jj show / jj diff output)
     let diff_start_idx = if let Some(first_line) = diff_text.lines().next() {
-        if let Some(hash) = first_line.strip_prefix("commit ") {
+        let extracted_hash = first_line
+            .strip_prefix("commit ")
+            .or_else(|| first_line.strip_prefix("Commit ID: "));
+
+        if let Some(hash) = extracted_hash {
             commit_hash = Some(hash.split_whitespace().next().unwrap_or(hash).to_string());
 
             let mut message_lines = Vec::new();
@@ -26,9 +30,26 @@ pub fn parse_diff(diff_text: &str) -> Result<DiffResponse> {
                     break;
                 }
 
-                if let Some(author) = line.strip_prefix("Author:").or_else(|| line.strip_prefix("author ")) {
+                // git: "Author: name", jj: "Author   : name (date)"
+                let is_author = line.starts_with("Author:") || line.starts_with("author ");
+                let is_author_jj = !is_author
+                    && line.starts_with("Author")
+                    && line.contains(':')
+                    && !line.starts_with("AuthorDate:");
+                if is_author {
+                    let author = line
+                        .strip_prefix("Author:")
+                        .or_else(|| line.strip_prefix("author "))
+                        .unwrap_or("");
                     commit_author = Some(author.trim().to_string());
-                } else if let Some(date) = line.strip_prefix("Date:").or_else(|| line.strip_prefix("AuthorDate:")) {
+                } else if is_author_jj {
+                    if let Some(val) = line.splitn(2, ':').nth(1) {
+                        commit_author = Some(val.trim().to_string());
+                    }
+                } else if let Some(date) = line
+                    .strip_prefix("Date:")
+                    .or_else(|| line.strip_prefix("AuthorDate:"))
+                {
                     commit_date = Some(date.trim().to_string());
                 } else if line.is_empty() {
                     in_message = true;
@@ -100,8 +121,12 @@ pub fn parse_diff(diff_text: &str) -> Result<DiffResponse> {
             let mut parts = rest.split_whitespace();
             if let Some(range) = parts.next() {
                 if let Some((a, b)) = range.split_once("..") {
-                    if !a.is_empty() { current_old_blob = Some(a.to_string()); }
-                    if !b.is_empty() { current_new_blob = Some(b.to_string()); }
+                    if !a.is_empty() {
+                        current_old_blob = Some(a.to_string());
+                    }
+                    if !b.is_empty() {
+                        current_new_blob = Some(b.to_string());
+                    }
                 }
             }
         } else if let Some(stripped) = line.strip_prefix("rename from ") {
