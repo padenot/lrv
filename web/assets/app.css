@@ -411,24 +411,6 @@ body {
   border-color: rgba(255, 215, 0, 0.5);
 }
 
-.file-list-actions {
-  padding: 10px 16px;
-}
-
-.file-action-btn {
-  width: 100%;
-  font-size: 12px;
-  padding: 8px 12px;
-  background: var(--bg-elevated);
-  color: var(--text-primary);
-  border: none;
-  cursor: pointer;
-}
-
-.file-action-btn:hover {
-  background: var(--border-color);
-}
-
 .sidebar-resizer {
   width: 4px;
   cursor: ew-resize;
@@ -451,63 +433,6 @@ body {
   transition: opacity 350ms ease;
   position: relative;
   z-index: 10;
-}
-
-/* Expand controls (above/below) */
-#expand-top-container,
-#expand-bottom-container {
-  position: absolute;
-  left: 0;
-  right: 0;
-  display: none; /* JS toggles visibility based on scroll */
-  z-index: 10000; /* above Monaco layers and scrollbars */
-  pointer-events: none; /* re-enable on inner control */
-}
-#expand-top-container {
-  top: 0;
-}
-#expand-bottom-container {
-  bottom: 0;
-}
-
-.expand-controls {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 6px 8px;
-  background: var(--bg-secondary);
-  border-top: 1px solid var(--border-color);
-  border-bottom: 1px solid var(--border-color);
-  pointer-events: auto; /* clickable */
-  position: relative;
-  z-index: 10001;
-}
-.expand-controls.top {
-  border-bottom: 1px solid var(--border-color);
-}
-.expand-controls.bottom {
-  border-top: 1px solid var(--border-color);
-}
-
-.expand-line {
-  height: 1px;
-  background: var(--border-color);
-  flex: 1;
-}
-
-.expand-btn {
-  background: var(--bg-elevated);
-  color: var(--text-primary);
-  border: 1px solid var(--border-color);
-  border-radius: 999px;
-  padding: 4px 12px;
-  font-size: 12px;
-  cursor: pointer;
-  position: relative;
-  z-index: 10002;
-}
-.expand-btn:hover {
-  background: var(--border-color);
 }
 
 /* Remove custom hover backgrounds to avoid masking Monaco diff overlays */

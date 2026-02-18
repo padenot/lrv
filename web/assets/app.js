@@ -217,7 +217,9 @@ function detectLanguageFromPathAndContent(path, content) {
     }
   }
 
-  const firstLine = String(content || '').split('\n', 1)[0].toLowerCase();
+  const firstLine = String(content || '')
+    .split('\n', 1)[0]
+    .toLowerCase();
   if (firstLine.startsWith('#!')) {
     if (
       firstLine.includes('bash') ||
@@ -254,10 +256,6 @@ const MONACO_HIDE_UNCHANGED = {
 };
 
 function computeHunkRanges(hunks) {
-  let oldLineStart = Infinity,
-    oldLineEnd = 0,
-    newLineStart = Infinity,
-    newLineEnd = 0;
   const hunkRanges = [];
   (hunks || []).forEach((hunk) => {
     const newLines = hunk.lines.filter((l) => l.new_line).map((l) => l.new_line);
@@ -278,24 +276,8 @@ function computeHunkRanges(hunks) {
         end: Math.max(...deletedOldLines),
       });
     }
-    hunk.lines.forEach((line) => {
-      if (line.old_line) {
-        oldLineStart = Math.min(oldLineStart, line.old_line);
-        oldLineEnd = Math.max(oldLineEnd, line.old_line);
-      }
-      if (line.new_line) {
-        newLineStart = Math.min(newLineStart, line.new_line);
-        newLineEnd = Math.max(newLineEnd, line.new_line);
-      }
-    });
   });
-  return {
-    hunkRanges,
-    oldLineStart,
-    oldLineEnd,
-    newLineStart,
-    newLineEnd,
-  };
+  return { hunkRanges };
 }
 
 const CUSTOM_THEMES = {
@@ -445,10 +427,7 @@ function openModal({ title, titleId, modalClass = '', footerContent = null, onKe
   const modal = el('div', { className: `submit-modal${modalClass ? ' ' + modalClass : ''}` });
 
   const header = el('div', { className: 'submit-modal-header' }, [
-    el(
-      'h2',
-      titleId ? { text: title, attrs: { id: titleId } } : { text: title },
-    ),
+    el('h2', titleId ? { text: title, attrs: { id: titleId } } : { text: title }),
     el('button', {
       className: 'submit-modal-close',
       text: '×',
@@ -483,7 +462,9 @@ function openModal({ title, titleId, modalClass = '', footerContent = null, onKe
 
   const focusable = () =>
     Array.from(
-      modal.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'),
+      modal.querySelectorAll(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      ),
     ).filter((el) => !el.hasAttribute('disabled'));
 
   const onTrap = (e) => {
@@ -705,7 +686,11 @@ function markAppReady() {
       if (performance.getEntriesByName('init:first-line-visible').length === 0) {
         window.Perf.mark('init:first-line-visible');
         if (performance.getEntriesByName('init:start').length > 0) {
-          window.Perf.measure('init:to-first-line-visible', 'init:start', 'init:first-line-visible');
+          window.Perf.measure(
+            'init:to-first-line-visible',
+            'init:start',
+            'init:first-line-visible',
+          );
         }
         if (performance.getEntriesByName('page:script-start').length > 0) {
           window.Perf.measure(
@@ -739,7 +724,11 @@ function markAppReady() {
           if (performance.getEntriesByName('init:first-line-visible').length === 0) {
             window.Perf.mark('init:first-line-visible');
             if (performance.getEntriesByName('init:start').length > 0) {
-              window.Perf.measure('init:to-first-line-visible', 'init:start', 'init:first-line-visible');
+              window.Perf.measure(
+                'init:to-first-line-visible',
+                'init:start',
+                'init:first-line-visible',
+              );
             }
             if (performance.getEntriesByName('page:script-start').length > 0) {
               window.Perf.measure(
@@ -848,27 +837,17 @@ class MonacoApp {
     this.files = [];
     this.stats = null;
     this.fileCache = {};
-    this.fileRanges = {}; // Track visible ranges per file
     this.fileHunks = {}; // Track hunk start lines per file: { [path]: number[] }
     this.currentHunkIndex = {}; // Track current hunk index per file
     this.config = null; // User config from server
     this.originalModel = null;
     this.modifiedModel = null;
-    this.scrollListenerDispose = null;
     this._eagerPrefetchStarted = false;
     this._commitPopoverEl = null;
     this.currentFileIsCommit = false;
     this._commitViewEl = null;
 
     this.commentManager.onChange(() => this.updateUI());
-  }
-
-  getFileOffsets(filePath) {
-    const range = this.fileRanges[filePath];
-    return {
-      newOffset: range && !range.hasFullContent ? range.new.start - 1 : 0,
-      oldOffset: range && !range.hasFullContent ? range.old.start - 1 : 0,
-    };
   }
 
   async fetchFilePair(filePath) {
@@ -1055,14 +1034,22 @@ class MonacoApp {
         window.Perf.mark('init:file-list:render:start');
         this.renderFileList();
         window.Perf.mark('init:file-list:render:end');
-        window.Perf.measure('init:file-list:render', 'init:file-list:render:start', 'init:file-list:render:end');
+        window.Perf.measure(
+          'init:file-list:render',
+          'init:file-list:render:start',
+          'init:file-list:render:end',
+        );
         if (window.DEBUG) {
           console.log('[app] calling loadFile(0)');
         }
         window.Perf.mark('init:first-file:load:start');
         Promise.resolve(this.loadFile(0)).then(() => {
           window.Perf.mark('init:first-file:load:end');
-          window.Perf.measure('init:first-file:load', 'init:first-file:load:start', 'init:first-file:load:end');
+          window.Perf.measure(
+            'init:first-file:load',
+            'init:first-file:load:start',
+            'init:first-file:load:end',
+          );
           // Set review timestamp
           document.getElementById('review-time').textContent = new Date().toLocaleString();
           // Set project info
@@ -1228,8 +1215,8 @@ class MonacoApp {
       controls.style.display = 'flex';
       controls.style.gap = '8px';
       controls.style.marginTop = '6px';
-      const addBtn = el('button', { className: 'expand-btn', text: 'Add Comment' });
-      const cancelBtn = el('button', { className: 'expand-btn', text: 'Cancel' });
+      const addBtn = el('button', { className: 'btn-secondary', text: 'Add Comment' });
+      const cancelBtn = el('button', { className: 'btn-secondary', text: 'Cancel' });
       controls.appendChild(addBtn);
       controls.appendChild(cancelBtn);
       form.appendChild(ta);
@@ -1554,35 +1541,28 @@ class MonacoApp {
     }
 
     const hunkRange = hunks[hunkIndex];
-    const { newOffset, oldOffset } = this.getFileOffsets(file.path);
-
     const reduceMotion = prefersReducedMotion();
     const smooth = monaco.editor.ScrollType.Smooth;
 
     if (hunkRange.side === 'old') {
       const originalEditor = this.editor.getOriginalEditor();
-      const monacoStartLine = hunkRange.start - oldOffset;
-      const monacoEndLine = hunkRange.end - oldOffset;
       originalEditor.revealLineInCenter(
-        monacoStartLine,
+        hunkRange.start,
         reduceMotion ? monaco.editor.ScrollType.Immediate : smooth,
       );
-      this.highlightFocusedHunk(monacoStartLine, monacoEndLine, 'old');
-      this.setFocusedLine('old', monacoStartLine, false);
-      // Indicator
+      this.highlightFocusedHunk(hunkRange.start, hunkRange.end, 'old');
+      this.setFocusedLine('old', hunkRange.start, false);
       const idx = (this.currentHunkIndex[file.path] || 0) + 1;
       const total = (this.fileHunks[file.path] || []).length;
       showNavIndicator(`Hunk ${idx}/${total} • old`);
     } else {
       const modifiedEditor = this.editor.getModifiedEditor();
-      const monacoStartLine = hunkRange.start - newOffset;
-      const monacoEndLine = hunkRange.end - newOffset;
       modifiedEditor.revealLineInCenter(
-        monacoStartLine,
+        hunkRange.start,
         reduceMotion ? monaco.editor.ScrollType.Immediate : smooth,
       );
-      this.highlightFocusedHunk(monacoStartLine, monacoEndLine, 'new');
-      this.setFocusedLine('new', monacoStartLine, false);
+      this.highlightFocusedHunk(hunkRange.start, hunkRange.end, 'new');
+      this.setFocusedLine('new', hunkRange.start, false);
       const idx = (this.currentHunkIndex[file.path] || 0) + 1;
       const total = (this.fileHunks[file.path] || []).length;
       showNavIndicator(`Hunk ${idx}/${total} • new`);
@@ -1660,10 +1640,7 @@ class MonacoApp {
         modifiedEditor.revealLineInCenterIfOutsideViewport(monacoLine, scrollType);
       }
     }
-    // Header indicator
-    const { newOffset, oldOffset } = this.getFileOffsets(this.files[this.currentFileIndex].path);
-    const fileLine = side === 'old' ? monacoLine + oldOffset : monacoLine + newOffset;
-    showNavIndicator(`Line ${fileLine} • ${side === 'old' ? 'old' : 'new'}`);
+    showNavIndicator(`Line ${monacoLine} • ${side === 'old' ? 'old' : 'new'}`);
   }
 
   moveLine(delta) {
@@ -1675,30 +1652,25 @@ class MonacoApp {
     if (!hunks || hunks.length === 0) {
       return;
     }
-    const { newOffset, oldOffset } = this.getFileOffsets(file.path);
-
     // Initialize focus if needed: start of current hunk
     let idx = this.currentHunkIndex[file.path] || 0;
     const hr = hunks[idx];
     if (!this.currentFocusedLine) {
       const side = hr.side === 'old' ? 'old' : 'new';
-      const monacoStart = side === 'old' ? hr.start - oldOffset : hr.start - newOffset;
-      this.setFocusedLine(side, monacoStart, true);
+      this.setFocusedLine(side, hr.start, true);
       return;
     }
 
     let { side, line } = this.currentFocusedLine;
     // Verify current focus lies within current hunk; adjust if not
-    const hunkStart = hr.side === 'old' ? hr.start - oldOffset : hr.start - newOffset;
-    const hunkEnd = hr.side === 'old' ? hr.end - oldOffset : hr.end - newOffset;
-    if (side !== (hr.side || 'new') || line < hunkStart || line > hunkEnd) {
+    if (side !== (hr.side || 'new') || line < hr.start || line > hr.end) {
       side = hr.side === 'old' ? 'old' : 'new';
-      line = hunkStart;
+      line = hr.start;
     }
 
     // Step within hunk
     let nextLine = line + delta;
-    if (nextLine >= hunkStart && nextLine <= hunkEnd) {
+    if (nextLine >= hr.start && nextLine <= hr.end) {
       this.setFocusedLine(side, nextLine, true);
       return;
     }
@@ -1709,17 +1681,15 @@ class MonacoApp {
       this.currentHunkIndex[file.path] = idx;
       const nhr = hunks[idx];
       const ns = nhr.side === 'old' ? 'old' : 'new';
-      const nStart = ns === 'old' ? nhr.start - oldOffset : nhr.start - newOffset;
       this.jumpToHunk(idx);
-      this.setFocusedLine(ns, nStart, true);
+      this.setFocusedLine(ns, nhr.start, true);
     } else if (delta < 0 && idx > 0) {
       idx -= 1;
       this.currentHunkIndex[file.path] = idx;
       const phr = hunks[idx];
       const ps = phr.side === 'old' ? 'old' : 'new';
-      const pEnd = ps === 'old' ? phr.end - oldOffset : phr.end - newOffset;
       this.jumpToHunk(idx);
-      this.setFocusedLine(ps, pEnd, true);
+      this.setFocusedLine(ps, phr.end, true);
     }
   }
 
@@ -1750,12 +1720,9 @@ class MonacoApp {
       return;
     }
 
-    const { newOffset, oldOffset } = this.getFileOffsets(file.path);
-
     if (this.currentFocusedLine) {
       const { side, line } = this.currentFocusedLine;
-      const fileLineNumber = side === 'old' ? line + oldOffset : line + newOffset;
-      this.showCommentDialog(file.path, fileLineNumber, line, side);
+      this.showCommentDialog(file.path, line, line, side);
       return;
     }
 
@@ -1763,8 +1730,7 @@ class MonacoApp {
     const currentIdx = this.currentHunkIndex[file.path] || 0;
     const hunkRange = hunks[currentIdx];
     const side = hunkRange.side === 'old' ? 'old' : 'new';
-    const monacoLine = side === 'old' ? hunkRange.start - oldOffset : hunkRange.start - newOffset;
-    this.showCommentDialog(file.path, hunkRange.start, monacoLine, side);
+    this.showCommentDialog(file.path, hunkRange.start, hunkRange.start, side);
   }
 
   setupSidebarResizer() {
@@ -1900,18 +1866,8 @@ class MonacoApp {
       console.log('[app] loadFile: path', file.path, 'status', file.status);
     }
 
-    // Monaco handles unchanged-region collapsing; custom expand/full controls are disabled.
-    const showFullBtn = $('#show-full-file');
-    const range = this.initFileRange(file);
-    if (range) {
-      range.hasFullContent = true;
-    }
-    if (showFullBtn) {
-      showFullBtn.style.display = 'none';
-    }
-
+    this.initFileHunks(file);
     this.renderFileList();
-    this.renderExpandControls();
 
     // Dispose old models and widget; keep editor instance
     if (this.originalModel) {
@@ -1980,23 +1936,10 @@ class MonacoApp {
     await this.fetchFilePair(file.path);
     window.Perf.mark('loadFile:fetch:end');
     window.Perf.measure('loadFile:fetch', 'loadFile:fetch:start', 'loadFile:fetch:end');
-    const oldAll = (this.fileCache[file.path].old || '').split('\n');
-    const newAll = (this.fileCache[file.path].new || '').split('\n');
-    if (range.totalOldLines == null) {
-      range.totalOldLines = oldAll.length;
-    }
-    if (range.totalNewLines == null) {
-      range.totalNewLines = newAll.length;
-    }
-    const oldStart = 1;
-    const newStart = 1;
     const oldContent = this.fileCache[file.path].old || '';
     const newContent = this.fileCache[file.path].new || '';
     const detectionPath = file.path || file.old_path || '';
-    const language = detectLanguageFromPathAndContent(
-      detectionPath,
-      newContent || oldContent || this.fileCache[file.path].new || this.fileCache[file.path].old || '',
-    );
+    const language = detectLanguageFromPathAndContent(detectionPath, newContent || oldContent);
 
     // Show/hide banner when old content is unavailable but new content exists
     try {
@@ -2063,18 +2006,16 @@ class MonacoApp {
         oe.updateOptions(opts);
       }
     } catch (_) {}
-    // Store offsets for line/hunk navigation helpers
-    this.currentOffsets = {
-      newOffset: newStart > 0 ? newStart - 1 : 0,
-      oldOffset: oldStart > 0 ? oldStart - 1 : 0,
-    };
-
     // Record end after the new models are set and painted
     window.Perf.mark('loadFile:paint-wait:start');
     requestAnimationFrame(() =>
       requestAnimationFrame(() => {
         window.Perf.mark('loadFile:paint-wait:end');
-        window.Perf.measure('loadFile:paint-wait', 'loadFile:paint-wait:start', 'loadFile:paint-wait:end');
+        window.Perf.measure(
+          'loadFile:paint-wait',
+          'loadFile:paint-wait:start',
+          'loadFile:paint-wait:end',
+        );
         window.Perf.recordFileSwitchEnd();
         window.Perf.mark('loadFile:end');
         window.Perf.measure('loadFile:total', 'loadFile:start', 'loadFile:end');
@@ -2115,38 +2056,25 @@ class MonacoApp {
       }),
     );
 
-    // Set custom line numbers to show actual file line numbers
     const modifiedEditor = this.editor.getModifiedEditor();
     const originalEditor = this.editor.getOriginalEditor();
-
-    let newOffset = 0;
-    let oldOffset = 0;
 
     modifiedEditor.updateOptions({ lineNumbers: 'on' });
     originalEditor.updateOptions({ lineNumbers: 'on' });
 
-    // Add click handler for comments on BOTH sides (line numbers and glyph margin)
-    this.setupEditorClickHandlers(file.path, modifiedEditor, originalEditor, newOffset, oldOffset);
-
-    // Update decorations for existing comments
+    this.setupEditorClickHandlers(file.path, modifiedEditor, originalEditor);
     this.updateDecorations();
-
-    // Setup scroll listener to show/hide bottom expand control
-    this.setupScrollListener();
-
-    // Highlight the current hunk (first hunk by default) and set focused line
     this.applyInitialHunkFocus(file.path);
   }
 
-  setupEditorClickHandlers(filePath, modifiedEditor, originalEditor, newOffset, oldOffset) {
+  setupEditorClickHandlers(filePath, modifiedEditor, originalEditor) {
     modifiedEditor.onMouseDown((e) => {
       if (
         e.target.type === monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS ||
         e.target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN
       ) {
         const monacoLine = e.target.position.lineNumber;
-        const fileLineNumber = monacoLine + newOffset;
-        this.showCommentDialog(filePath, fileLineNumber, monacoLine, 'new');
+        this.showCommentDialog(filePath, monacoLine, monacoLine, 'new');
       }
     });
 
@@ -2156,8 +2084,7 @@ class MonacoApp {
         e.target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN
       ) {
         const monacoLine = e.target.position.lineNumber;
-        const fileLineNumber = monacoLine + oldOffset;
-        this.showCommentDialog(filePath, fileLineNumber, monacoLine, 'old');
+        this.showCommentDialog(filePath, monacoLine, monacoLine, 'old');
       }
     });
   }
@@ -2169,49 +2096,22 @@ class MonacoApp {
       setTimeout(() => {
         this.jumpToHunk(currentIdx);
         const hr = hunks[currentIdx];
-        const newOffset = this.currentOffsets ? this.currentOffsets.newOffset : 0;
-        const oldOffset = this.currentOffsets ? this.currentOffsets.oldOffset : 0;
         const side = hr.side === 'old' ? 'old' : 'new';
-        const monacoLine = side === 'old' ? hr.start - oldOffset : hr.start - newOffset;
-        this.setFocusedLine(side, monacoLine, false);
+        this.setFocusedLine(side, hr.start, false);
       }, 100);
     }
   }
 
-  initFileRange(file) {
-    let range = this.fileRanges[file.path];
-    if (!range) {
-      const { hunkRanges, oldLineStart, oldLineEnd, newLineStart, newLineEnd } =
-        computeHunkRanges(file.hunks);
+  initFileHunks(file) {
+    if (!this.fileHunks[file.path]) {
+      const { hunkRanges } = computeHunkRanges(file.hunks);
       this.fileHunks[file.path] = hunkRanges;
       this.currentHunkIndex[file.path] = 0;
-      range = this.fileRanges[file.path] = {
-        old: { start: oldLineStart, end: oldLineEnd },
-        new: { start: newLineStart, end: newLineEnd },
-        hasFullContent: false,
-        totalOldLines: null,
-        totalNewLines: null,
-      };
     }
-    return range;
   }
 
   loadCommitView() {
     this.currentFileIsCommit = true;
-    // Hide all UI elements that don't apply to commit view
-    const topC = document.getElementById('expand-top-container');
-    const bottomC = document.getElementById('expand-bottom-container');
-    const showFullBtn = document.getElementById('show-full-file');
-    if (topC) {
-      topC.style.display = 'none';
-    }
-    if (bottomC) {
-      bottomC.style.display = 'none';
-    }
-    if (showFullBtn) {
-      showFullBtn.style.display = 'none';
-    }
-
     const container = document.getElementById('editor-container');
     container.style.display = 'none';
     if (!this._commitViewEl) {
@@ -2428,38 +2328,29 @@ class MonacoApp {
     const modifiedEditor = this.editor.getModifiedEditor();
     const originalEditor = this.editor.getOriginalEditor();
 
-    // Get offsets for current file
-    const { newOffset, oldOffset } = this.getFileOffsets(file.path);
-
     // Decorations for modified (new) side
     const modifiedDecorations = comments
       .filter((c) => c.side === 'new')
-      .map((comment) => {
-        const monacoLine = comment.start_line - newOffset;
-        return {
-          range: new monaco.Range(monacoLine, 1, monacoLine, 1),
-          options: {
-            isWholeLine: true,
-            glyphMarginClassName: 'codicon codicon-comment',
-            glyphMarginHoverMessage: { value: comment.body },
-          },
-        };
-      });
+      .map((comment) => ({
+        range: new monaco.Range(comment.start_line, 1, comment.start_line, 1),
+        options: {
+          isWholeLine: true,
+          glyphMarginClassName: 'codicon codicon-comment',
+          glyphMarginHoverMessage: { value: comment.body },
+        },
+      }));
 
     // Decorations for original (old) side
     const originalDecorations = comments
       .filter((c) => c.side === 'old')
-      .map((comment) => {
-        const monacoLine = comment.start_line - oldOffset;
-        return {
-          range: new monaco.Range(monacoLine, 1, monacoLine, 1),
-          options: {
-            isWholeLine: true,
-            glyphMarginClassName: 'codicon codicon-comment',
-            glyphMarginHoverMessage: { value: comment.body },
-          },
-        };
-      });
+      .map((comment) => ({
+        range: new monaco.Range(comment.start_line, 1, comment.start_line, 1),
+        options: {
+          isWholeLine: true,
+          glyphMarginClassName: 'codicon codicon-comment',
+          glyphMarginHoverMessage: { value: comment.body },
+        },
+      }));
 
     this.modifiedDecorations = modifiedEditor.deltaDecorations(
       this.modifiedDecorations || [],
@@ -2588,311 +2479,6 @@ class MonacoApp {
 
     // Focus after a brief delay to let Monaco position the widget
     setTimeout(() => textarea.focus(), 100);
-  }
-
-  async loadFullFile(index) {
-    const file = this.files[index];
-
-    await this.fetchFilePair(file.path);
-
-    // Update tracking BEFORE reloading
-    const range = this.fileRanges[file.path];
-    range.hasFullContent = true;
-    range.old.start = 1;
-    range.old.end = range.totalOldLines || this.fileCache[file.path].old.split('\n').length;
-    range.new.start = 1;
-    range.new.end = range.totalNewLines || this.fileCache[file.path].new.split('\n').length;
-
-    // Reload the editor with full content via loadFile
-    await this.loadFile(index);
-
-    // Update button
-    const showFullBtn = document.getElementById('show-full-file');
-    showFullBtn.style.display = 'none';
-  }
-
-  async renderExpandControls() {
-    // Remove existing controls
-    $$('.expand-controls').forEach((el) => el.remove());
-
-    const file = this.files[this.currentFileIndex];
-    const range = this.fileRanges[file.path];
-    const topContainer = $('#expand-top-container');
-    const bottomContainer = $('#expand-bottom-container');
-
-    if (window.DEBUG) {
-      console.log(`renderExpandControls for ${file.path}`);
-      console.log('Range:', range);
-    }
-
-    if (!range || range.hasFullContent) {
-      if (topContainer) {
-        clearEl(topContainer);
-        topContainer.style.display = 'none';
-      }
-      if (bottomContainer) {
-        clearEl(bottomContainer);
-        bottomContainer.style.display = 'none';
-      }
-      if (window.DEBUG) {
-        console.log(`Skipping: ${!range ? 'no range' : 'has full content'}`);
-      }
-      return;
-    }
-
-    // Fetch total line counts if we don't have them
-    if (range.totalOldLines === null || range.totalNewLines === null) {
-      await this.fetchFileLengths(file.path);
-    }
-
-    if (window.DEBUG) {
-      console.log(`Total lines: old=${range.totalOldLines}, new=${range.totalNewLines}`);
-      console.log(
-        `Current range: old ${range.old.start}-${range.old.end}, new ${range.new.start}-${range.new.end}`,
-      );
-    }
-
-    // Calculate available lines above and below current view
-    // Use the maximum of old/new sides since they may have different lengths
-    const availableAboveOld = Math.max(0, range.old.start - 1);
-    const availableAboveNew = Math.max(0, range.new.start - 1);
-    const availableAbove = Math.max(availableAboveOld, availableAboveNew);
-
-    const availableBelowOld = Math.max(0, range.totalOldLines - range.old.end);
-    const availableBelowNew = Math.max(0, range.totalNewLines - range.new.end);
-    const availableBelow = Math.max(availableBelowOld, availableBelowNew);
-
-    // If showing full content on both sides, mark as such and hide controls
-    if (availableAbove === 0 && availableBelow === 0) {
-      range.hasFullContent = true;
-      document.getElementById('show-full-file').style.display = 'none';
-      clearEl(topContainer);
-      clearEl(bottomContainer);
-      bottomContainer.style.display = 'none';
-      if (window.DEBUG) {
-        console.log(`Already showing full file`);
-      }
-      return;
-    }
-
-    if (window.DEBUG) {
-      console.log(
-        `Available: above=${availableAbove} (old=${availableAboveOld}, new=${availableAboveNew}), below=${availableBelow} (old=${availableBelowOld}, new=${availableBelowNew})`,
-      );
-    }
-
-    // Clear previous controls
-    clearEl(topContainer);
-    clearEl(bottomContainer);
-
-    // Add expand controls
-    if (availableAbove > 0) {
-      if (window.DEBUG) {
-        console.log(`Adding top control`);
-      }
-      const topControl = this.createExpandControl('top', file.path, availableAbove);
-      topContainer.appendChild(topControl);
-      // Will be shown/hidden by scroll listener
-    } else {
-      topContainer.style.display = 'none';
-    }
-
-    if (availableBelow > 0) {
-      if (window.DEBUG) {
-        console.log(`Adding bottom control`);
-      }
-      const bottomControl = this.createExpandControl('bottom', file.path, availableBelow);
-      bottomContainer.appendChild(bottomControl);
-      // Will be shown/hidden by scroll listener
-    } else {
-      if (window.DEBUG) {
-        console.log(`NOT adding bottom control - availableBelow=${availableBelow}`);
-      }
-      bottomContainer.style.display = 'none';
-    }
-  }
-
-  setupScrollListener() {
-    if (!this.editor) {
-      return;
-    }
-
-    const modifiedEditor = this.editor.getModifiedEditor();
-
-    // Remove previous listener if it exists
-    if (this.scrollListenerDispose && this.scrollListenerDispose.dispose) {
-      try {
-        this.scrollListenerDispose.dispose();
-      } catch (e) {}
-      this.scrollListenerDispose = null;
-    }
-
-    // Listen for scroll changes
-    this.scrollListenerDispose = modifiedEditor.onDidScrollChange(() => {
-      this.checkExpandVisibility();
-    });
-
-    // Initial check
-    setTimeout(() => this.checkExpandVisibility(), 100);
-  }
-
-  checkExpandVisibility() {
-    if (!this.editor) {
-      return;
-    }
-
-    const modifiedEditor = this.editor.getModifiedEditor();
-    const visibleRanges = modifiedEditor.getVisibleRanges();
-
-    if (visibleRanges.length === 0) {
-      return;
-    }
-
-    const firstVisibleLine = visibleRanges[0].startLineNumber;
-    const lastVisibleLine = visibleRanges[visibleRanges.length - 1].endLineNumber;
-    const totalLines = modifiedEditor.getModel().getLineCount();
-
-    // Show top expand button when within 3 lines of top
-    const topContainer = document.getElementById('expand-top-container');
-    if (topContainer && topContainer.querySelector('.expand-controls')) {
-      const nearTop = firstVisibleLine <= 4;
-      topContainer.style.display = nearTop ? 'block' : 'none';
-    }
-
-    // Show bottom expand button when within 3 lines of bottom
-    const bottomContainer = document.getElementById('expand-bottom-container');
-    if (bottomContainer && bottomContainer.querySelector('.expand-controls')) {
-      const nearBottom = lastVisibleLine >= totalLines - 3;
-      bottomContainer.style.display = nearBottom ? 'block' : 'none';
-    }
-  }
-
-  async fetchFileLengths(filePath) {
-    const range = this.fileRanges[filePath];
-    const { old, new: newContent } = await this.fetchFilePair(filePath);
-    range.totalOldLines = old.split('\n').length;
-    range.totalNewLines = newContent.split('\n').length;
-  }
-
-  createExpandControl(position, filePath, availableLines) {
-    const expandAmount = Math.min(20, availableLines);
-    const control = el('div', { className: `expand-controls ${position}` }, [
-      el('div', { className: 'expand-line' }),
-      el('button', {
-        className: 'expand-btn',
-        attrs: { 'data-position': position, 'data-file': filePath },
-        text: `↕ Expand ${position === 'top' ? 'Above' : 'Below'} (+${expandAmount} line${
-          expandAmount === 1 ? '' : 's'
-        })`,
-      }),
-      el('div', { className: 'expand-line' }),
-    ]);
-
-    const btn = control.querySelector('.expand-btn');
-    btn.onclick = () => this.expandLines(position, filePath);
-
-    return control;
-  }
-
-  async expandLines(position, filePath) {
-    const range = this.fileRanges[filePath];
-    const file = this.files.find((f) => f.path === filePath);
-    if (!file) {
-      return;
-    }
-
-    if (window.DEBUG) {
-      console.log(`Expanding ${position} for ${filePath}`);
-      console.log(
-        `Current range: old ${range.old.start}-${range.old.end}, new ${range.new.start}-${range.new.end}`,
-      );
-    }
-
-    // Fetch the full file content
-    const { old, new: newContent } = await this.fetchFilePair(filePath);
-    const oldLines = old.split('\n');
-    const newLines = newContent.split('\n');
-
-    if (window.DEBUG) {
-      console.log(`File lengths: old ${oldLines.length}, new ${newLines.length}`);
-    }
-
-    // Calculate new range
-    const expandAmount = 20;
-    let newOldStart = range.old.start;
-    let newOldEnd = range.old.end;
-    let newNewStart = range.new.start;
-    let newNewEnd = range.new.end;
-
-    if (position === 'top') {
-      newOldStart = Math.max(1, range.old.start - expandAmount);
-      newNewStart = Math.max(1, range.new.start - expandAmount);
-    } else {
-      // Expand below, but don't exceed file length
-      newOldEnd = Math.min(oldLines.length, range.old.end + expandAmount);
-      newNewEnd = Math.min(newLines.length, range.new.end + expandAmount);
-    }
-
-    if (window.DEBUG) {
-      console.log(`New range: old ${newOldStart}-${newOldEnd}, new ${newNewStart}-${newNewEnd}`);
-    }
-
-    // Extract the lines we need (0-indexed slice from 1-indexed line numbers)
-    file.old_content = oldLines.slice(newOldStart - 1, newOldEnd).join('\n');
-    file.new_content = newLines.slice(newNewStart - 1, newNewEnd).join('\n');
-
-    if (window.DEBUG) {
-      console.log(
-        `Extracted content lengths: old ${file.old_content.split('\n').length}, new ${file.new_content.split('\n').length}`,
-      );
-    }
-
-    // Update range
-    range.old.start = newOldStart;
-    range.old.end = newOldEnd;
-    range.new.start = newNewStart;
-    range.new.end = newNewEnd;
-
-    // Update total line counts if not set
-    if (range.totalOldLines === null) {
-      range.totalOldLines = oldLines.length;
-    }
-    if (range.totalNewLines === null) {
-      range.totalNewLines = newLines.length;
-    }
-
-    // Save scroll position before reloading
-    let scrollLineNumber = null;
-    if (this.editor) {
-      const modifiedEditor = this.editor.getModifiedEditor();
-      const visibleRanges = modifiedEditor.getVisibleRanges();
-      if (visibleRanges.length > 0) {
-        scrollLineNumber = visibleRanges[0].startLineNumber;
-      }
-    }
-
-    // Calculate how many lines were actually added at top
-    const oldNewStart = range.new.start;
-
-    // Reload editor
-    this.loadFile(this.currentFileIndex);
-
-    // Restore scroll position after a brief delay for editor to initialize
-    if (scrollLineNumber !== null) {
-      setTimeout(() => {
-        if (this.editor) {
-          const modifiedEditor = this.editor.getModifiedEditor();
-          // If we expanded at top, adjust scroll by actual lines added
-          const linesAddedAtTop = position === 'top' ? oldNewStart - newNewStart : 0;
-          const adjustedLine = scrollLineNumber + linesAddedAtTop;
-          const reduceMotion = prefersReducedMotion();
-          modifiedEditor.revealLineInCenter(
-            adjustedLine,
-            reduceMotion ? monaco.editor.ScrollType.Immediate : monaco.editor.ScrollType.Smooth,
-          );
-        }
-      }, 50);
-    }
   }
 
   updateUI() {

@@ -2,13 +2,17 @@ use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::{fs, path::PathBuf, sync::Arc};
 use tokio::sync::{mpsc, Mutex};
 use tower::util::ServiceExt; // for `oneshot`
 
+static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
+
 fn make_temp_dir() -> PathBuf {
+    let id = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
     let mut dir = std::env::temp_dir();
-    dir.push(format!("lrv-test-{}", std::process::id()));
+    dir.push(format!("lrv-test-{}-{}", std::process::id(), id));
     let _ = fs::create_dir_all(&dir);
     dir
 }
