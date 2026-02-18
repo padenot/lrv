@@ -251,7 +251,9 @@ test.describe('Perf Bench', () => {
             duration: e.duration || 0,
           }))
           .sort((a, b) => a.startTime - b.startTime);
-        const firstLine = timeline.find((e) => e.entryType === 'mark' && e.name === 'init:first-line-visible');
+        const firstLine = timeline.find(
+          (e) => e.entryType === 'mark' && e.name === 'init:first-line-visible',
+        );
         return { timeline, firstLineMs: firstLine ? firstLine.startTime : null };
       });
       const timeline = timelineResult.timeline;
@@ -276,7 +278,11 @@ test.describe('Perf Bench', () => {
       const firstLine = findMark(timeline, 'init:first-line-visible');
       const initTotal = findMeasure(timeline, 'init:total');
       const preInit = initStart ? initStart.startTime : null;
-      const initDur = initTotal ? initTotal.duration : initStart && initEnd ? initEnd.startTime - initStart.startTime : null;
+      const initDur = initTotal
+        ? initTotal.duration
+        : initStart && initEnd
+          ? initEnd.startTime - initStart.startTime
+          : null;
       const postInitToLine =
         firstLine && initEnd ? Math.max(0, firstLine.startTime - initEnd.startTime) : null;
       console.log(

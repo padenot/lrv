@@ -19,25 +19,47 @@ struct Args {
 
 fn get_project_context(cwd: Option<&PathBuf>) -> lrv::types::ProjectContext {
     let mut cmd = Command::new("git");
-    if let Some(d) = cwd { cmd.current_dir(d); }
+    if let Some(d) = cwd {
+        cmd.current_dir(d);
+    }
     let working_directory = cmd
         .args(["rev-parse", "--show-toplevel"])
         .output()
         .ok()
-        .and_then(|o| if o.status.success() { String::from_utf8(o.stdout).ok() } else { None })
+        .and_then(|o| {
+            if o.status.success() {
+                String::from_utf8(o.stdout).ok()
+            } else {
+                None
+            }
+        })
         .map(|s| s.trim().to_string())
         .or_else(|| {
-            if let Some(d) = cwd { d.to_str().map(|s| s.to_string()) } else { std::env::current_dir().ok().and_then(|p| p.to_str().map(String::from)) }
+            if let Some(d) = cwd {
+                d.to_str().map(|s| s.to_string())
+            } else {
+                std::env::current_dir()
+                    .ok()
+                    .and_then(|p| p.to_str().map(String::from))
+            }
         })
         .unwrap_or_else(|| "unknown".to_string());
 
     let mut cmd = Command::new("git");
-    if let Some(d) = cwd { cmd.current_dir(d); }
+    if let Some(d) = cwd {
+        cmd.current_dir(d);
+    }
     let git_branch = cmd
         .args(["rev-parse", "--abbrev-ref", "HEAD"])
         .output()
         .ok()
-        .and_then(|o| if o.status.success() { String::from_utf8(o.stdout).ok() } else { None })
+        .and_then(|o| {
+            if o.status.success() {
+                String::from_utf8(o.stdout).ok()
+            } else {
+                None
+            }
+        })
         .map(|s| s.trim().to_string());
 
     lrv::types::ProjectContext {
@@ -55,14 +77,20 @@ fn read_stdin() -> Result<String> {
 }
 
 fn get_file_new(cwd: Option<&PathBuf>, rel: &str) -> Result<String> {
-    let root = if let Some(d) = cwd { d.clone() } else { std::env::current_dir()? };
+    let root = if let Some(d) = cwd {
+        d.clone()
+    } else {
+        std::env::current_dir()?
+    };
     let path = root.join(rel);
     Ok(fs::read_to_string(path).with_context(|| format!("read new file {}", rel))?)
 }
 
 fn get_file_old(cwd: Option<&PathBuf>, rel: &str) -> Result<String> {
     let mut cmd = Command::new("git");
-    if let Some(d) = cwd { cmd.current_dir(d); }
+    if let Some(d) = cwd {
+        cmd.current_dir(d);
+    }
     let out = cmd.args(["show", &format!("HEAD:{}", rel)]).output()?;
     if out.status.success() {
         Ok(String::from_utf8(out.stdout).unwrap_or_default())

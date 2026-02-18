@@ -1,7 +1,5 @@
 use crate::config::UserConfig;
 use crate::types::*;
-use std::fs;
-use std::collections::{HashMap, HashSet};
 use axum::{
     extract::{Path as AxumPath, Query, State},
     http::{header, HeaderValue, StatusCode},
@@ -13,16 +11,18 @@ use axum::{
 use mime_guess;
 use rust_embed::RustEmbed;
 use serde::Deserialize;
+use std::collections::{HashMap, HashSet};
+use std::fs;
+use std::os::unix::process::ExitStatusExt;
 use std::path::{Component, Path};
+use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::thread;
+use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, Mutex, Semaphore};
 use tokio::task::JoinSet;
 use tower_http::trace::TraceLayer;
-use std::thread;
-use std::os::unix::process::ExitStatusExt;
-use std::sync::atomic::AtomicBool;
-use std::time::{Duration, Instant};
 
 #[derive(Deserialize)]
 struct FileQuery {
@@ -125,12 +125,25 @@ fn resolve_old_content(state: &AppState, req_path: &str) -> String {
                 let mut hunks = fe.hunks.clone();
                 hunks.sort_by_key(|h| std::cmp::Reverse(h.new_start));
                 for h in hunks {
-                    let mut pos = if h.new_start == 0 { 0 } else { h.new_start.saturating_sub(1) };
+                    let mut pos = if h.new_start == 0 {
+                        0
+                    } else {
+                        h.new_start.saturating_sub(1)
+                    };
                     for dl in &h.lines {
                         match dl.line_type {
-                            LineType::Context => { pos = pos.saturating_add(1); }
-                            LineType::Add => { if pos < lines.len() { lines.remove(pos); } }
-                            LineType::Delete => { lines.insert(pos, dl.content.clone() + "\n"); pos = pos.saturating_add(1); }
+                            LineType::Context => {
+                                pos = pos.saturating_add(1);
+                            }
+                            LineType::Add => {
+                                if pos < lines.len() {
+                                    lines.remove(pos);
+                                }
+                            }
+                            LineType::Delete => {
+                                lines.insert(pos, dl.content.clone() + "\n");
+                                pos = pos.saturating_add(1);
+                            }
                         }
                     }
                 }
@@ -167,9 +180,20 @@ fn resolve_old_content(state: &AppState, req_path: &str) -> String {
             let cmd_old = |rev: &str| -> std::process::Output {
                 std::process::Command::new("jj")
                     .current_dir(repo)
-                    .args(["file", "show", "-r", &format!("parents({})", rev), "--", &old_key])
+                    .args([
+                        "file",
+                        "show",
+                        "-r",
+                        &format!("parents({})", rev),
+                        "--",
+                        &old_key,
+                    ])
                     .output()
-                    .unwrap_or_else(|_| std::process::Output { status: std::process::ExitStatus::from_raw(1), stdout: Vec::new(), stderr: Vec::new() })
+                    .unwrap_or_else(|_| std::process::Output {
+                        status: std::process::ExitStatus::from_raw(1),
+                        stdout: Vec::new(),
+                        stderr: Vec::new(),
+                    })
             };
             let out = run_with_delayed_notice(
                 format!(
@@ -179,7 +203,9 @@ fn resolve_old_content(state: &AppState, req_path: &str) -> String {
                 400,
                 || {
                     let o1 = cmd_old("@-");
-                    if o1.status.success() { return o1; }
+                    if o1.status.success() {
+                        return o1;
+                    }
                     cmd_old("@")
                 },
             );
@@ -197,13 +223,20 @@ fn resolve_old_content(state: &AppState, req_path: &str) -> String {
         .map(|s| s.replace(std::path::MAIN_SEPARATOR, "/"))
         .unwrap_or_else(|| req_path.to_string());
     let output = run_with_delayed_notice(
-        format!("Falling back to git show HEAD:{} (may be slow)...", rel_for_vcs),
+        format!(
+            "Falling back to git show HEAD:{} (may be slow)...",
+            rel_for_vcs
+        ),
         400,
         || {
             std::process::Command::new("git")
                 .args(["show", &format!("HEAD:{}", rel_for_vcs)])
                 .output()
-                .unwrap_or_else(|_| std::process::Output { status: std::process::ExitStatus::from_raw(1), stdout: Vec::new(), stderr: Vec::new() })
+                .unwrap_or_else(|_| std::process::Output {
+                    status: std::process::ExitStatus::from_raw(1),
+                    stdout: Vec::new(),
+                    stderr: Vec::new(),
+                })
         },
     );
     if output.status.success() {
@@ -230,7 +263,10 @@ pub async fn prefetch_old_files(state: AppState) {
         .filter_map(|(p, op, ob)| ob.as_ref().map(|b| (p.clone(), op.clone(), b.clone())))
         .collect();
     if !blob_items.is_empty() {
-        if let Some(blob_map) = batch_cat_file_blobs(&state.context.working_directory, &blob_items.iter().map(|t| t.2.clone()).collect::<Vec<_>>()) {
+        if let Some(blob_map) = batch_cat_file_blobs(
+            &state.context.working_directory,
+            &blob_items.iter().map(|t| t.2.clone()).collect::<Vec<_>>(),
+        ) {
             let mut cache = state.old_cache.lock().await;
             for (path, old_path_opt, oid) in blob_items {
                 if let Some(content) = blob_map.get(&oid) {
@@ -308,9 +344,14 @@ fn batch_cat_file_blobs(working_dir: &str, oids: &[String]) -> Option<HashMap<St
             Err(_) => return None,
         }
         let header = header.trim_end();
-        if header.is_empty() { continue; }
+        if header.is_empty() {
+            continue;
+        }
         let mut it = header.split_whitespace();
-        let oid = match it.next() { Some(s) => s.to_string(), None => break };
+        let oid = match it.next() {
+            Some(s) => s.to_string(),
+            None => break,
+        };
         let second = it.next();
         match second {
             Some("missing") => {
@@ -321,7 +362,9 @@ fn batch_cat_file_blobs(working_dir: &str, oids: &[String]) -> Option<HashMap<St
                 let size_str = it.next().unwrap_or("0");
                 let size: usize = size_str.parse().unwrap_or(0);
                 let mut buf = vec![0u8; size];
-                if let Err(_) = reader.read_exact(&mut buf) { return None; }
+                if let Err(_) = reader.read_exact(&mut buf) {
+                    return None;
+                }
                 // Consume the trailing newline after the object content
                 let mut nl = [0u8; 1];
                 let _ = reader.read_exact(&mut nl);
@@ -492,94 +535,103 @@ async fn get_file_content(
     // For the "new" side we require the file to exist on disk and stay under root.
     // For the "old" side we first try to reconstruct from the parsed diff hunks
     // (works for jj or any stdin-provided diff), and only then fall back to VCS.
-    let content = match query.side.as_str() {
-        "new" => {
-            // Try Git blob OID from diff if present, fallback to filesystem
-            let mut content_new = if let Some(fe) = state
-                .diff
-                .files
-                .iter()
-                .find(|f| f.path == query.path || f.old_path.as_deref() == Some(&query.path))
-            {
-                let mut content = String::new();
+    let content =
+        match query.side.as_str() {
+            "new" => {
+                // Try Git blob OID from diff if present, fallback to filesystem
+                let mut content_new = if let Some(fe) =
+                    state.diff.files.iter().find(|f| {
+                        f.path == query.path || f.old_path.as_deref() == Some(&query.path)
+                    }) {
+                    let mut content = String::new();
 
-                if let Some(oid) = &fe.new_blob {
-                    let output = std::process::Command::new("git")
-                        .current_dir(&state.context.working_directory)
-                        .args(["cat-file", "-p", oid])
-                        .output()
-                        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-                    if output.status.success() {
-                        if let Ok(s) = String::from_utf8(output.stdout) {
-                            content = s;
+                    if let Some(oid) = &fe.new_blob {
+                        let output = std::process::Command::new("git")
+                            .current_dir(&state.context.working_directory)
+                            .args(["cat-file", "-p", oid])
+                            .output()
+                            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+                        if output.status.success() {
+                            if let Ok(s) = String::from_utf8(output.stdout) {
+                                content = s;
+                            }
                         }
                     }
-                }
 
-                // Fallback to filesystem if git cat-file failed or no blob
-                if content.is_empty() {
+                    // Fallback to filesystem if git cat-file failed or no blob
+                    if content.is_empty() {
+                        let joined = base_path.join(rel_path);
+                        let file_path =
+                            std::fs::canonicalize(&joined).map_err(|_| StatusCode::NOT_FOUND)?;
+                        if !file_path.starts_with(&base_canon) {
+                            return Err(StatusCode::FORBIDDEN);
+                        }
+                        content = std::fs::read_to_string(&file_path)
+                            .map_err(|_| StatusCode::NOT_FOUND)?;
+                    }
+
+                    content
+                } else {
+                    // Not part of diff: fallback to filesystem
                     let joined = base_path.join(rel_path);
-                    let file_path = std::fs::canonicalize(&joined)
-                        .map_err(|_| StatusCode::NOT_FOUND)?;
+                    let file_path =
+                        std::fs::canonicalize(&joined).map_err(|_| StatusCode::NOT_FOUND)?;
                     if !file_path.starts_with(&base_canon) {
                         return Err(StatusCode::FORBIDDEN);
                     }
-                    content = std::fs::read_to_string(&file_path).map_err(|_| StatusCode::NOT_FOUND)?;
-                }
-
-                content
-            } else {
-                // Not part of diff: fallback to filesystem
-                let joined = base_path.join(rel_path);
-                let file_path = std::fs::canonicalize(&joined).map_err(|_| StatusCode::NOT_FOUND)?;
-                if !file_path.starts_with(&base_canon) {
-                    return Err(StatusCode::FORBIDDEN);
-                }
-                std::fs::read_to_string(&file_path).map_err(|_| StatusCode::NOT_FOUND)?
-            };
-
-            // As a last resort on JJ repos, fetch from jj new revs if we still have no content
-            if content_new.is_empty() && is_jj_repo(&state.context.working_directory) {
-                let repo = &state.context.working_directory;
-                let path = query.path.clone();
-                let cmd_new = |rev: &str| -> std::process::Output {
-                    std::process::Command::new("jj")
-                        .current_dir(repo)
-                        .args(["file", "show", "-r", rev, "--", &path])
-                        .output()
-                        .unwrap_or_else(|_| std::process::Output { status: std::process::ExitStatus::from_raw(1), stdout: Vec::new(), stderr: Vec::new() })
+                    std::fs::read_to_string(&file_path).map_err(|_| StatusCode::NOT_FOUND)?
                 };
-                let out = run_with_delayed_notice(
-                    format!("Fetching new content from jj (@-, then @) for {}...", path),
-                    400,
-                    || {
-                        let o1 = cmd_new("@-");
-                        if o1.status.success() { return o1; }
-                        cmd_new("@")
-                    },
-                );
-                if out.status.success() {
-                    if let Ok(s) = String::from_utf8(out.stdout) { content_new = s; }
+
+                // As a last resort on JJ repos, fetch from jj new revs if we still have no content
+                if content_new.is_empty() && is_jj_repo(&state.context.working_directory) {
+                    let repo = &state.context.working_directory;
+                    let path = query.path.clone();
+                    let cmd_new = |rev: &str| -> std::process::Output {
+                        std::process::Command::new("jj")
+                            .current_dir(repo)
+                            .args(["file", "show", "-r", rev, "--", &path])
+                            .output()
+                            .unwrap_or_else(|_| std::process::Output {
+                                status: std::process::ExitStatus::from_raw(1),
+                                stdout: Vec::new(),
+                                stderr: Vec::new(),
+                            })
+                    };
+                    let out = run_with_delayed_notice(
+                        format!("Fetching new content from jj (@-, then @) for {}...", path),
+                        400,
+                        || {
+                            let o1 = cmd_new("@-");
+                            if o1.status.success() {
+                                return o1;
+                            }
+                            cmd_new("@")
+                        },
+                    );
+                    if out.status.success() {
+                        if let Ok(s) = String::from_utf8(out.stdout) {
+                            content_new = s;
+                        }
+                    }
+                }
+                content_new
+            }
+            "old" => {
+                // Cache check first
+                if let Some(cached) = {
+                    let cache = state.old_cache.lock().await;
+                    cache.get(&query.path).cloned()
+                } {
+                    cached
+                } else {
+                    let content = resolve_old_content(&state, &query.path);
+                    let mut cache = state.old_cache.lock().await;
+                    cache.insert(query.path.clone(), content.clone());
+                    content
                 }
             }
-            content_new
-        }
-        "old" => {
-            // Cache check first
-            if let Some(cached) = {
-                let cache = state.old_cache.lock().await;
-                cache.get(&query.path).cloned()
-            } {
-                cached
-            } else {
-                let content = resolve_old_content(&state, &query.path);
-                let mut cache = state.old_cache.lock().await;
-                cache.insert(query.path.clone(), content.clone());
-                content
-            }
-        }
-        _ => return Err(StatusCode::BAD_REQUEST),
-    };
+            _ => return Err(StatusCode::BAD_REQUEST),
+        };
 
     Ok(Json(serde_json::json!({ "content": content })))
 }
