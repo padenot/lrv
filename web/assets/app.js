@@ -1924,11 +1924,6 @@ class MonacoApp {
           horizontal: 'visible',
         },
       });
-      try {
-        // Defer sub-editor option updates until models are set
-      } catch (_) {}
-    } else {
-      // Defer diff editor option updates until after models are bound
     }
 
     // Fetch full content and let Monaco hide unchanged regions in-view
@@ -1967,8 +1962,8 @@ class MonacoApp {
         'lang',
         language,
         'old/new lines',
-        oldAll.length,
-        newAll.length,
+        oldContent.split('\n').length,
+        newContent.split('\n').length,
       );
     }
 
@@ -1991,18 +1986,18 @@ class MonacoApp {
         scrollBeyondLastLine: true,
         hideUnchangedRegions: MONACO_HIDE_UNCHANGED,
       });
-      const me = this.editor.getModifiedEditor && this.editor.getModifiedEditor();
-      const oe = this.editor.getOriginalEditor && this.editor.getOriginalEditor();
       const opts = {
         smoothScrolling: !reduceMotion,
         glyphMargin: true,
         folding: false,
         scrollBeyondLastLine: true,
       };
-      if (me && me.getModel()) {
+      const me = this.editor.getModifiedEditor();
+      const oe = this.editor.getOriginalEditor();
+      if (me.getModel()) {
         me.updateOptions(opts);
       }
-      if (oe && oe.getModel()) {
+      if (oe.getModel()) {
         oe.updateOptions(opts);
       }
     } catch (_) {}
