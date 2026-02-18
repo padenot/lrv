@@ -124,7 +124,12 @@ fn parse_ips_from_env_value(value: &str) -> Vec<String> {
 fn get_tailscale_ipv4s_from_env() -> Vec<String> {
     let mut out = Vec::new();
 
-    for key in ["LRV_TAILSCALE_IPS", "TAILSCALE_IPS", "LRV_TAILSCALE_IP", "TAILSCALE_IP"] {
+    for key in [
+        "LRV_TAILSCALE_IPS",
+        "TAILSCALE_IPS",
+        "LRV_TAILSCALE_IP",
+        "TAILSCALE_IP",
+    ] {
         if let Ok(v) = env::var(key) {
             for ip in parse_ips_from_env_value(&v) {
                 push_unique_ip(&mut out, ip);
@@ -140,7 +145,6 @@ fn get_tailscale_ipv4s_from_env() -> Vec<String> {
 
     out
 }
-
 
 fn is_ssh_session() -> bool {
     // Detect common SSH environment variables
@@ -211,11 +215,9 @@ async fn main() -> Result<()> {
             let ts = get_tailscale_ipv4s_from_env();
             if !ts.is_empty() {
                 if !enable_tailscale {
-                    eprintln!("Auto-enabling --tailscale (SSH + Tailscale IP from env)");
                     enable_tailscale = true;
                 }
                 if !disable_open {
-                    eprintln!("Auto-enabling --no-open (SSH session)");
                     disable_open = true;
                 }
                 detected_ts_ips = Some(ts);
@@ -292,7 +294,9 @@ async fn main() -> Result<()> {
         shutdown_tx: Arc::new(Mutex::new(Some(shutdown_tx))),
         config: Arc::new(Mutex::new(user_config)),
         context: Arc::new(project_context),
-        old_cache: Arc::new(Mutex::new(std::collections::HashMap::with_capacity(old_cache_capacity))),
+        old_cache: Arc::new(Mutex::new(std::collections::HashMap::with_capacity(
+            old_cache_capacity,
+        ))),
     };
 
     // Create router (we'll clone per listener)
@@ -317,9 +321,7 @@ async fn main() -> Result<()> {
             None => get_tailscale_ipv4s_from_env(),
         };
         if ts.is_empty() {
-            eprintln!(
-                "Note: Tailscale IP not found in env; set LRV_TAILSCALE_IPS/TAILSCALE_IPS or rely on SSH_CONNECTION"
-            );
+            eprintln!("warning: no Tailscale IP found in environment");
         }
         for ip in ts {
             if !bind_addrs.contains(&ip) {
@@ -364,15 +366,13 @@ async fn main() -> Result<()> {
         }
     }
 
-    eprintln!("Server running on port {}", actual_port);
-    eprintln!("Available at:");
     for (addr, _) in &listeners {
         if addr == "0.0.0.0" {
             for iface in get_network_interfaces() {
-                eprintln!("  http://{}:{}", iface, actual_port);
+                eprintln!("http://{}:{}", iface, actual_port);
             }
         } else {
-            eprintln!("  http://{}:{}", addr, actual_port);
+            eprintln!("http://{}:{}", addr, actual_port);
         }
     }
 
