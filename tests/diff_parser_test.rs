@@ -167,6 +167,7 @@ index a1b2c3d..e4f5a6b 100644
     assert_eq!(diff.commit_date.as_deref(), Some("Wed Feb 18 12:00:00 2026 +0100"));
     let msg = diff.commit_message.as_deref().unwrap();
     assert!(msg.starts_with("Remove dead expand/range system"));
+    assert!(msg.contains("\n\nMonaco's hideUnchangedRegions"));
     assert!(msg.contains("hasFullContent was hardcoded to true"));
 }
 
@@ -236,6 +237,8 @@ index 31eb1b8241..c0b0d9bd58 100644
     assert!(diff.commit_date.is_none()); // jj embeds date in author field
     let msg = diff.commit_message.as_deref().unwrap();
     assert!(msg.starts_with("Fix integer overflow in range comparison"));
+    assert!(msg.contains("\n\nWhen aOffset is near INT64_MAX"));
+    assert!(msg.contains("\n\nFix by computing"));
     assert!(msg.contains("uint64_t"));
 }
 

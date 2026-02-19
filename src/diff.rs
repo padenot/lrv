@@ -52,14 +52,22 @@ pub fn parse_diff(diff_text: &str) -> Result<DiffResponse> {
                 {
                     commit_date = Some(date.trim().to_string());
                 } else if line.is_empty() {
-                    in_message = true;
+                    if in_message {
+                        message_lines.push("");
+                    } else {
+                        in_message = true;
+                    }
                 } else if in_message && line.starts_with("    ") {
                     message_lines.push(line.strip_prefix("    ").unwrap_or(line));
                 }
             }
 
+            // Strip trailing blank lines only
+            while message_lines.last() == Some(&"") {
+                message_lines.pop();
+            }
             if !message_lines.is_empty() {
-                commit_message = Some(message_lines.join("\n").trim().to_string());
+                commit_message = Some(message_lines.join("\n"));
             }
 
             diff_line_idx
