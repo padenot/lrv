@@ -1974,8 +1974,17 @@ class MonacoApp {
     });
     window.Perf.mark('loadFile:setModel:end');
     window.Perf.measure('loadFile:setModel', 'loadFile:setModel:start', 'loadFile:setModel:end');
-    // Now that models are bound, update diff editor + sub-editors
+    // Now that models are bound, update diff editor + sub-editors.
+    // Register a one-time onDidUpdateDiff listener to scroll to top after
+    // Monaco finishes its async diff/hideUnchangedRegions computation; a plain
+    // setScrollTop(0) here would be overridden by that async step.  The
+    // listener fires well before the 100 ms jumpToHunk timer.
     try {
+      const scrollReset = this.editor.onDidUpdateDiff(() => {
+        scrollReset.dispose();
+        this.editor.getModifiedEditor().setScrollTop(0);
+        this.editor.getOriginalEditor().setScrollTop(0);
+      });
       this.editor.updateOptions({
         renderSideBySide: !this.isInline,
         theme: theme,
@@ -1994,14 +2003,8 @@ class MonacoApp {
       };
       const me = this.editor.getModifiedEditor();
       const oe = this.editor.getOriginalEditor();
-      if (me.getModel()) {
-        me.updateOptions(opts);
-      }
-      if (oe.getModel()) {
-        oe.updateOptions(opts);
-      }
-      me.setScrollTop(0);
-      oe.setScrollTop(0);
+      if (me.getModel()) me.updateOptions(opts);
+      if (oe.getModel()) oe.updateOptions(opts);
     } catch (_) {}
     // Record end after the new models are set and painted
     window.Perf.mark('loadFile:paint-wait:start');
