@@ -84,6 +84,8 @@ body {
   /* Align text baselines of lrv, message, date, etc. */
   align-items: baseline;
   gap: 12px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 /* Wordmark styling for "lrv" */
@@ -130,6 +132,10 @@ body {
   font-size: 12px;
   font-weight: 400;
   line-height: 1.1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .project-info-value {
@@ -208,6 +214,7 @@ body {
   display: flex;
   gap: 12px;
   align-items: center;
+  flex-shrink: 0;
 }
 
 .settings-btn {
