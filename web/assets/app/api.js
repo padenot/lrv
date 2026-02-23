@@ -5,54 +5,46 @@ let fileFetchDelayTimer = null;
 let fetchSpinnerEl = null;
 
 function ensureFetchSpinner() {
-  try {
-    if (!fetchSpinnerEl) {
-      const host = document.querySelector('.header .header-actions');
-      if (!host) {
-        return;
-      }
-      const spinner = el('span', { className: 'fetch-spinner', attrs: { id: 'fetch-spinner' } });
-      host.insertBefore(spinner, host.firstChild);
-      fetchSpinnerEl = spinner;
+  if (!fetchSpinnerEl) {
+    const host = document.querySelector('.header .header-actions');
+    if (!host) {
+      return;
     }
-  } catch {}
+    const spinner = el('span', { className: 'fetch-spinner', attrs: { id: 'fetch-spinner' } });
+    host.insertBefore(spinner, host.firstChild);
+    fetchSpinnerEl = spinner;
+  }
 }
 
 function showFetchSpinnerDelayed() {
-  try {
-    ensureFetchSpinner();
-    if (!fetchSpinnerEl) {
-      return;
-    }
-    if (fileFetchDelayTimer) {
-      return;
-    }
-    fileFetchDelayTimer = setTimeout(() => {
-      if (fileFetchPending > 0) {
-        fetchSpinnerEl.classList.add('visible');
-        try {
-          if (window.__APP && typeof window.__APP.eagerPrefetchAllFiles === 'function') {
-            window.__APP.eagerPrefetchAllFiles();
-          }
-        } catch {}
+  ensureFetchSpinner();
+  if (!fetchSpinnerEl) {
+    return;
+  }
+  if (fileFetchDelayTimer) {
+    return;
+  }
+  fileFetchDelayTimer = setTimeout(() => {
+    if (fileFetchPending > 0) {
+      fetchSpinnerEl.classList.add('visible');
+      if (window.__APP && typeof window.__APP.eagerPrefetchAllFiles === 'function') {
+        window.__APP.eagerPrefetchAllFiles();
       }
-      fileFetchDelayTimer = null;
-    }, 400);
-  } catch {}
+    }
+    fileFetchDelayTimer = null;
+  }, 400);
 }
 
 function hideFetchSpinnerMaybe() {
-  try {
-    if (fileFetchPending === 0) {
-      if (fileFetchDelayTimer) {
-        clearTimeout(fileFetchDelayTimer);
-        fileFetchDelayTimer = null;
-      }
-      if (fetchSpinnerEl) {
-        fetchSpinnerEl.classList.remove('visible');
-      }
+  if (fileFetchPending === 0) {
+    if (fileFetchDelayTimer) {
+      clearTimeout(fileFetchDelayTimer);
+      fileFetchDelayTimer = null;
     }
-  } catch {}
+    if (fetchSpinnerEl) {
+      fetchSpinnerEl.classList.remove('visible');
+    }
+  }
 }
 
 export async function fetchJSON(url, options) {
@@ -66,7 +58,7 @@ export async function fetchJSON(url, options) {
   try {
     const res = await fetch(url, options);
     if (!res.ok) {
-      const text = await res.text().catch(() => '');
+      const text = await res.text();
       throw new Error(
         `Request failed ${res.status} ${res.statusText} at ${url}${text ? `: ${text.slice(0, 200)}` : ''}`,
       );

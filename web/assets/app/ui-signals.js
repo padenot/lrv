@@ -1,20 +1,18 @@
 let navTimer = null;
 
 export function showNavIndicator(text) {
-  try {
-    const indicatorEl = document.getElementById('nav-indicator');
-    if (!indicatorEl) {
-      return;
-    }
-    indicatorEl.textContent = text;
-    indicatorEl.style.display = 'inline-block';
-    if (navTimer) {
-      clearTimeout(navTimer);
-    }
-    navTimer = setTimeout(() => {
-      indicatorEl.style.display = 'none';
-    }, 900);
-  } catch {}
+  const indicatorEl = document.getElementById('nav-indicator');
+  if (!indicatorEl) {
+    return;
+  }
+  indicatorEl.textContent = text;
+  indicatorEl.style.display = 'inline-block';
+  if (navTimer) {
+    clearTimeout(navTimer);
+  }
+  navTimer = setTimeout(() => {
+    indicatorEl.style.display = 'none';
+  }, 900);
 }
 
 export function markAppReady() {
@@ -23,28 +21,24 @@ export function markAppReady() {
   }
   const hasLines = document.querySelectorAll('.monaco-editor .view-lines .view-line').length > 0;
   if (hasLines) {
-    try {
-      if (performance.getEntriesByName('init:first-line-visible').length === 0) {
-        window.Perf.mark('init:first-line-visible');
-        if (performance.getEntriesByName('init:start').length > 0) {
-          window.Perf.measure('init:to-first-line-visible', 'init:start', 'init:first-line-visible');
-        }
-        if (performance.getEntriesByName('page:script-start').length > 0) {
-          window.Perf.measure(
-            'page:script-to-first-line-visible',
-            'page:script-start',
-            'init:first-line-visible',
-          );
-        }
+    if (performance.getEntriesByName('init:first-line-visible').length === 0) {
+      window.Perf.mark('init:first-line-visible');
+      if (performance.getEntriesByName('init:start').length > 0) {
+        window.Perf.measure('init:to-first-line-visible', 'init:start', 'init:first-line-visible');
       }
-    } catch {}
+      if (performance.getEntriesByName('page:script-start').length > 0) {
+        window.Perf.measure(
+          'page:script-to-first-line-visible',
+          'page:script-start',
+          'init:first-line-visible',
+        );
+      }
+    }
     window.__APP_READY = true;
-    try {
-      window.Perf.mark('init:app-ready');
-      if (performance.getEntriesByName('appInit').length > 0) {
-        window.Perf.measure('init:app-ready-after-appInit', 'appInitEnd', 'init:app-ready');
-      }
-    } catch {}
+    window.Perf.mark('init:app-ready');
+    if (performance.getEntriesByName('appInit').length > 0) {
+      window.Perf.measure('init:app-ready-after-appInit', 'appInitEnd', 'init:app-ready');
+    }
     if (window.DEBUG) {
       console.log('[app] APP_READY: diff lines visible');
     }
@@ -57,32 +51,24 @@ export function markAppReady() {
     }
     const obs = new MutationObserver(() => {
       if (document.querySelectorAll('.monaco-editor .view-lines .view-line').length > 0) {
-        try {
-          if (performance.getEntriesByName('init:first-line-visible').length === 0) {
-            window.Perf.mark('init:first-line-visible');
-            if (performance.getEntriesByName('init:start').length > 0) {
-              window.Perf.measure(
-                'init:to-first-line-visible',
-                'init:start',
-                'init:first-line-visible',
-              );
-            }
-            if (performance.getEntriesByName('page:script-start').length > 0) {
-              window.Perf.measure(
-                'page:script-to-first-line-visible',
-                'page:script-start',
-                'init:first-line-visible',
-              );
-            }
+        if (performance.getEntriesByName('init:first-line-visible').length === 0) {
+          window.Perf.mark('init:first-line-visible');
+          if (performance.getEntriesByName('init:start').length > 0) {
+            window.Perf.measure('init:to-first-line-visible', 'init:start', 'init:first-line-visible');
           }
-        } catch {}
+          if (performance.getEntriesByName('page:script-start').length > 0) {
+            window.Perf.measure(
+              'page:script-to-first-line-visible',
+              'page:script-start',
+              'init:first-line-visible',
+            );
+          }
+        }
         window.__APP_READY = true;
-        try {
-          window.Perf.mark('init:app-ready');
-          if (performance.getEntriesByName('appInit').length > 0) {
-            window.Perf.measure('init:app-ready-after-appInit', 'appInitEnd', 'init:app-ready');
-          }
-        } catch {}
+        window.Perf.mark('init:app-ready');
+        if (performance.getEntriesByName('appInit').length > 0) {
+          window.Perf.measure('init:app-ready-after-appInit', 'appInitEnd', 'init:app-ready');
+        }
         if (window.DEBUG) {
           console.log('[app] APP_READY: observer saw first line');
         }

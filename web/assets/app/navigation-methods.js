@@ -6,6 +6,11 @@ import { showNavIndicator } from './ui-signals.js';
 export class NavigationMethods {
   setupKeyboardShortcuts() {
     document.addEventListener('keydown', (e) => {
+      // Modal-specific key handlers take precedence while a modal is open.
+      if (document.querySelector('.submit-modal-overlay')) {
+        return;
+      }
+
       // Never handle shortcuts while authoring text (inputs, textareas, contenteditable)
       const activeElement = document.activeElement || document.body;
       if (
@@ -72,9 +77,7 @@ export class NavigationMethods {
   toggleView() {
     this.isInline = !this.isInline;
     this.loadFile(this.currentFileIndex);
-    try {
-      showNavIndicator(this.isInline ? 'Inline' : 'Side-by-Side');
-    } catch {}
+    showNavIndicator(this.isInline ? 'Inline' : 'Side-by-Side');
   }
 
   matchKeyboardShortcut(e) {

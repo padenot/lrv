@@ -55,11 +55,9 @@ export class MonacoApp {
     }
     window.Perf.recordAppInitStart();
     window.Perf.mark('init:start');
-    try {
-      if (performance.getEntriesByName('page:script-start').length > 0) {
-        window.Perf.measure('page:script-to-init-start', 'page:script-start', 'init:start');
-      }
-    } catch {}
+    if (performance.getEntriesByName('page:script-start').length > 0) {
+      window.Perf.measure('page:script-to-init-start', 'page:script-start', 'init:start');
+    }
     // Load config, context, diff data, and ensure @font-face fonts are ready
     window.Perf.mark('init:fetch:start');
     const t0 = performance.now();
@@ -76,14 +74,12 @@ export class MonacoApp {
     }
     this.config = configData;
     this.context = contextData;
-    try {
-      if (this.context.title) {
-        document.title = String(this.context.title);
-      } else {
-        const dirName = (this.context.working_directory || '').split('/').pop() || '';
-        document.title = dirName || 'lrv';
-      }
-    } catch {}
+    if (this.context.title) {
+      document.title = String(this.context.title);
+    } else {
+      const dirName = (this.context.working_directory || '').split('/').pop() || '';
+      document.title = dirName || 'lrv';
+    }
     if (window.DEBUG) {
       console.log('[app] init: parsed config/context/diff');
     }
@@ -116,10 +112,8 @@ export class MonacoApp {
     });
 
     // Pre-apply theme variables to avoid flash while Monaco loads
-    try {
-      this.applyThemeToUI(this.config.color_scheme || 'vs-dark');
-      document.documentElement.setAttribute('data-ui-ready', '1');
-    } catch {}
+    this.applyThemeToUI(this.config.color_scheme || 'vs-dark');
+    document.documentElement.setAttribute('data-ui-ready', '1');
 
     return new Promise((resolve) => {
       window.Perf.mark('init:monaco:load:start');
@@ -132,30 +126,24 @@ export class MonacoApp {
         this.defineCustomThemes();
         this.applyThemeToUI(this.config.color_scheme || 'vs-dark');
         // Accent is set from UI_THEME_ACCENTS_HEX; keep logic simple and deterministic
-        try {
-          document.documentElement.setAttribute('data-ui-ready', '1');
-        } catch {}
+        document.documentElement.setAttribute('data-ui-ready', '1');
         // Set accent directly from our theme map when available (fast, deterministic)
-        try {
-          const hexMap = window.UIThemeAccentsHex || {};
-          const hex = hexMap[this.config.color_scheme || 'vs-dark'];
-          if (hex) {
-            const norm = el('div');
-            norm.style.color = hex;
-            document.body.appendChild(norm);
-            try {
-              const rgb = getComputedStyle(norm).color;
-              if (rgb) {
-                document.documentElement.style.setProperty('--accent-color', rgb);
-              }
-            } finally {
-              norm.remove();
+        const hexMap = window.UIThemeAccentsHex || {};
+        const hex = hexMap[this.config.color_scheme || 'vs-dark'];
+        if (hex) {
+          const norm = el('div');
+          norm.style.color = hex;
+          document.body.appendChild(norm);
+          try {
+            const rgb = getComputedStyle(norm).color;
+            if (rgb) {
+              document.documentElement.style.setProperty('--accent-color', rgb);
             }
-            try {
-              window.__ACCENT_READY = true;
-            } catch {}
+          } finally {
+            norm.remove();
           }
-        } catch {}
+          window.__ACCENT_READY = true;
+        }
         window.Perf.mark('init:ui-setup:start');
         this.setupUI();
         window.Perf.mark('init:ui-setup:end');
@@ -197,15 +185,13 @@ export class MonacoApp {
               window.Perf.mark('init:end');
               window.Perf.measure('init:total', 'init:start', 'init:end');
               // Minimal perf log (gated behind DEBUG)
-              try {
-                if (window.DEBUG) {
-                  const e = performance.getEntriesByName('appInit');
-                  const d = e && e.length ? e[e.length - 1].duration : null;
-                  if (d != null) {
-                    console.log('[perf] appInit ms:', Math.round(d));
-                  }
+              if (window.DEBUG) {
+                const e = performance.getEntriesByName('appInit');
+                const d = e && e.length ? e[e.length - 1].duration : null;
+                if (d != null) {
+                  console.log('[perf] appInit ms:', Math.round(d));
                 }
-              } catch {}
+              }
               markAppReady();
             }),
           );
@@ -224,25 +210,23 @@ export class MonacoApp {
     };
 
     // Accent from theme rules: prefer the 'keyword' token color defined in our theme
-    try {
-      const defs = window.UI_THEME_DEFS || {};
-      const def = defs[themeName];
-      if (def && Array.isArray(def.rules)) {
-        const kw = def.rules.find((r) => r && r.token === 'keyword' && r.foreground);
-        if (kw && kw.foreground) {
-          const hex = '#' + String(kw.foreground).replace(/^#/, '');
-          const norm = el('div');
-          norm.style.color = hex;
-          document.body.appendChild(norm);
-          try {
-            setVar('--accent-color', getComputedStyle(norm).color);
-            window.__ACCENT_READY = true;
-          } finally {
-            norm.remove();
-          }
+    const defs = window.UI_THEME_DEFS || {};
+    const def = defs[themeName];
+    if (def && Array.isArray(def.rules)) {
+      const kw = def.rules.find((r) => r && r.token === 'keyword' && r.foreground);
+      if (kw && kw.foreground) {
+        const hex = '#' + String(kw.foreground).replace(/^#/, '');
+        const norm = el('div');
+        norm.style.color = hex;
+        document.body.appendChild(norm);
+        try {
+          setVar('--accent-color', getComputedStyle(norm).color);
+          window.__ACCENT_READY = true;
+        } finally {
+          norm.remove();
         }
       }
-    } catch {}
+    }
 
     // If an editor exists, derive surface/text colors from its computed styles
     const editorEl = document.querySelector('.monaco-editor');

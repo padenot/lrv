@@ -2,45 +2,35 @@ import './perf.js';
 import './themes.js';
 import { MonacoApp } from './monaco-app.js';
 
-try {
-  document.title = 'lrv — Loading…';
-} catch {}
+document.title = 'lrv — Loading…';
 
 window.DEBUG = false;
 window.__APP_READY = false;
 
-try {
-  if (window.DEBUG) {
-    window.addEventListener('error', function (e) {
-      try {
-        console.log('[onerror]', e.message, e.filename, e.lineno, e.colno);
-      } catch (_) {}
-    });
-  }
-} catch (_) {}
+if (window.DEBUG) {
+  window.addEventListener('error', function (e) {
+    console.log('[onerror]', e.message, e.filename, e.lineno, e.colno);
+  });
+}
 
-try {
-  performance.mark('page:script-start');
-  window.addEventListener(
-    'DOMContentLoaded',
-    () => {
-      performance.mark('page:dom-content-loaded');
-    },
-    { once: true },
-  );
-  window.addEventListener(
-    'load',
-    () => {
-      performance.mark('page:load-event');
-    },
-    { once: true },
-  );
-} catch {}
+performance.mark('page:script-start');
+window.addEventListener(
+  'DOMContentLoaded',
+  () => {
+    performance.mark('page:dom-content-loaded');
+  },
+  { once: true },
+);
+window.addEventListener(
+  'load',
+  () => {
+    performance.mark('page:load-event');
+  },
+  { once: true },
+);
 
 const app = new MonacoApp();
-try {
-  window.__APP = app;
-} catch {}
+window.__APP = app;
 app.init().then(() => {
   if (window.DEBUG) {
     console.log('Monaco Editor initialized');

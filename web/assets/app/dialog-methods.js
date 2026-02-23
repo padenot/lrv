@@ -215,9 +215,7 @@ export class DialogMethods {
         if (response.ok) {
           this.config = newConfig;
           this.isInline = !this.config.split_view;
-          try {
-            monaco.editor.setTheme(this.config.color_scheme || 'vs-dark');
-          } catch {}
+          monaco.editor.setTheme(this.config.color_scheme || 'vs-dark');
           this.applyThemeToUI(this.config.color_scheme || 'vs-dark');
           saveBtn.textContent = 'Saved!';
 
@@ -250,6 +248,7 @@ export class DialogMethods {
 
   async showSubmitConfirmation() {
     const comments = this.commentManager.getComments();
+    let submit = () => {};
 
     const footerContent = [
       el('button', { className: 'btn-secondary cancel-submit-btn', text: 'Cancel' }),
@@ -260,6 +259,12 @@ export class DialogMethods {
       title: comments.length === 0 ? 'Submit Review' : `Review Comments (${comments.length})`,
       titleId: 'submit-title',
       footerContent,
+      onKeydown: (e) => {
+        if (e.key === 'Enter' && e.shiftKey && (e.ctrlKey || e.metaKey)) {
+          e.preventDefault();
+          submit();
+        }
+      },
     });
 
     if (comments.length === 0) {
@@ -330,7 +335,7 @@ export class DialogMethods {
       body.appendChild(preview);
     });
 
-    const submit = async () => {
+    submit = async () => {
       const submitBtn = footer.querySelector('.confirm-submit-btn');
       submitBtn.disabled = true;
       submitBtn.textContent = 'Submitting...';

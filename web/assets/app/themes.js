@@ -151,6 +151,4 @@ export const UI_THEME_ACCENTS_HEX = {
   vs: '#007acc',
   'hc-light': '#007acc',
 };
-try {
-  window.UIThemeAccentsHex = UI_THEME_ACCENTS_HEX;
-} catch {}
+window.UIThemeAccentsHex = UI_THEME_ACCENTS_HEX;

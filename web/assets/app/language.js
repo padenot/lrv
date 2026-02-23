@@ -26,38 +26,36 @@ export function detectLanguageFromPathAndContent(path, content) {
   }
 
   if (window.monaco && monaco.languages && typeof monaco.languages.getLanguages === 'function') {
-    try {
-      const languages = monaco.languages.getLanguages() || [];
-      for (const lang of languages) {
-        if (!lang || !lang.id) {
-          continue;
-        }
-
-        const fileNames = Array.isArray(lang.filenames) ? lang.filenames : [];
-        if (fileNames.some((name) => String(name).toLowerCase() === lowerBase)) {
-          return lang.id;
-        }
-
-        const extensions = Array.isArray(lang.extensions) ? lang.extensions : [];
-        if (extensions.some((ext) => lowerPath.endsWith(String(ext).toLowerCase()))) {
-          return lang.id;
-        }
-
-        const filePatterns = Array.isArray(lang.filenamePatterns) ? lang.filenamePatterns : [];
-        if (
-          filePatterns.some((pattern) => {
-            try {
-              const rx = globPatternToRegExp(pattern);
-              return rx.test(baseName) || rx.test(normalizedPath);
-            } catch (_) {
-              return false;
-            }
-          })
-        ) {
-          return lang.id;
-        }
+    const languages = monaco.languages.getLanguages() || [];
+    for (const lang of languages) {
+      if (!lang || !lang.id) {
+        continue;
       }
-    } catch (_) {}
+
+      const fileNames = Array.isArray(lang.filenames) ? lang.filenames : [];
+      if (fileNames.some((name) => String(name).toLowerCase() === lowerBase)) {
+        return lang.id;
+      }
+
+      const extensions = Array.isArray(lang.extensions) ? lang.extensions : [];
+      if (extensions.some((ext) => lowerPath.endsWith(String(ext).toLowerCase()))) {
+        return lang.id;
+      }
+
+      const filePatterns = Array.isArray(lang.filenamePatterns) ? lang.filenamePatterns : [];
+      if (
+        filePatterns.some((pattern) => {
+          try {
+            const rx = globPatternToRegExp(pattern);
+            return rx.test(baseName) || rx.test(normalizedPath);
+          } catch (_) {
+            return false;
+          }
+        })
+      ) {
+        return lang.id;
+      }
+    }
   }
 
   const extensionMap = {

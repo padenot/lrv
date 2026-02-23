@@ -39,41 +39,39 @@ export class FileEditorMethods {
       return;
     }
     this._eagerPrefetchStarted = true;
-    try {
-      const paths = (this.files || []).map((f) => f.path).filter(Boolean);
-      const toFetch = paths.filter((p) => !this.fileCache[p]);
-      if (toFetch.length === 0) {
-        return;
+    const paths = (this.files || []).map((f) => f.path).filter(Boolean);
+    const toFetch = paths.filter((p) => !this.fileCache[p]);
+    if (toFetch.length === 0) {
+      return;
+    }
+    if (window.DEBUG) {
+      console.log('[prefetch] warming', toFetch.length, 'files');
+    }
+    const concurrency = 8;
+    let i = 0;
+    const nextBatch = () => {
+      const batch = [];
+      for (let k = 0; k < concurrency && i < toFetch.length; k++, i++) {
+        const p = toFetch[i];
+        batch.push(
+          Promise.all([
+            fetchJSON(`/api/file?path=${encodeURIComponent(p)}&side=old`),
+            fetchJSON(`/api/file?path=${encodeURIComponent(p)}&side=new`),
+          ])
+            .then(([oldData, newData]) => {
+              this.fileCache[p] = { old: oldData.content || '', new: newData.content || '' };
+            })
+            .catch(() => {}),
+        );
       }
-      if (window.DEBUG) {
-        console.log('[prefetch] warming', toFetch.length, 'files');
-      }
-      const concurrency = 8;
-      let i = 0;
-      const nextBatch = () => {
-        const batch = [];
-        for (let k = 0; k < concurrency && i < toFetch.length; k++, i++) {
-          const p = toFetch[i];
-          batch.push(
-            Promise.all([
-              fetchJSON(`/api/file?path=${encodeURIComponent(p)}&side=old`),
-              fetchJSON(`/api/file?path=${encodeURIComponent(p)}&side=new`),
-            ])
-              .then(([oldData, newData]) => {
-                this.fileCache[p] = { old: oldData.content || '', new: newData.content || '' };
-              })
-              .catch(() => {}),
-          );
-        }
-        return Promise.all(batch);
-      };
-      while (i < toFetch.length) {
-        await nextBatch();
-      }
-      if (window.DEBUG) {
-        console.log('[prefetch] done');
-      }
-    } catch {}
+      return Promise.all(batch);
+    };
+    while (i < toFetch.length) {
+      await nextBatch();
+    }
+    if (window.DEBUG) {
+      console.log('[prefetch] done');
+    }
   }
   setupSidebarResizer() {
     const sidebar = document.getElementById('sidebar');
@@ -213,21 +211,15 @@ export class FileEditorMethods {
 
     // Dispose old models and widget; keep editor instance
     if (this.originalModel) {
-      try {
-        this.originalModel.dispose();
-      } catch (e) {}
+      this.originalModel.dispose();
       this.originalModel = null;
     }
     if (this.modifiedModel) {
-      try {
-        this.modifiedModel.dispose();
-      } catch (e) {}
+      this.modifiedModel.dispose();
       this.modifiedModel = null;
     }
     if (this.currentWidget && this.currentWidgetEditor) {
-      try {
-        this.currentWidgetEditor.removeContentWidget(this.currentWidget);
-      } catch (e) {}
+      this.currentWidgetEditor.removeContentWidget(this.currentWidget);
       this.currentWidget = null;
       this.currentWidgetEditor = null;
     }
@@ -279,19 +271,17 @@ export class FileEditorMethods {
     const language = detectLanguageFromPathAndContent(detectionPath, newContent || oldContent);
 
     // Show/hide banner when old content is unavailable but new content exists
-    try {
-      const oldBanner = $('#old-missing-banner');
-      if (oldBanner) {
-        const status = String((this.files[index] && this.files[index].status) || '').toLowerCase();
-        const isAdded = status === 'added';
-        const show =
-          !isAdded &&
-          (!this.fileCache[file.path].old || this.fileCache[file.path].old.length === 0) &&
-          this.fileCache[file.path].new &&
-          this.fileCache[file.path].new.length > 0;
-        oldBanner.style.display = show ? '' : 'none';
-      }
-    } catch (_) {}
+    const oldBanner = $('#old-missing-banner');
+    if (oldBanner) {
+      const status = String((this.files[index] && this.files[index].status) || '').toLowerCase();
+      const isAdded = status === 'added';
+      const show =
+        !isAdded &&
+        (!this.fileCache[file.path].old || this.fileCache[file.path].old.length === 0) &&
+        this.fileCache[file.path].new &&
+        this.fileCache[file.path].new.length > 0;
+      oldBanner.style.display = show ? '' : 'none';
+    }
     window.Perf.mark('loadFile:models:start');
     this.originalModel = monaco.editor.createModel(oldContent, language);
     this.modifiedModel = monaco.editor.createModel(newContent, language);
@@ -321,37 +311,35 @@ export class FileEditorMethods {
     // Monaco finishes its async diff/hideUnchangedRegions computation; a plain
     // setScrollTop(0) here would be overridden by that async step.  The
     // listener fires well before the 100 ms jumpToHunk timer.
-    try {
-      const scrollReset = this.editor.onDidUpdateDiff(() => {
-        scrollReset.dispose();
-        this.editor.getModifiedEditor().setScrollTop(0);
-        this.editor.getOriginalEditor().setScrollTop(0);
-      });
-      this.editor.updateOptions({
-        renderSideBySide: !this.isInline,
-        theme: theme,
-        fontFamily: mono,
-        glyphMargin: true,
-        folding: false,
-        lineDecorationsWidth: 0,
-        scrollBeyondLastLine: true,
-        hideUnchangedRegions: MONACO_HIDE_UNCHANGED,
-      });
-      const opts = {
-        smoothScrolling: !reduceMotion,
-        glyphMargin: true,
-        folding: false,
-        scrollBeyondLastLine: true,
-      };
-      const me = this.editor.getModifiedEditor();
-      const oe = this.editor.getOriginalEditor();
-      if (me.getModel()) {
-        me.updateOptions(opts);
-      }
-      if (oe.getModel()) {
-        oe.updateOptions(opts);
-      }
-    } catch (_) {}
+    const scrollReset = this.editor.onDidUpdateDiff(() => {
+      scrollReset.dispose();
+      this.editor.getModifiedEditor().setScrollTop(0);
+      this.editor.getOriginalEditor().setScrollTop(0);
+    });
+    this.editor.updateOptions({
+      renderSideBySide: !this.isInline,
+      theme: theme,
+      fontFamily: mono,
+      glyphMargin: true,
+      folding: false,
+      lineDecorationsWidth: 0,
+      scrollBeyondLastLine: true,
+      hideUnchangedRegions: MONACO_HIDE_UNCHANGED,
+    });
+    const opts = {
+      smoothScrolling: !reduceMotion,
+      glyphMargin: true,
+      folding: false,
+      scrollBeyondLastLine: true,
+    };
+    const me = this.editor.getModifiedEditor();
+    const oe = this.editor.getOriginalEditor();
+    if (me.getModel()) {
+      me.updateOptions(opts);
+    }
+    if (oe.getModel()) {
+      oe.updateOptions(opts);
+    }
     // Record end after the new models are set and painted
     window.Perf.mark('loadFile:paint-wait:start');
     requestAnimationFrame(() =>
@@ -365,39 +353,35 @@ export class FileEditorMethods {
         window.Perf.recordFileSwitchEnd();
         window.Perf.mark('loadFile:end');
         window.Perf.measure('loadFile:total', 'loadFile:start', 'loadFile:end');
-        try {
-          if (window.DEBUG) {
-            const e = performance.getEntriesByName('fileSwitch');
-            const d = e && e.length ? e[e.length - 1].duration : null;
-            if (d != null) {
-              console.log('[perf] fileSwitch ms:', Math.round(d));
-            }
+        if (window.DEBUG) {
+          const e = performance.getEntriesByName('fileSwitch');
+          const d = e && e.length ? e[e.length - 1].duration : null;
+          if (d != null) {
+            console.log('[perf] fileSwitch ms:', Math.round(d));
           }
-        } catch {}
+        }
         // Derive accent color from a visible keyword token if present (prefer 'function'/'const'/'import')
-        try {
-          const prefs = ['function', 'const', 'import', 'class', 'return', 'if', 'export', 'let'];
-          const spans = Array.from(document.querySelectorAll('.monaco-editor .view-line span'));
-          let found = null;
-          for (const p of prefs) {
-            for (const s of spans) {
-              const txt = (s.textContent || '').trim();
-              if (txt === p) {
-                found = s;
-                break;
-              }
-            }
-            if (found) {
+        const prefs = ['function', 'const', 'import', 'class', 'return', 'if', 'export', 'let'];
+        const spans = Array.from(document.querySelectorAll('.monaco-editor .view-line span'));
+        let found = null;
+        for (const p of prefs) {
+          for (const s of spans) {
+            const txt = (s.textContent || '').trim();
+            if (txt === p) {
+              found = s;
               break;
             }
           }
           if (found) {
-            const col = getComputedStyle(found).color;
-            if (col) {
-              document.documentElement.style.setProperty('--accent-color', col);
-            }
+            break;
           }
-        } catch {}
+        }
+        if (found) {
+          const col = getComputedStyle(found).color;
+          if (col) {
+            document.documentElement.style.setProperty('--accent-color', col);
+          }
+        }
         markAppReady();
       }),
     );
