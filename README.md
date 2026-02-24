@@ -1,181 +1,93 @@
 # lrv
 
-Local code review tool for LLM agents. A CLI tool that spawns a local web server for reviewing git diffs with line-level comments.
+Local code review tool for LLM agents.
 
-## Features
+`lrv` reads a unified diff (from stdin, `--cmd`, or `--file`), serves a local Monaco-based review UI, and prints submitted comments to stdout as JSON or text.
 
-- **VCS Agnostic**: Works with any version control system that produces unified diff format (git, jj, hg, etc.)
-- **Line-Level Comments**: Click or drag to select lines and add comments
-- **Syntax Highlighting**: Beautiful diff view with color-coded changes
-- **Batch Mode**: Review entire diff and submit all comments at once
-- **Network Support**: Binds to 0.0.0.0 for remote access (SSH, Tailscale, etc.)
+## Quick Start
 
-## Installation
+Use the installed binary:
 
 ```bash
-cargo install --path .
+git diff | lrv
 ```
 
-Or run directly with cargo:
+Use the dev binary from this repo:
 
 ```bash
-cargo run -- [OPTIONS]
+git diff | cargo run --bin lrv --
+```
+
+Review a specific commit (recommended over `git diff HEAD^`):
+
+```bash
+git show HEAD^ | cargo run --bin lrv --
+```
+
+## Diff Input Modes
+
+```bash
+# Read stdin
+git diff --staged | lrv
+
+# Run a command
+lrv --cmd "git diff --staged"
+lrv --cmd "jj diff --git"
+
+# Read a patch file
+lrv --file changes.patch
+```
+
+## CLI Options
+
+```text
+--cmd <CMD>        Command to run to get diff (e.g., "git diff", "jj diff")
+--file <FILE>      Read diff from file instead of stdin
+--port <PORT>      Port to bind server to (default: random available port)
+--bind <BIND>      Bind address(es), can be passed multiple times (default: 127.0.0.1)
+--public           Bind on all interfaces (equivalent to --bind 0.0.0.0)
+--tailscale        Also bind to local Tailscale IPv4 if detected
+--no-open          Don't auto-open browser
+--format <FORMAT>  Output format: json or text (default: json)
+--title <TITLE>    Optional title shown in the UI header
+--dev-log          Enable development HTTP tracing
 ```
 
 ## Development
 
-This project uses [`just`](https://github.com/casey/just) for task automation. Install it with:
+`just` is used for common workflows:
 
 ```bash
-brew install just  # macOS
-cargo install just # or via cargo
-```
-
-Common tasks:
-
-```bash
-just              # Show all available commands
-just build        # Build the project
-just test         # Run all tests (unit + e2e)
-just test-unit    # Run Rust unit tests only
-just test-e2e     # Run e2e tests with Playwright
-just review       # Run lrv on current git diff
-just ci           # Full CI workflow (format, lint, build, test)
-```
-
-### Running Tests
-
-**Unit tests:**
-```bash
+just build
 just test-unit
-# or: cargo test
+just test-e2e
+just test
+just fmt
+just fmt-web
+just lint
 ```
 
-**E2E tests:**
-```bash
-just setup-e2e    # First time only: install dependencies
-just test-e2e     # Run e2e tests in headless Firefox
-```
-
-The e2e tests run in isolated temporary git repositories to avoid modifying your working directory.
-
-## Usage
-
-### Pipe diff from stdin
+First-time e2e setup:
 
 ```bash
-git diff | lrv
-jj diff | lrv
-hg diff | lrv
-```
-
-### Run a command to get diff
-
-```bash
-lrv --cmd "git diff --staged"
-lrv --cmd "jj diff -r @"
-```
-
-### Read diff from file
-
-```bash
-lrv --file changes.patch
-```
-
-## Options
-
-```
---cmd <COMMAND>         Command to run to get diff (e.g., "git diff")
---file <FILE>           Read diff from file instead of stdin
---port <PORT>           Specific port (default: random available port)
---bind <ADDR>           Bind address (can be passed multiple times; default: 127.0.0.1)
---public                Shorthand for --bind 0.0.0.0 (shows a banner in UI)
---tailscale             Also bind on detected Tailscale IPv4 (in addition to localhost)
---no-open               Don't auto-open browser
---format <FORMAT>       Output format: json (default) or text
---title <TITLE>         Optional title to display in the UI header
---dev-log               Enable development HTTP tracing (tower_http::trace)
-```
-
-## Review Workflow
-
-1. Run lrv with your diff source
-2. Browser opens automatically (or use the displayed URLs for remote access)
-3. Click on line numbers to add comments
-4. Select severity: comment, suggestion, issue, or nitpick
-5. Click "Submit Review" when done
-6. Comments are printed to stdout in JSON/text format
-
-## Keyboard Shortcuts
-
-Press `?` in the web UI to see all available keyboard shortcuts. Key bindings include navigation between files and hunks, adding comments, and submitting reviews.
-
-## Output Format
-
-### JSON (default)
-
-```json
-{
-  "status": "completed",
-  "comments": [
-    {
-      "file": "src/main.rs",
-      "start_line": 42,
-      "end_line": 45,
-      "side": "new",
-      "body": "Consider using a match here instead",
-      "severity": "suggestion"
-    }
-  ],
-  "summary": "1 comment on 1 file"
-}
+just setup-e2e
 ```
 
 ## Architecture
 
-```
-                stdin/--cmd
-┌─────────────┐    (unified diff)    ┌──────────────────┐
-│ git/jj/hg   │ ──────────────────► │  Rust Server     │
-└─────────────┘                      │  - axum          │
-                                     │  - diff parser   │
-┌─────────────────┐     HTTP         └────────┬─────────┘
-│  Browser        │ ◄──────────────►          │
-│  - Vanilla TS   │                           │ stdout (JSON)
-└─────────────────┘                  ┌──────────────────┐
-                                     │  LLM Agent       │
-                                     └──────────────────┘
+```text
+stdin/--cmd/--file -> Rust server (axum) -> Browser UI (Monaco)
+                                         -> stdout (review comments)
 ```
 
-### Key Components
+Key source files:
 
-- **`src/main.rs`** - CLI argument parsing, server lifecycle, project context detection
-- **`src/server.rs`** - Axum web server, HTTP routes, embeds web assets at compile time
-- **`src/diff.rs`** - Unified diff parser (handles git/jj/hg format)
-- **`src/types.rs`** - Shared data structures between Rust and frontend
-- **`src/output.rs`** - Formats review output as JSON or text
-- **`web/dist/index.html`** - Single-file web UI (vanilla JS, embedded at compile time)
-- **`e2e/`** - Playwright e2e tests in Firefox
-
-### Modifying the Frontend
-
-The web UI is embedded in the binary at compile time via `include_str!()`. After editing `web/dist/index.html`:
-
-```bash
-just build  # Rebuild to embed the updated HTML
-```
-
-For vendored assets (Monaco + fonts) and how to update them, see `docs/VENDORED_ASSETS.md`.
-
-## Credits
-
-### Monaco Editor Themes
-
-This project includes Monaco editor themes adapted from the following excellent VSCode themes:
-
-- **GitHub Theme** - [primer/github-vscode-theme](https://github.com/primer/github-vscode-theme)
-- **Firefox DevTools Theme** - [heronsilva/firefox-theme-vscode](https://github.com/heronsilva/firefox-theme-vscode)
-- **Solarized Theme** - [braver/vscode-solarized](https://github.com/braver/vscode-solarized)
+- `src/main.rs`: CLI, input handling, server lifecycle
+- `src/server.rs`: HTTP routes, file content resolution, static assets
+- `src/diff.rs`: unified diff parser (git/jj/hg)
+- `src/output.rs`: review output formatting
+- `web/dist/index.html`: embedded app shell
+- `web/assets/app/*.js`: frontend modules
 
 ## License
 
