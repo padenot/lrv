@@ -3,7 +3,9 @@ import { CommentManager } from './comments.js';
 import { fetchJSON } from './api.js';
 import { CUSTOM_THEMES } from './themes.js';
 
-import { FileEditorMethods } from './file-editor-methods.js';
+import { FileDataMethods } from './file-data-methods.js';
+import { FileListMethods } from './file-list-methods.js';
+import { FileLoadingMethods } from './file-loading-methods.js';
 import { NavigationMethods } from './navigation-methods.js';
 import { CommitMethods } from './commit-methods.js';
 import { CommentsUIMethods } from './comments-ui-methods.js';
@@ -350,10 +352,11 @@ export class MonacoApp {
     // Keyboard shortcuts
     this.setupKeyboardShortcuts();
   }
-
 }
 
-applyMixin(MonacoApp, FileEditorMethods);
+applyMixin(MonacoApp, FileDataMethods);
+applyMixin(MonacoApp, FileListMethods);
+applyMixin(MonacoApp, FileLoadingMethods);
 applyMixin(MonacoApp, NavigationMethods);
 applyMixin(MonacoApp, CommitMethods);
 applyMixin(MonacoApp, CommentsUIMethods);

@@ -1,198 +1,10 @@
-import { $, clearEl, el } from './dom.js';
-import { fetchJSON } from './api.js';
+import { $ } from './dom.js';
 import { detectLanguageFromPathAndContent } from './language.js';
-import { MONACO_HIDE_UNCHANGED, computeHunkRanges } from './diff-utils.js';
+import { MONACO_HIDE_UNCHANGED } from './diff-utils.js';
 import { monoFontStack, prefersReducedMotion } from './font.js';
 import { markAppReady } from './ui-signals.js';
 
-export class FileEditorMethods {
-  async fetchFilePair(filePath) {
-    if (this.fileCache[filePath]) {
-      return this.fileCache[filePath];
-    }
-
-    const [oldData, newData] = await Promise.all([
-      fetchJSON(`/api/file?path=${encodeURIComponent(filePath)}&side=old`).catch((err) => {
-        if (window.DEBUG) {
-          console.error('[app] old fetch failed', err);
-        }
-        return { content: '' };
-      }),
-      fetchJSON(`/api/file?path=${encodeURIComponent(filePath)}&side=new`).catch((err) => {
-        if (window.DEBUG) {
-          console.error('[app] new fetch failed', err);
-        }
-        return { content: '' };
-      }),
-    ]);
-
-    this.fileCache[filePath] = {
-      old: oldData.content || '',
-      new: newData.content || '',
-    };
-    return this.fileCache[filePath];
-  }
-
-  // When we detect slow file fetches, eagerly prefetch the rest to warm caches
-  async eagerPrefetchAllFiles() {
-    if (this._eagerPrefetchStarted) {
-      return;
-    }
-    this._eagerPrefetchStarted = true;
-    const paths = (this.files || []).map((f) => f.path).filter(Boolean);
-    const toFetch = paths.filter((p) => !this.fileCache[p]);
-    if (toFetch.length === 0) {
-      return;
-    }
-    if (window.DEBUG) {
-      console.log('[prefetch] warming', toFetch.length, 'files');
-    }
-    const concurrency = 8;
-    let i = 0;
-    const nextBatch = () => {
-      const batch = [];
-      for (let k = 0; k < concurrency && i < toFetch.length; k++, i++) {
-        const p = toFetch[i];
-        batch.push(
-          Promise.all([
-            fetchJSON(`/api/file?path=${encodeURIComponent(p)}&side=old`),
-            fetchJSON(`/api/file?path=${encodeURIComponent(p)}&side=new`),
-          ])
-            .then(([oldData, newData]) => {
-              this.fileCache[p] = { old: oldData.content || '', new: newData.content || '' };
-            })
-            .catch(() => {}),
-        );
-      }
-      return Promise.all(batch);
-    };
-    while (i < toFetch.length) {
-      await nextBatch();
-    }
-    if (window.DEBUG) {
-      console.log('[prefetch] done');
-    }
-  }
-  setupSidebarResizer() {
-    const sidebar = document.getElementById('sidebar');
-    const resizer = document.getElementById('sidebar-resizer');
-    let isResizing = false;
-
-    resizer.addEventListener('mousedown', (e) => {
-      isResizing = true;
-      resizer.classList.add('dragging');
-      document.body.style.cursor = 'ew-resize';
-      document.body.style.userSelect = 'none';
-      e.preventDefault();
-    });
-
-    document.addEventListener('mousemove', (e) => {
-      if (!isResizing) {
-        return;
-      }
-      const newWidth = e.clientX;
-      if (newWidth >= 150 && newWidth <= 600) {
-        sidebar.style.width = newWidth + 'px';
-      }
-    });
-
-    document.addEventListener('mouseup', () => {
-      if (isResizing) {
-        isResizing = false;
-        resizer.classList.remove('dragging');
-        document.body.style.cursor = '';
-        document.body.style.userSelect = '';
-      }
-    });
-  }
-
-  renderFileList() {
-    const list = document.getElementById('file-list');
-    clearEl(list);
-
-    // Optional pseudo-file for commit (when reviewing full commits)
-    const hasCommit = !!(this.diff && (this.diff.commit_message || this.diff.commit_hash));
-    if (hasCommit) {
-      const li = el('li', {
-        className: this.currentFileIsCommit ? 'active' : '',
-        attrs: { 'data-commit': '1' },
-      });
-
-      const left = el('span', { className: 'file-left' }, [el('span', { text: 'Commit' })]);
-
-      const right = el('span', { className: 'file-right' });
-      const commentCount = this.commentManager.getCommentsForFile('(commit)').length;
-      if (commentCount > 0) {
-        left.appendChild(
-          el('span', { className: 'file-comment-badge', text: String(commentCount) }),
-        );
-      }
-
-      right.appendChild(el('span', { className: 'file-status', text: 'C' }));
-
-      li.appendChild(left);
-      li.appendChild(right);
-      list.appendChild(li);
-    }
-
-    this.files.forEach((file, index) => {
-      const li = el('li', {
-        className: !this.currentFileIsCommit && index === this.currentFileIndex ? 'active' : '',
-        attrs: { 'data-index': index },
-      });
-
-      // Left: name + (optional) comment count
-      const left = el('span', { className: 'file-left' });
-      const name = el('span');
-      // Display renames clearly as "old.txt → new.txt"
-      if (file.status === 'renamed' && file.old_path) {
-        name.textContent = `${file.old_path} → ${file.path}`;
-      } else {
-        name.textContent = file.path;
-      }
-      left.appendChild(name);
-
-      const commentCount = this.commentManager.getCommentsForFile(file.path).length;
-      if (commentCount > 0) {
-        left.appendChild(
-          el('span', { className: 'file-comment-badge', text: String(commentCount) }),
-        );
-      }
-
-      // Right: per-file +/- and status
-      const right = el('span', { className: 'file-right' });
-
-      // Compute per-file additions/deletions (serde lowercases enum and renames to `type`)
-      const added = (file.hunks || []).reduce(
-        (acc, h) => acc + (h.lines || []).filter((l) => l && l.type === 'add').length,
-        0,
-      );
-      const deleted = (file.hunks || []).reduce(
-        (acc, h) => acc + (h.lines || []).filter((l) => l && l.type === 'delete').length,
-        0,
-      );
-
-      right.appendChild(
-        el('span', { className: 'file-delta' }, [
-          el('span', { className: 'delta-add', text: `+${added}` }),
-          ' ',
-          el('span', { className: 'delta-del', text: `-${deleted}` }),
-        ]),
-      );
-
-      right.appendChild(
-        el('span', {
-          className: `file-status ${file.status}`,
-          text: file.status[0].toUpperCase(),
-        }),
-      );
-
-      li.appendChild(left);
-      li.appendChild(right);
-      list.appendChild(li);
-    });
-  }
-
+export class FileLoadingMethods {
   async loadFile(index) {
     this.currentFileIsCommit = false;
     if (window.DEBUG) {
@@ -309,7 +121,7 @@ export class FileEditorMethods {
     // Now that models are bound, update diff editor + sub-editors.
     // Register a one-time onDidUpdateDiff listener to scroll to top after
     // Monaco finishes its async diff/hideUnchangedRegions computation; a plain
-    // setScrollTop(0) here would be overridden by that async step.  The
+    // setScrollTop(0) here would be overridden by that async step. The
     // listener fires well before the 100 ms jumpToHunk timer.
     const scrollReset = this.editor.onDidUpdateDiff(() => {
       scrollReset.dispose();
@@ -431,13 +243,4 @@ export class FileEditorMethods {
       }, 100);
     }
   }
-
-  initFileHunks(file) {
-    if (!this.fileHunks[file.path]) {
-      const { hunkRanges } = computeHunkRanges(file.hunks);
-      this.fileHunks[file.path] = hunkRanges;
-      this.currentHunkIndex[file.path] = 0;
-    }
-  }
-
 }
