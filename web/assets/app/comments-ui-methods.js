@@ -170,5 +170,4 @@ export class CommentsUIMethods {
     document.getElementById('comment-count').textContent = count.toString();
     this.renderFileList();
   }
-
 }

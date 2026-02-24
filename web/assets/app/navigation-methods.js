@@ -391,5 +391,4 @@ export class NavigationMethods {
     const side = hunkRange.side === 'old' ? 'old' : 'new';
     this.showCommentDialog(file.path, hunkRange.start, hunkRange.start, side);
   }
-
 }

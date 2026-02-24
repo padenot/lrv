@@ -54,7 +54,11 @@ export function markAppReady() {
         if (performance.getEntriesByName('init:first-line-visible').length === 0) {
           window.Perf.mark('init:first-line-visible');
           if (performance.getEntriesByName('init:start').length > 0) {
-            window.Perf.measure('init:to-first-line-visible', 'init:start', 'init:first-line-visible');
+            window.Perf.measure(
+              'init:to-first-line-visible',
+              'init:start',
+              'init:first-line-visible',
+            );
           }
           if (performance.getEntriesByName('page:script-start').length > 0) {
             window.Perf.measure(

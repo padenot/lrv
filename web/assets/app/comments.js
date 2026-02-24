@@ -15,7 +15,9 @@ export class CommentManager {
   }
 
   findComment(file, line, side) {
-    return this.comments.findIndex((c) => c.file === file && c.start_line === line && c.side === side);
+    return this.comments.findIndex(
+      (c) => c.file === file && c.start_line === line && c.side === side,
+    );
   }
 
   updateComment(index, newBody) {

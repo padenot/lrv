@@ -316,5 +316,4 @@ export class CommitMethods {
 
     setTimeout(() => ta.focus(), 100);
   }
-
 }

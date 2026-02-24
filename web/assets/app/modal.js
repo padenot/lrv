@@ -1,6 +1,12 @@
 import { el } from './dom.js';
 
-export function openModal({ title, titleId, modalClass = '', footerContent = null, onKeydown = null }) {
+export function openModal({
+  title,
+  titleId,
+  modalClass = '',
+  footerContent = null,
+  onKeydown = null,
+}) {
   const overlay = el('div', { className: 'submit-modal-overlay' });
 
   const modal = el('div', { className: `submit-modal${modalClass ? ' ' + modalClass : ''}` });
