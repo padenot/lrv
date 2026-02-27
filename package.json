@@ -10,6 +10,8 @@
     "typescript": "^5.9.3"
   },
   "scripts": {
+    "build:web": "rolldown -c rolldown.config.mjs",
+    "typecheck:web": "tsc -p tsconfig.web.json",
     "lint:web": "eslint web e2e scripts"
   }
 }

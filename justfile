@@ -4,9 +4,11 @@ default:
     @just --list
 
 build:
+    npm run build:web
     cargo build
 
 build-release:
+    npm run build:web
     cargo build --release
 
 install:

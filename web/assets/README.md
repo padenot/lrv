@@ -14,5 +14,12 @@ Place the following here before building release binaries:
 
 Notes:
 - The app prefers these local assets. If missing at runtime, the UI falls back to the Monaco CDN and system fonts, but that is not self‑contained.
+
+## App build
+
+- TypeScript sources live in `web/src/`.
+- Bundled output is written to `web/assets/app/main.js` via:
+  - `npm run build:web`
+- `just build` and `just build-release` run the web build before `cargo build`.
 - When publishing, ensure assets are present so `rust-embed` includes them in the binary.
 - See `THIRD_PARTY_NOTICES.md` for license links (add appropriately).
