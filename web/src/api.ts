@@ -1,9 +1,8 @@
-// @ts-nocheck
 import { el } from './dom';
 
 let fileFetchPending = 0;
-let fileFetchDelayTimer = null;
-let fetchSpinnerEl = null;
+let fileFetchDelayTimer: ReturnType<typeof setTimeout> | null = null;
+let fetchSpinnerEl: HTMLSpanElement | null = null;
 
 function ensureFetchSpinner() {
   if (!fetchSpinnerEl) {
@@ -28,8 +27,9 @@ function showFetchSpinnerDelayed() {
   fileFetchDelayTimer = setTimeout(() => {
     if (fileFetchPending > 0) {
       fetchSpinnerEl.classList.add('visible');
-      if (window.__APP && typeof window.__APP.eagerPrefetchAllFiles === 'function') {
-        window.__APP.eagerPrefetchAllFiles();
+      const app = window.__APP as { eagerPrefetchAllFiles?: () => Promise<void> } | undefined;
+      if (app && typeof app.eagerPrefetchAllFiles === 'function') {
+        app.eagerPrefetchAllFiles();
       }
     }
     fileFetchDelayTimer = null;
@@ -48,7 +48,7 @@ function hideFetchSpinnerMaybe() {
   }
 }
 
-export async function fetchJSON(url, options) {
+export async function fetchJSON<T>(url: string, options?: RequestInit): Promise<T> {
   const isFile = typeof url === 'string' && url.startsWith('/api/file');
   if (isFile) {
     fileFetchPending++;
@@ -64,7 +64,7 @@ export async function fetchJSON(url, options) {
         `Request failed ${res.status} ${res.statusText} at ${url}${text ? `: ${text.slice(0, 200)}` : ''}`,
       );
     }
-    return res.json();
+    return (await res.json()) as T;
   } finally {
     if (isFile) {
       fileFetchPending = Math.max(0, fileFetchPending - 1);

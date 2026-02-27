@@ -1,11 +1,13 @@
-// @ts-nocheck
-function globPatternToRegExp(pattern) {
+function globPatternToRegExp(pattern: string): RegExp {
   const escaped = String(pattern).replace(/[.+^${}()|[\]\\]/g, '\\$&');
   const regexBody = escaped.replace(/\*/g, '.*').replace(/\?/g, '.');
   return new RegExp(`^${regexBody}$`, 'i');
 }
 
-export function detectLanguageFromPathAndContent(path, content) {
+export function detectLanguageFromPathAndContent(
+  path: string | null | undefined,
+  content: string | null | undefined,
+): string {
   const normalizedPath = String(path || '')
     .replace(/\\/g, '/')
     .replace(/[?#].*$/, '');
@@ -13,7 +15,7 @@ export function detectLanguageFromPathAndContent(path, content) {
   const lowerPath = normalizedPath.toLowerCase();
   const lowerBase = baseName.toLowerCase();
 
-  const fileNameMap = {
+  const fileNameMap: Record<string, string> = {
     dockerfile: 'dockerfile',
     makefile: 'makefile',
     gnumakefile: 'makefile',
@@ -26,7 +28,7 @@ export function detectLanguageFromPathAndContent(path, content) {
     return fileNameMap[lowerBase];
   }
 
-  if (window.monaco && monaco.languages && typeof monaco.languages.getLanguages === 'function') {
+  if (typeof monaco !== 'undefined' && monaco.languages.getLanguages) {
     const languages = monaco.languages.getLanguages() || [];
     for (const lang of languages) {
       if (!lang || !lang.id) {
@@ -59,7 +61,7 @@ export function detectLanguageFromPathAndContent(path, content) {
     }
   }
 
-  const extensionMap = {
+  const extensionMap: Record<string, string> = {
     '.rs': 'rust',
     '.js': 'javascript',
     '.mjs': 'javascript',

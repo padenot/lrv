@@ -6,6 +6,7 @@ interface PerfHelpers {
   recordFileSwitchStart(): void;
   recordFileSwitchEnd(): void;
   getMetrics(): Record<string, unknown>;
+  clear(): void;
 }
 
 type RequireLike = {
@@ -19,7 +20,7 @@ declare global {
   interface Window {
     DEBUG: boolean;
     __APP_READY: boolean;
-    __APP?: { eagerPrefetchAllFiles?: () => Promise<void> };
+    __APP?: unknown;
     __ACCENT_READY?: boolean;
     MONACO_VS_BASE?: string;
     Perf: PerfHelpers;

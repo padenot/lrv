@@ -1,4 +1,3 @@
-// @ts-nocheck
 import './perf';
 import './themes';
 import { MonacoApp } from './monaco-app';
@@ -9,7 +8,7 @@ window.DEBUG = false;
 window.__APP_READY = false;
 
 if (window.DEBUG) {
-  window.addEventListener('error', function (e) {
+  window.addEventListener('error', function (e: ErrorEvent) {
     console.log('[onerror]', e.message, e.filename, e.lineno, e.colno);
   });
 }

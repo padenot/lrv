@@ -1,9 +1,8 @@
-// @ts-nocheck
 window.Perf = {
-  mark: (name) => {
+  mark: (name: string) => {
     performance.mark(name);
   },
-  measure: (name, start, end) => {
+  measure: (name: string, start: string, end: string) => {
     performance.measure(name, { start, end });
   },
   recordFileSwitchStart: () => {
@@ -21,7 +20,8 @@ window.Perf = {
     performance.measure('appInit', { start: 'appInitStart', end: 'appInitEnd' });
   },
   getMetrics: () => {
-    const toDurations = (name) => (performance.getEntriesByName(name) || []).map((e) => e.duration);
+    const toDurations = (name: string) =>
+      (performance.getEntriesByName(name) || []).map((e) => e.duration);
     return { fileSwitch: toDurations('fileSwitch'), appInit: toDurations('appInit') };
   },
   clear: () => {

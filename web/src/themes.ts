@@ -1,5 +1,8 @@
-// @ts-nocheck
-export const CUSTOM_THEMES = {
+import type { editor } from 'monaco-editor';
+
+type ThemeMap = Record<string, editor.IStandaloneThemeData>;
+
+export const CUSTOM_THEMES: ThemeMap = {
   'solarized-dark': {
     base: 'vs-dark',
     inherit: true,

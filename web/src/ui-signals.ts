@@ -1,7 +1,6 @@
-// @ts-nocheck
-let navTimer = null;
+let navTimer: ReturnType<typeof setTimeout> | null = null;
 
-export function showNavIndicator(text) {
+export function showNavIndicator(text: string): void {
   const indicatorEl = document.getElementById('nav-indicator');
   if (!indicatorEl) {
     return;

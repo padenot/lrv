@@ -395,6 +395,8 @@ const clearEl = (node) => {
 //#endregion
 //#region web/src/comments.ts
 var CommentManager = class {
+	comments;
+	listeners;
 	constructor() {
 		this.comments = [];
 		this.listeners = [];
@@ -454,7 +456,8 @@ function showFetchSpinnerDelayed() {
 	fileFetchDelayTimer = setTimeout(() => {
 		if (fileFetchPending > 0) {
 			fetchSpinnerEl.classList.add("visible");
-			if (window.__APP && typeof window.__APP.eagerPrefetchAllFiles === "function") window.__APP.eagerPrefetchAllFiles();
+			const app = window.__APP;
+			if (app && typeof app.eagerPrefetchAllFiles === "function") app.eagerPrefetchAllFiles();
 		}
 		fileFetchDelayTimer = null;
 	}, 400);
@@ -480,7 +483,7 @@ async function fetchJSON(url, options) {
 			const text = await res.text();
 			throw new Error(`Request failed ${res.status} ${res.statusText} at ${url}${text ? `: ${text.slice(0, 200)}` : ""}`);
 		}
-		return res.json();
+		return await res.json();
 	} finally {
 		if (isFile) {
 			fileFetchPending = Math.max(0, fileFetchPending - 1);
@@ -500,13 +503,13 @@ const MONACO_HIDE_UNCHANGED = {
 function computeHunkRanges(hunks) {
 	const hunkRanges = [];
 	(hunks || []).forEach((hunk) => {
-		const newLines = hunk.lines.filter((l) => l.new_line).map((l) => l.new_line);
+		const newLines = hunk.lines.filter((l) => Boolean(l.new_line)).map((l) => l.new_line);
 		if (newLines.length > 0) hunkRanges.push({
 			side: "new",
 			start: Math.min(...newLines),
 			end: Math.max(...newLines)
 		});
-		const deletedOldLines = hunk.lines.filter((l) => l.old_line && l.type === "delete").map((l) => l.old_line);
+		const deletedOldLines = hunk.lines.filter((l) => Boolean(l.old_line) && l.type === "delete").map((l) => l.old_line);
 		if (deletedOldLines.length > 0) hunkRanges.push({
 			side: "old",
 			start: Math.min(...deletedOldLines),
@@ -679,7 +682,7 @@ function detectLanguageFromPathAndContent(path, content) {
 		pipfile: "toml"
 	};
 	if (fileNameMap[lowerBase]) return fileNameMap[lowerBase];
-	if (window.monaco && monaco.languages && typeof monaco.languages.getLanguages === "function") {
+	if (typeof monaco !== "undefined" && monaco.languages.getLanguages) {
 		const languages = monaco.languages.getLanguages() || [];
 		for (const lang of languages) {
 			if (!lang || !lang.id) continue;
@@ -759,6 +762,7 @@ const MONO_FALLBACK = "'Monaco', 'Menlo', 'Consolas', monospace";
 const DEFAULT_MONO_STACK = `'JetBrains Mono', ${MONO_FALLBACK}`;
 function isMonospace(fontName) {
 	const ctx = el("canvas").getContext("2d");
+	if (!ctx) return false;
 	ctx.font = `72px '${fontName}'`;
 	return Math.abs(ctx.measureText("m").width - ctx.measureText("i").width) < 1;
 }
@@ -1367,7 +1371,7 @@ function openModal({ title, titleId, modalClass = "", footerContent = null, onKe
 	modal.setAttribute("role", "dialog");
 	modal.setAttribute("aria-modal", "true");
 	if (titleId) modal.setAttribute("aria-labelledby", titleId);
-	const focusable = () => Array.from(modal.querySelectorAll("button, [href], input, select, textarea, [tabindex]:not([tabindex=\"-1\"])")).filter((el) => !el.hasAttribute("disabled"));
+	const focusable = () => Array.from(modal.querySelectorAll("button, [href], input, select, textarea, [tabindex]:not([tabindex=\"-1\"])")).filter((focusEl) => !focusEl.hasAttribute("disabled"));
 	const onTrap = (e) => {
 		if (e.key === "Tab") {
 			const nodes = focusable();
@@ -1397,7 +1401,8 @@ function openModal({ title, titleId, modalClass = "", footerContent = null, onKe
 	};
 	document.addEventListener("keydown", handleEscape);
 	if (onKeydown) document.addEventListener("keydown", onKeydown);
-	header.querySelector(".submit-modal-close").onclick = close;
+	const closeButton = header.querySelector(".submit-modal-close");
+	if (closeButton) closeButton.onclick = close;
 	overlay.addEventListener("click", (e) => {
 		if (e.target === overlay) close();
 	});

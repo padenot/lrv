@@ -1,5 +1,23 @@
-// @ts-nocheck
-export const KEYBOARD_SHORTCUTS = [
+export type KeyboardAction =
+  | 'nextFile'
+  | 'previousFile'
+  | 'nextHunk'
+  | 'previousHunk'
+  | 'lineDown'
+  | 'lineUp'
+  | 'toggleView'
+  | 'openComment'
+  | 'clearFocus'
+  | 'submitReview'
+  | 'showHelp';
+
+export type KeyboardShortcut = {
+  keys: string[];
+  action: KeyboardAction;
+  description: string;
+};
+
+export const KEYBOARD_SHORTCUTS: KeyboardShortcut[] = [
   { keys: ['Mod+ArrowDown', 'Mod+J'], action: 'nextFile', description: 'Next file' },
   { keys: ['Mod+ArrowUp', 'Mod+K'], action: 'previousFile', description: 'Previous file' },
   { keys: ['Shift+ArrowDown', 'Shift+J'], action: 'nextHunk', description: 'Next hunk' },

@@ -1,5 +1,20 @@
-// @ts-nocheck
 import { el } from './dom';
+
+type OpenModalParams = {
+  title: string;
+  titleId?: string;
+  modalClass?: string;
+  footerContent?: Node | Node[] | null;
+  onKeydown?: ((e: KeyboardEvent) => void) | null;
+};
+
+type OpenModalResult = {
+  overlay: HTMLDivElement;
+  modal: HTMLDivElement;
+  body: HTMLDivElement;
+  footer: HTMLDivElement;
+  close: () => void;
+};
 
 export function openModal({
   title,
@@ -7,7 +22,7 @@ export function openModal({
   modalClass = '',
   footerContent = null,
   onKeydown = null,
-}) {
+}: OpenModalParams): OpenModalResult {
   const overlay = el('div', { className: 'submit-modal-overlay' });
 
   const modal = el('div', { className: `submit-modal${modalClass ? ' ' + modalClass : ''}` });
@@ -39,7 +54,7 @@ export function openModal({
   overlay.appendChild(modal);
   document.body.appendChild(overlay);
 
-  const previouslyFocused = document.activeElement;
+  const previouslyFocused = document.activeElement as HTMLElement | null;
   modal.setAttribute('role', 'dialog');
   modal.setAttribute('aria-modal', 'true');
   if (titleId) {
@@ -51,9 +66,9 @@ export function openModal({
       modal.querySelectorAll(
         'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
       ),
-    ).filter((el) => !el.hasAttribute('disabled'));
+    ).filter((focusEl) => !focusEl.hasAttribute('disabled')) as HTMLElement[];
 
-  const onTrap = (e) => {
+  const onTrap = (e: KeyboardEvent) => {
     if (e.key === 'Tab') {
       const nodes = focusable();
       if (nodes.length === 0) {
@@ -73,7 +88,7 @@ export function openModal({
 
   document.addEventListener('keydown', onTrap);
 
-  let handleEscape;
+  let handleEscape: ((e: KeyboardEvent) => void) | undefined;
   const close = () => {
     overlay.remove();
     document.removeEventListener('keydown', onTrap);
@@ -88,7 +103,7 @@ export function openModal({
     }
   };
 
-  handleEscape = (e) => {
+  handleEscape = (e: KeyboardEvent) => {
     if (e.key === 'Escape') {
       close();
     }
@@ -99,9 +114,12 @@ export function openModal({
     document.addEventListener('keydown', onKeydown);
   }
 
-  header.querySelector('.submit-modal-close').onclick = close;
+  const closeButton = header.querySelector<HTMLButtonElement>('.submit-modal-close');
+  if (closeButton) {
+    closeButton.onclick = close;
+  }
 
-  overlay.addEventListener('click', (e) => {
+  overlay.addEventListener('click', (e: MouseEvent) => {
     if (e.target === overlay) {
       close();
     }

@@ -1,8 +1,21 @@
-// @ts-nocheck
-export const $ = (sel, root = document) => root.querySelector(sel);
-export const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+export const $ = <T extends Element = Element>(sel: string, root: ParentNode = document) =>
+  root.querySelector<T>(sel);
+export const $$ = <T extends Element = Element>(sel: string, root: ParentNode = document) =>
+  Array.from(root.querySelectorAll<T>(sel));
 
-export const el = (tag, { className, text, attrs } = {}, children = null) => {
+type ElOptions = {
+  className?: string;
+  text?: string | number;
+  attrs?: Record<string, string | number | boolean | null | undefined>;
+};
+
+type ElChild = Node | string | number | null | undefined;
+
+export const el = <K extends keyof HTMLElementTagNameMap>(
+  tag: K,
+  { className, text, attrs }: ElOptions = {},
+  children: ElChild[] | null = null,
+): HTMLElementTagNameMap[K] => {
   const node = document.createElement(tag);
   if (className) {
     node.className = className;
@@ -33,7 +46,7 @@ export const el = (tag, { className, text, attrs } = {}, children = null) => {
   return node;
 };
 
-export const clearEl = (node) => {
+export const clearEl = <T extends Element>(node: T): T => {
   node.textContent = '';
   return node;
 };
