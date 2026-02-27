@@ -1,4 +1,5 @@
 import { el } from './dom';
+import { commentStartLine } from './comments';
 import { openModal } from './modal';
 import { fetchJSON } from './api';
 import { IS_MAC } from './platform';
@@ -327,12 +328,12 @@ export class DialogMethods {
     comments.forEach((comment) => {
       const preview = el('div', { className: 'comment-preview' });
 
-      const headerText = `${comment.file}:${comment.start_line} (${comment.side})`;
+      const headerText = `${comment.file}:${commentStartLine(comment)} (${comment.side})`;
       const previewHeader = el('div', { className: 'comment-preview-header', text: headerText });
 
       const fileKey = `${comment.file}:${comment.side}`;
       const lines = fileContents[fileKey] || [];
-      const lineIndex = comment.start_line - 1;
+      const lineIndex = commentStartLine(comment) - 1;
       const startLine = Math.max(0, lineIndex - 1);
       const endLine = Math.min(lines.length, lineIndex + 2);
       const excerpt = lines.slice(startLine, endLine);

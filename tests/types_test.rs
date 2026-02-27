@@ -33,16 +33,19 @@ fn test_diff_response_structure() {
 fn test_comment_structure() {
     let comment = lrv::types::Comment {
         file: "test.rs".to_string(),
-        start_line: 10,
-        end_line: 15,
+        line: lrv::types::CommentLine::Range((10, 15)),
         side: lrv::types::Side::New,
         body: "This needs improvement".to_string(),
-        severity: lrv::types::Severity::Issue,
     };
 
     assert_eq!(comment.file, "test.rs");
-    assert_eq!(comment.start_line, 10);
-    assert_eq!(comment.end_line, 15);
+    match comment.line {
+        lrv::types::CommentLine::Range((start, end)) => {
+            assert_eq!(start, 10);
+            assert_eq!(end, 15);
+        }
+        _ => panic!("expected line range"),
+    }
     assert_eq!(comment.body, "This needs improvement");
 }
 
@@ -60,19 +63,19 @@ fn test_project_context() {
     assert_eq!(context.git_branch, Some("feature/test".to_string()));
 }
 
-/// Test Severity enum
+/// Test CommentLine enum
 #[test]
-fn test_severity_serde() {
+fn test_comment_line_serde() {
     use serde_json;
 
-    let comment = serde_json::json!({
-        "severity": "issue"
-    });
+    let single = serde_json::json!(12);
+    let range = serde_json::json!([10, 15]);
 
-    let severity: lrv::types::Severity =
-        serde_json::from_value(comment["severity"].clone()).unwrap();
+    let l1: lrv::types::CommentLine = serde_json::from_value(single).unwrap();
+    let l2: lrv::types::CommentLine = serde_json::from_value(range).unwrap();
 
-    assert!(matches!(severity, lrv::types::Severity::Issue));
+    assert!(matches!(l1, lrv::types::CommentLine::Single(12)));
+    assert!(matches!(l2, lrv::types::CommentLine::Range((10, 15))));
 }
 
 /// Test Side enum

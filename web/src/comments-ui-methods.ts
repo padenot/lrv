@@ -1,5 +1,6 @@
 import { el } from './dom';
 import { MOD_KEY_LABEL } from './platform';
+import { commentStartLine } from './comments';
 import type { AppContext, Side } from './types/app';
 
 export class CommentsUIMethods {
@@ -27,7 +28,7 @@ export class CommentsUIMethods {
     const modifiedDecorations = comments
       .filter((c) => c.side === 'new')
       .map((comment) => ({
-        range: new monaco.Range(comment.start_line, 1, comment.start_line, 1),
+        range: new monaco.Range(commentStartLine(comment), 1, commentStartLine(comment), 1),
         options: {
           isWholeLine: true,
           glyphMarginClassName: 'codicon codicon-comment',
@@ -39,7 +40,7 @@ export class CommentsUIMethods {
     const originalDecorations = comments
       .filter((c) => c.side === 'old')
       .map((comment) => ({
-        range: new monaco.Range(comment.start_line, 1, comment.start_line, 1),
+        range: new monaco.Range(commentStartLine(comment), 1, commentStartLine(comment), 1),
         options: {
           isWholeLine: true,
           glyphMarginClassName: 'codicon codicon-comment',
@@ -147,11 +148,9 @@ export class CommentsUIMethods {
       } else {
         const comment = {
           file,
-          start_line: fileLineNumber,
-          end_line: fileLineNumber,
+          line: fileLineNumber,
           side,
           body: textarea.value,
-          severity: 'comment',
         };
         this.commentManager.addComment(comment);
       }

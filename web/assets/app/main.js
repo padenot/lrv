@@ -394,6 +394,9 @@ const clearEl = (node) => {
 
 //#endregion
 //#region web/src/comments.ts
+function commentStartLine(comment) {
+	return Array.isArray(comment.line) ? comment.line[0] : comment.line;
+}
 var CommentManager = class {
 	comments;
 	listeners;
@@ -410,7 +413,7 @@ var CommentManager = class {
 		this.notifyListeners();
 	}
 	findComment(file, line, side) {
-		return this.comments.findIndex((c) => c.file === file && c.start_line === line && c.side === side);
+		return this.comments.findIndex((c) => c.file === file && commentStartLine(c) === line && c.side === side);
 	}
 	updateComment(index, newBody) {
 		if (index >= 0 && index < this.comments.length) {
@@ -1511,8 +1514,7 @@ var CommitMethods = class {
 			}
 			const comment = {
 				file: "(commit)",
-				start_line: 1,
-				end_line: 1,
+				line: 1,
 				side: "new",
 				body
 			};
@@ -1613,7 +1615,7 @@ var CommitMethods = class {
 			const lineLabel = el("div");
 			lineLabel.style.fontSize = "11px";
 			lineLabel.style.color = "var(--text-secondary)";
-			lineLabel.textContent = `Line ${c.start_line}`;
+			lineLabel.textContent = `Line ${commentStartLine(c)}`;
 			const bodyRow = el("div");
 			bodyRow.style.display = "flex";
 			bodyRow.style.justifyContent = "space-between";
@@ -1632,7 +1634,7 @@ var CommitMethods = class {
 			del.style.fontSize = "11px";
 			del.style.padding = "4px 8px";
 			del.onclick = () => {
-				const absIndex = this.commentManager.findComment("(commit)", c.start_line, c.side);
+				const absIndex = this.commentManager.findComment("(commit)", commentStartLine(c), c.side);
 				if (absIndex >= 0) {
 					this.commentManager.removeComment(absIndex);
 					this.loadCommitView();
@@ -1692,8 +1694,7 @@ var CommitMethods = class {
 			}
 			const comment = {
 				file: "(commit)",
-				start_line: lineNum,
-				end_line: lineNum,
+				line: lineNum,
 				side: "new",
 				body: text
 			};
@@ -1719,7 +1720,7 @@ var CommentsUIMethods = class {
 		const modifiedEditor = this.editor.getModifiedEditor();
 		const originalEditor = this.editor.getOriginalEditor();
 		const modifiedDecorations = comments.filter((c) => c.side === "new").map((comment) => ({
-			range: new monaco.Range(comment.start_line, 1, comment.start_line, 1),
+			range: new monaco.Range(commentStartLine(comment), 1, commentStartLine(comment), 1),
 			options: {
 				isWholeLine: true,
 				glyphMarginClassName: "codicon codicon-comment",
@@ -1727,7 +1728,7 @@ var CommentsUIMethods = class {
 			}
 		}));
 		const originalDecorations = comments.filter((c) => c.side === "old").map((comment) => ({
-			range: new monaco.Range(comment.start_line, 1, comment.start_line, 1),
+			range: new monaco.Range(commentStartLine(comment), 1, commentStartLine(comment), 1),
 			options: {
 				isWholeLine: true,
 				glyphMarginClassName: "codicon codicon-comment",
@@ -1816,11 +1817,9 @@ var CommentsUIMethods = class {
 			else {
 				const comment = {
 					file,
-					start_line: fileLineNumber,
-					end_line: fileLineNumber,
+					line: fileLineNumber,
 					side,
-					body: textarea.value,
-					severity: "comment"
+					body: textarea.value
 				};
 				this.commentManager.addComment(comment);
 			}
@@ -2079,10 +2078,10 @@ var DialogMethods = class {
 			const preview = el("div", { className: "comment-preview" });
 			const previewHeader = el("div", {
 				className: "comment-preview-header",
-				text: `${comment.file}:${comment.start_line} (${comment.side})`
+				text: `${comment.file}:${commentStartLine(comment)} (${comment.side})`
 			});
 			const lines = fileContents[`${comment.file}:${comment.side}`] || [];
-			const lineIndex = comment.start_line - 1;
+			const lineIndex = commentStartLine(comment) - 1;
 			const startLine = Math.max(0, lineIndex - 1);
 			const endLine = Math.min(lines.length, lineIndex + 2);
 			const excerpt = lines.slice(startLine, endLine);

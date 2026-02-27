@@ -1,4 +1,5 @@
 import { clearEl, el } from './dom';
+import { commentStartLine } from './comments';
 import { openModal } from './modal';
 import { MOD_KEY_LABEL } from './platform';
 import { showNavIndicator } from './ui-signals';
@@ -106,8 +107,7 @@ export class CommitMethods {
       }
       const comment = {
         file: '(commit)',
-        start_line: 1,
-        end_line: 1,
+        line: 1,
         side: 'new' as const,
         body,
       };
@@ -229,7 +229,7 @@ export class CommitMethods {
         const lineLabel = el('div');
         lineLabel.style.fontSize = '11px';
         lineLabel.style.color = 'var(--text-secondary)';
-        lineLabel.textContent = `Line ${c.start_line}`;
+        lineLabel.textContent = `Line ${commentStartLine(c)}`;
 
         const bodyRow = el('div');
         bodyRow.style.display = 'flex';
@@ -248,7 +248,7 @@ export class CommitMethods {
         del.style.fontSize = '11px';
         del.style.padding = '4px 8px';
         del.onclick = () => {
-          const absIndex = this.commentManager.findComment('(commit)', c.start_line, c.side);
+          const absIndex = this.commentManager.findComment('(commit)', commentStartLine(c), c.side);
           if (absIndex >= 0) {
             this.commentManager.removeComment(absIndex);
             this.loadCommitView();
@@ -314,8 +314,7 @@ export class CommitMethods {
       }
       const comment = {
         file: '(commit)',
-        start_line: lineNum,
-        end_line: lineNum,
+        line: lineNum,
         side: 'new' as const,
         body: text,
       };

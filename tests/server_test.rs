@@ -92,11 +92,9 @@ async fn test_comment_storage() {
         let mut comments_lock = comments.lock().await;
         comments_lock.push(lrv::types::Comment {
             file: "test.rs".to_string(),
-            start_line: 1,
-            end_line: 1,
+            line: lrv::types::CommentLine::Single(1),
             side: lrv::types::Side::New,
             body: "test comment".to_string(),
-            severity: lrv::types::Severity::Comment,
         });
     }
 

@@ -39,9 +39,13 @@ fn format_text(comments: &[Comment]) -> String {
     ));
 
     for comment in comments {
+        let line_display = match &comment.line {
+            crate::types::CommentLine::Single(line) => line.to_string(),
+            crate::types::CommentLine::Range((start, end)) => format!("{}-{}", start, end),
+        };
         output.push_str(&format!(
-            "{}:{}-{} [{}] ({:?})\n",
-            comment.file, comment.start_line, comment.end_line, comment.side, comment.severity
+            "{}:{} [{}]\n",
+            comment.file, line_display, comment.side
         ));
         output.push_str(&format!("  {}\n\n", comment.body));
     }

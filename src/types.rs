@@ -67,11 +67,16 @@ pub struct DiffStats {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Comment {
     pub file: String,
-    pub start_line: usize,
-    pub end_line: usize,
+    pub line: CommentLine,
     pub side: Side,
     pub body: String,
-    pub severity: Severity,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum CommentLine {
+    Single(usize),
+    Range((usize, usize)),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -79,15 +84,6 @@ pub struct Comment {
 pub enum Side {
     New,
     Old,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Severity {
-    Comment,
-    Suggestion,
-    Issue,
-    Nitpick,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -1,11 +1,19 @@
+export type CommentLine = number | [number, number];
+
 export type ReviewComment = {
   file: string;
-  start_line: number;
+  line: CommentLine;
   side: 'old' | 'new';
   body: string;
-  severity?: string;
-  end_line?: number;
 };
+
+export function commentStartLine(comment: ReviewComment): number {
+  return Array.isArray(comment.line) ? comment.line[0] : comment.line;
+}
+
+export function commentEndLine(comment: ReviewComment): number {
+  return Array.isArray(comment.line) ? comment.line[1] : comment.line;
+}
 
 export class CommentManager {
   private comments: ReviewComment[];
@@ -28,7 +36,7 @@ export class CommentManager {
 
   findComment(file: string, line: number, side: 'old' | 'new'): number {
     return this.comments.findIndex(
-      (c) => c.file === file && c.start_line === line && c.side === side,
+      (c) => c.file === file && commentStartLine(c) === line && c.side === side,
     );
   }
 
