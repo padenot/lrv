@@ -1,8 +1,9 @@
 import { el } from './dom';
-import { commentEndLine, commentLineIsValid, commentLineLabel, commentStartLine } from './comments';
+import { commentEndLine, commentLineLabel, commentStartLine } from './comments';
 import type { ReviewComment } from './comments';
 import { openModal } from './modal';
 import { fetchJSON } from './api';
+import { resolveAppConfig } from './config';
 import { IS_MAC } from './platform';
 import { KEYBOARD_SHORTCUTS } from './shortcuts';
 import type { AppContext } from './types/app';
@@ -93,7 +94,7 @@ export class DialogMethods {
 
     const form = el('form', { className: 'settings-form' });
 
-    let currentColorScheme = this.config.color_scheme || 'vs-dark';
+    let currentColorScheme = this.config.color_scheme;
     const legacyThemeMap = {
       dark: 'vs-dark',
       light: 'vs',
@@ -103,10 +104,9 @@ export class DialogMethods {
       currentColorScheme = legacyThemeMap[currentColorScheme];
     }
 
-    const currentFont = (this.config.font && this.config.font.trim()) || 'JetBrains Mono';
-    const currentSplitView = this.config.split_view !== undefined ? this.config.split_view : true;
-    const currentAutoCloseTab =
-      this.config.auto_close_tab !== undefined ? this.config.auto_close_tab : true;
+    const currentFont = this.config.font;
+    const currentSplitView = this.config.split_view;
+    const currentAutoCloseTab = this.config.auto_close_tab;
 
     if (window.DEBUG) {
       console.log('Settings modal - current values:', {
@@ -214,12 +214,12 @@ export class DialogMethods {
       saveBtn.textContent = 'Saving...';
 
       const formData = new FormData(form);
-      const newConfig = {
+      const newConfig = resolveAppConfig({
         color_scheme: String(formData.get('color_scheme') || 'vs-dark'),
-        font: (formData.get('font') || '').toString().trim() || 'JetBrains Mono',
+        font: (formData.get('font') || '').toString(),
         split_view: formData.get('split_view') === 'on',
         auto_close_tab: formData.get('auto_close_tab') === 'on',
-      };
+      });
 
       try {
         const response = await fetch('/api/config', {
@@ -231,8 +231,8 @@ export class DialogMethods {
         if (response.ok) {
           this.config = newConfig;
           this.isInline = !this.config.split_view;
-          monaco.editor.setTheme(this.config.color_scheme || 'vs-dark');
-          this.applyThemeToUI(this.config.color_scheme || 'vs-dark');
+          monaco.editor.setTheme(this.config.color_scheme);
+          this.applyThemeToUI(this.config.color_scheme);
           saveBtn.textContent = 'Saved!';
 
           setTimeout(() => {
@@ -362,11 +362,6 @@ export class DialogMethods {
     submit = async () => {
       const submitBtn = footer.querySelector<HTMLButtonElement>('.confirm-submit-btn');
       if (!submitBtn) {
-        return;
-      }
-      const invalid = comments.find((c) => !commentLineIsValid(c.line));
-      if (invalid) {
-        alert(`Invalid comment line range for ${invalid.file}: ${JSON.stringify(invalid.line)}`);
         return;
       }
       submitBtn.disabled = true;

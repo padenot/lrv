@@ -410,14 +410,6 @@ function commentLineLabel(comment) {
 	const end = commentEndLine(comment);
 	return start === end ? String(start) : `${start}-${end}`;
 }
-function commentLineIsValid(line) {
-	if (typeof line === "number") return Number.isInteger(line) && line > 0;
-	if (Array.isArray(line) && line.length === 2) {
-		const [start, end] = line;
-		return Number.isInteger(start) && Number.isInteger(end) && start > 0 && end > 0 && start <= end;
-	}
-	return false;
-}
 var CommentManager = class {
 	comments;
 	listeners;
@@ -426,7 +418,6 @@ var CommentManager = class {
 		this.listeners = [];
 	}
 	addComment(comment) {
-		if (!commentLineIsValid(comment.line)) throw new Error(`Invalid comment line: ${JSON.stringify(comment.line)}`);
 		this.comments.push(comment);
 		this.notifyListeners();
 	}
@@ -515,6 +506,23 @@ async function fetchJSON(url, options) {
 			hideFetchSpinnerMaybe();
 		}
 	}
+}
+
+//#endregion
+//#region web/src/config.ts
+const DEFAULT_APP_CONFIG = {
+	color_scheme: "vs-dark",
+	font: "JetBrains Mono",
+	split_view: true,
+	auto_close_tab: true
+};
+function resolveAppConfig(input) {
+	return {
+		color_scheme: input.color_scheme ?? DEFAULT_APP_CONFIG.color_scheme,
+		font: input.font?.trim() || DEFAULT_APP_CONFIG.font,
+		split_view: input.split_view ?? DEFAULT_APP_CONFIG.split_view,
+		auto_close_tab: input.auto_close_tab ?? DEFAULT_APP_CONFIG.auto_close_tab
+	};
 }
 
 //#endregion
@@ -889,7 +897,7 @@ var FileLoadingMethods = class {
 			this.currentWidget = null;
 			this.currentWidgetEditor = null;
 		}
-		const theme = this.config.color_scheme || "vs-dark";
+		const theme = this.config.color_scheme;
 		const container = document.getElementById("editor-container");
 		if (!container) return;
 		if (this._commitViewEl) {
@@ -1927,16 +1935,16 @@ var DialogMethods = class {
 			})]
 		});
 		const form = el("form", { className: "settings-form" });
-		let currentColorScheme = this.config.color_scheme || "vs-dark";
+		let currentColorScheme = this.config.color_scheme;
 		const legacyThemeMap = {
 			dark: "vs-dark",
 			light: "vs",
 			"high-contrast": "hc-black"
 		};
 		if (legacyThemeMap[currentColorScheme]) currentColorScheme = legacyThemeMap[currentColorScheme];
-		const currentFont = this.config.font && this.config.font.trim() || "JetBrains Mono";
-		const currentSplitView = this.config.split_view !== void 0 ? this.config.split_view : true;
-		const currentAutoCloseTab = this.config.auto_close_tab !== void 0 ? this.config.auto_close_tab : true;
+		const currentFont = this.config.font;
+		const currentSplitView = this.config.split_view;
+		const currentAutoCloseTab = this.config.auto_close_tab;
 		if (window.DEBUG) console.log("Settings modal - current values:", {
 			currentColorScheme,
 			currentFont,
@@ -2007,12 +2015,12 @@ var DialogMethods = class {
 			saveBtn.disabled = true;
 			saveBtn.textContent = "Saving...";
 			const formData = new FormData(form);
-			const newConfig = {
+			const newConfig = resolveAppConfig({
 				color_scheme: String(formData.get("color_scheme") || "vs-dark"),
-				font: (formData.get("font") || "").toString().trim() || "JetBrains Mono",
+				font: (formData.get("font") || "").toString(),
 				split_view: formData.get("split_view") === "on",
 				auto_close_tab: formData.get("auto_close_tab") === "on"
-			};
+			});
 			try {
 				if ((await fetch("/api/config", {
 					method: "PUT",
@@ -2021,8 +2029,8 @@ var DialogMethods = class {
 				})).ok) {
 					this.config = newConfig;
 					this.isInline = !this.config.split_view;
-					monaco.editor.setTheme(this.config.color_scheme || "vs-dark");
-					this.applyThemeToUI(this.config.color_scheme || "vs-dark");
+					monaco.editor.setTheme(this.config.color_scheme);
+					this.applyThemeToUI(this.config.color_scheme);
 					saveBtn.textContent = "Saved!";
 					setTimeout(() => {
 						close();
@@ -2128,11 +2136,6 @@ var DialogMethods = class {
 		submit = async () => {
 			const submitBtn = footer.querySelector(".confirm-submit-btn");
 			if (!submitBtn) return;
-			const invalid = comments.find((c) => !commentLineIsValid(c.line));
-			if (invalid) {
-				alert(`Invalid comment line range for ${invalid.file}: ${JSON.stringify(invalid.line)}`);
-				return;
-			}
 			submitBtn.disabled = true;
 			submitBtn.textContent = "Submitting...";
 			try {
@@ -2220,7 +2223,7 @@ var MonacoApp = class {
 		this.fileCache = {};
 		this.fileHunks = {};
 		this.currentHunkIndex = {};
-		this.config = {};
+		this.config = DEFAULT_APP_CONFIG;
 		this.originalModel = null;
 		this.modifiedModel = null;
 		this._eagerPrefetchStarted = false;
@@ -2245,7 +2248,7 @@ var MonacoApp = class {
 		window.Perf.mark("init:fetch:end");
 		window.Perf.measure("init:fetch", "init:fetch:start", "init:fetch:end");
 		if (window.DEBUG) console.log("[app] init: responses received in", Math.round(performance.now() - t0), "ms");
-		this.config = configData;
+		this.config = resolveAppConfig(configData);
 		this.context = contextData;
 		if (this.context.title) document.title = String(this.context.title);
 		else {
@@ -2273,8 +2276,8 @@ var MonacoApp = class {
 		});
 		window.Perf.mark("init:amd-wait:end");
 		window.Perf.measure("init:amd-wait", "init:amd-wait:start", "init:amd-wait:end");
-		window.require.config({ paths: { vs: window.MONACO_VS_BASE || "/assets/vendor/monaco/min/vs" } });
-		this.applyThemeToUI(this.config.color_scheme || "vs-dark");
+		window.require.config({ paths: { vs: window.MONACO_VS_BASE ?? "/assets/vendor/monaco/min/vs" } });
+		this.applyThemeToUI(this.config.color_scheme);
 		document.documentElement.setAttribute("data-ui-ready", "1");
 		return new Promise((resolve) => {
 			window.Perf.mark("init:monaco:load:start");
@@ -2283,9 +2286,9 @@ var MonacoApp = class {
 				window.Perf.measure("init:monaco:load", "init:monaco:load:start", "init:monaco:load:end");
 				if (window.DEBUG) console.log("[app] monaco loaded");
 				this.defineCustomThemes();
-				this.applyThemeToUI(this.config.color_scheme || "vs-dark");
+				this.applyThemeToUI(this.config.color_scheme);
 				document.documentElement.setAttribute("data-ui-ready", "1");
-				const hex = (window.UIThemeAccentsHex || {})[this.config.color_scheme || "vs-dark"];
+				const hex = (window.UIThemeAccentsHex ?? {})[this.config.color_scheme];
 				if (hex) {
 					const norm = el("div");
 					norm.style.color = hex;

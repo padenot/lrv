@@ -1,6 +1,7 @@
 import { $, clearEl, el } from './dom';
 import { CommentManager } from './comments';
 import { fetchJSON } from './api';
+import { DEFAULT_APP_CONFIG, resolveAppConfig } from './config';
 import { CUSTOM_THEMES } from './themes';
 import { markAppReady } from './ui-signals';
 
@@ -11,7 +12,15 @@ import { NavigationMethods } from './navigation-methods';
 import { CommitMethods } from './commit-methods';
 import { CommentsUIMethods } from './comments-ui-methods';
 import { DialogMethods } from './dialog-methods';
-import type { AppConfig, AppContextData, DiffFile, DiffStats, FilePair, HunkRange } from './types/app';
+import type {
+  AppConfig,
+  AppConfigInput,
+  AppContextData,
+  DiffFile,
+  DiffStats,
+  FilePair,
+  HunkRange,
+} from './types/app';
 import type { editor } from 'monaco-editor';
 import type { UIThemeDefinitionMap } from './themes';
 
@@ -79,7 +88,7 @@ export class MonacoApp {
     this.fileCache = {};
     this.fileHunks = {}; // Track hunk start lines per file: { [path]: number[] }
     this.currentHunkIndex = {}; // Track current hunk index per file
-    this.config = {}; // User config from server
+    this.config = DEFAULT_APP_CONFIG;
     this.originalModel = null;
     this.modifiedModel = null;
     this._eagerPrefetchStarted = false;
@@ -103,7 +112,7 @@ export class MonacoApp {
     window.Perf.mark('init:fetch:start');
     const t0 = performance.now();
     const [configData, contextData, diffData] = await Promise.all([
-      fetchJSON<AppConfig>('/api/config'),
+      fetchJSON<AppConfigInput>('/api/config'),
       fetchJSON<AppContextData>('/api/context'),
       fetchJSON<{ files: DiffFile[]; stats: DiffStats; commit_message?: string; commit_hash?: string }>('/api/diff'),
       document.fonts.ready,
@@ -113,7 +122,7 @@ export class MonacoApp {
     if (window.DEBUG) {
       console.log('[app] init: responses received in', Math.round(performance.now() - t0), 'ms');
     }
-    this.config = configData;
+    this.config = resolveAppConfig(configData);
     this.context = contextData;
     if (this.context.title) {
       document.title = String(this.context.title);
@@ -149,11 +158,11 @@ export class MonacoApp {
     window.Perf.mark('init:amd-wait:end');
     window.Perf.measure('init:amd-wait', 'init:amd-wait:start', 'init:amd-wait:end');
     window.require.config({
-      paths: { vs: window.MONACO_VS_BASE || '/assets/vendor/monaco/min/vs' },
+      paths: { vs: window.MONACO_VS_BASE ?? '/assets/vendor/monaco/min/vs' },
     });
 
     // Pre-apply theme variables to avoid flash while Monaco loads
-    this.applyThemeToUI(this.config.color_scheme || 'vs-dark');
+    this.applyThemeToUI(this.config.color_scheme);
     document.documentElement.setAttribute('data-ui-ready', '1');
 
     return new Promise<void>((resolve) => {
@@ -165,12 +174,12 @@ export class MonacoApp {
           console.log('[app] monaco loaded');
         }
         this.defineCustomThemes();
-        this.applyThemeToUI(this.config.color_scheme || 'vs-dark');
+        this.applyThemeToUI(this.config.color_scheme);
         // Accent is set from UI_THEME_ACCENTS_HEX; keep logic simple and deterministic
         document.documentElement.setAttribute('data-ui-ready', '1');
         // Set accent directly from our theme map when available (fast, deterministic)
-        const hexMap = window.UIThemeAccentsHex || {};
-        const hex = hexMap[this.config.color_scheme || 'vs-dark'];
+        const hexMap = window.UIThemeAccentsHex ?? {};
+        const hex = hexMap[this.config.color_scheme];
         if (hex) {
           const norm = el('div');
           norm.style.color = hex;

@@ -32,11 +32,13 @@ export type HunkRange = {
 };
 
 export type AppConfig = {
-  color_scheme?: string;
-  font?: string;
-  split_view?: boolean;
-  auto_close_tab?: boolean;
+  color_scheme: string;
+  font: string;
+  split_view: boolean;
+  auto_close_tab: boolean;
 };
+
+export type AppConfigInput = Partial<AppConfig>;
 
 export type AppContextData = {
   title?: string;

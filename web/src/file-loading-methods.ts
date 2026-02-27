@@ -74,7 +74,7 @@ export class FileLoadingMethods {
     }
 
     // Use the configured Monaco theme directly
-    const theme = this.config.color_scheme || 'vs-dark';
+    const theme = this.config.color_scheme;
 
     // Create diff editor on first run, reuse afterwards
     const container = document.getElementById('editor-container');
