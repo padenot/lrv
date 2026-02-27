@@ -493,6 +493,57 @@ async function fetchJSON(url, options) {
 }
 
 //#endregion
+//#region web/src/ui-signals.ts
+let navTimer = null;
+function showNavIndicator(text) {
+	const indicatorEl = document.getElementById("nav-indicator");
+	if (!indicatorEl) return;
+	indicatorEl.textContent = text;
+	indicatorEl.style.display = "inline-block";
+	if (navTimer) clearTimeout(navTimer);
+	navTimer = setTimeout(() => {
+		indicatorEl.style.display = "none";
+	}, 900);
+}
+function markAppReady() {
+	if (window.__APP_READY) return;
+	if (document.querySelectorAll(".monaco-editor .view-lines .view-line").length > 0) {
+		if (performance.getEntriesByName("init:first-line-visible").length === 0) {
+			window.Perf.mark("init:first-line-visible");
+			if (performance.getEntriesByName("init:start").length > 0) window.Perf.measure("init:to-first-line-visible", "init:start", "init:first-line-visible");
+			if (performance.getEntriesByName("page:script-start").length > 0) window.Perf.measure("page:script-to-first-line-visible", "page:script-start", "init:first-line-visible");
+		}
+		window.__APP_READY = true;
+		window.Perf.mark("init:app-ready");
+		if (performance.getEntriesByName("appInit").length > 0) window.Perf.measure("init:app-ready-after-appInit", "appInitEnd", "init:app-ready");
+		if (window.DEBUG) console.log("[app] APP_READY: diff lines visible");
+		return;
+	}
+	const container = document.querySelector(".monaco-editor .view-lines");
+	if (container && !window.__APP_READY) {
+		if (window.DEBUG) console.log("[app] Waiting for first view-line via MutationObserver");
+		const obs = new MutationObserver(() => {
+			if (document.querySelectorAll(".monaco-editor .view-lines .view-line").length > 0) {
+				if (performance.getEntriesByName("init:first-line-visible").length === 0) {
+					window.Perf.mark("init:first-line-visible");
+					if (performance.getEntriesByName("init:start").length > 0) window.Perf.measure("init:to-first-line-visible", "init:start", "init:first-line-visible");
+					if (performance.getEntriesByName("page:script-start").length > 0) window.Perf.measure("page:script-to-first-line-visible", "page:script-start", "init:first-line-visible");
+				}
+				window.__APP_READY = true;
+				window.Perf.mark("init:app-ready");
+				if (performance.getEntriesByName("appInit").length > 0) window.Perf.measure("init:app-ready-after-appInit", "appInitEnd", "init:app-ready");
+				if (window.DEBUG) console.log("[app] APP_READY: observer saw first line");
+				obs.disconnect();
+			}
+		});
+		obs.observe(container, {
+			childList: true,
+			subtree: true
+		});
+	}
+}
+
+//#endregion
 //#region web/src/diff-utils.ts
 const MONACO_HIDE_UNCHANGED = {
 	enabled: true,
@@ -576,6 +627,7 @@ var FileListMethods = class {
 	setupSidebarResizer() {
 		const sidebar = document.getElementById("sidebar");
 		const resizer = document.getElementById("sidebar-resizer");
+		if (!sidebar || !resizer) return;
 		let isResizing = false;
 		resizer.addEventListener("mousedown", (e) => {
 			isResizing = true;
@@ -600,6 +652,7 @@ var FileListMethods = class {
 	}
 	renderFileList() {
 		const list = document.getElementById("file-list");
+		if (!list) return;
 		clearEl(list);
 		if (!!(this.diff && (this.diff.commit_message || this.diff.commit_hash))) {
 			const li = el("li", {
@@ -778,57 +831,6 @@ function prefersReducedMotion() {
 }
 
 //#endregion
-//#region web/src/ui-signals.ts
-let navTimer = null;
-function showNavIndicator(text) {
-	const indicatorEl = document.getElementById("nav-indicator");
-	if (!indicatorEl) return;
-	indicatorEl.textContent = text;
-	indicatorEl.style.display = "inline-block";
-	if (navTimer) clearTimeout(navTimer);
-	navTimer = setTimeout(() => {
-		indicatorEl.style.display = "none";
-	}, 900);
-}
-function markAppReady$1() {
-	if (window.__APP_READY) return;
-	if (document.querySelectorAll(".monaco-editor .view-lines .view-line").length > 0) {
-		if (performance.getEntriesByName("init:first-line-visible").length === 0) {
-			window.Perf.mark("init:first-line-visible");
-			if (performance.getEntriesByName("init:start").length > 0) window.Perf.measure("init:to-first-line-visible", "init:start", "init:first-line-visible");
-			if (performance.getEntriesByName("page:script-start").length > 0) window.Perf.measure("page:script-to-first-line-visible", "page:script-start", "init:first-line-visible");
-		}
-		window.__APP_READY = true;
-		window.Perf.mark("init:app-ready");
-		if (performance.getEntriesByName("appInit").length > 0) window.Perf.measure("init:app-ready-after-appInit", "appInitEnd", "init:app-ready");
-		if (window.DEBUG) console.log("[app] APP_READY: diff lines visible");
-		return;
-	}
-	const container = document.querySelector(".monaco-editor .view-lines");
-	if (container && !window.__APP_READY) {
-		if (window.DEBUG) console.log("[app] Waiting for first view-line via MutationObserver");
-		const obs = new MutationObserver(() => {
-			if (document.querySelectorAll(".monaco-editor .view-lines .view-line").length > 0) {
-				if (performance.getEntriesByName("init:first-line-visible").length === 0) {
-					window.Perf.mark("init:first-line-visible");
-					if (performance.getEntriesByName("init:start").length > 0) window.Perf.measure("init:to-first-line-visible", "init:start", "init:first-line-visible");
-					if (performance.getEntriesByName("page:script-start").length > 0) window.Perf.measure("page:script-to-first-line-visible", "page:script-start", "init:first-line-visible");
-				}
-				window.__APP_READY = true;
-				window.Perf.mark("init:app-ready");
-				if (performance.getEntriesByName("appInit").length > 0) window.Perf.measure("init:app-ready-after-appInit", "appInitEnd", "init:app-ready");
-				if (window.DEBUG) console.log("[app] APP_READY: observer saw first line");
-				obs.disconnect();
-			}
-		});
-		obs.observe(container, {
-			childList: true,
-			subtree: true
-		});
-	}
-}
-
-//#endregion
 //#region web/src/file-loading-methods.ts
 var FileLoadingMethods = class {
 	isAddedFile(file) {
@@ -864,6 +866,7 @@ var FileLoadingMethods = class {
 		}
 		const theme = this.config.color_scheme || "vs-dark";
 		const container = document.getElementById("editor-container");
+		if (!container) return;
 		if (this._commitViewEl) {
 			this._commitViewEl.style.display = "none";
 			container.style.display = "";
@@ -976,7 +979,7 @@ var FileLoadingMethods = class {
 				const col = getComputedStyle(found).color;
 				if (col) document.documentElement.style.setProperty("--accent-color", col);
 			}
-			markAppReady$1();
+			markAppReady();
 		}));
 		const modifiedEditor = this.editor.getModifiedEditor();
 		const originalEditor = this.editor.getOriginalEditor();
@@ -1476,7 +1479,8 @@ var CommitMethods = class {
 		pop.style.left = `${Math.max(pad, left)}px`;
 		pop.style.top = `${Math.max(pad, top)}px`;
 		const onDocClick = (e) => {
-			if (!pop.contains(e.target) && e.target !== anchorEl) cleanup();
+			const target = e.target;
+			if (!target || !pop.contains(target) && target !== anchorEl) cleanup();
 		};
 		const onEsc = (e) => {
 			if (e.key === "Escape") cleanup();
@@ -1510,8 +1514,7 @@ var CommitMethods = class {
 				start_line: 1,
 				end_line: 1,
 				side: "new",
-				body,
-				severity: "comment"
+				body
 			};
 			this.commentManager.addComment(comment);
 			showNavIndicator("Commit comment added");
@@ -1521,9 +1524,11 @@ var CommitMethods = class {
 	loadCommitView() {
 		this.currentFileIsCommit = true;
 		const container = document.getElementById("editor-container");
+		if (!container) return;
 		container.style.display = "none";
 		if (!this._commitViewEl) {
 			const host = document.querySelector(".content");
+			if (!host) return;
 			const viewEl = el("div", { className: "commit-view" });
 			viewEl.style.padding = "16px";
 			viewEl.style.overflow = "auto";
@@ -1568,7 +1573,7 @@ var CommitMethods = class {
 			lineNumSpan.style.color = "var(--text-secondary)";
 			lineNumSpan.style.userSelect = "none";
 			lineNumSpan.style.flexShrink = "0";
-			lineNumSpan.textContent = lineNum;
+			lineNumSpan.textContent = String(lineNum);
 			const lineContent = el("span");
 			lineContent.style.paddingRight = "12px";
 			lineContent.style.whiteSpace = "pre-wrap";
@@ -1595,7 +1600,7 @@ var CommitMethods = class {
 			empty.style.padding = "8px 0";
 			empty.textContent = "No comments yet. Click a line in the message above to add one.";
 			list.appendChild(empty);
-		} else comments.forEach((c, idx) => {
+		} else comments.forEach((c) => {
 			const row = el("div");
 			row.style.display = "flex";
 			row.style.flexDirection = "column";
@@ -1690,15 +1695,16 @@ var CommitMethods = class {
 				start_line: lineNum,
 				end_line: lineNum,
 				side: "new",
-				body: text,
-				severity: "comment"
+				body: text
 			};
 			this.commentManager.addComment(comment);
 			close();
 			this.loadCommitView();
 		};
-		footer.querySelector(".cancel-btn").onclick = close;
-		footer.querySelector(".save-btn").onclick = save;
+		const cancelBtn = footer.querySelector(".cancel-btn");
+		const saveBtn = footer.querySelector(".save-btn");
+		if (cancelBtn) cancelBtn.onclick = close;
+		if (saveBtn) saveBtn.onclick = save;
 		setTimeout(() => ta.focus(), 100);
 	}
 };
@@ -1821,8 +1827,8 @@ var CommentsUIMethods = class {
 			this.updateDecorations();
 			cleanup();
 		};
-		saveBtn.onclick = saveComment;
-		cancelBtn.onclick = cleanup;
+		if (saveBtn) saveBtn.onclick = saveComment;
+		if (cancelBtn) cancelBtn.onclick = cleanup;
 		const deleteBtnEl = domNode.querySelector(".delete-btn");
 		if (deleteBtnEl) deleteBtnEl.onclick = () => {
 			this.commentManager.removeComment(existingIndex);
@@ -1833,7 +1839,8 @@ var CommentsUIMethods = class {
 	}
 	updateUI() {
 		const count = this.commentManager.getComments().length;
-		document.getElementById("comment-count").textContent = count.toString();
+		const countEl = document.getElementById("comment-count");
+		if (countEl) countEl.textContent = count.toString();
 		this.renderFileList();
 	}
 };
@@ -1971,14 +1978,16 @@ var DialogMethods = class {
 		form.appendChild(splitViewField);
 		form.appendChild(autoCloseField);
 		body.appendChild(form);
-		form.querySelector("#color-scheme").value = currentColorScheme;
+		const colorField = form.querySelector("#color-scheme");
+		if (colorField) colorField.value = currentColorScheme;
 		const save = async () => {
 			const saveBtn = footer.querySelector(".save-btn");
+			if (!saveBtn) return;
 			saveBtn.disabled = true;
 			saveBtn.textContent = "Saving...";
 			const formData = new FormData(form);
 			const newConfig = {
-				color_scheme: formData.get("color_scheme"),
+				color_scheme: String(formData.get("color_scheme") || "vs-dark"),
 				font: (formData.get("font") || "").toString().trim() || "JetBrains Mono",
 				split_view: formData.get("split_view") === "on",
 				auto_close_tab: formData.get("auto_close_tab") === "on"
@@ -2009,8 +2018,10 @@ var DialogMethods = class {
 				saveBtn.textContent = "Save";
 			}
 		};
-		footer.querySelector(".cancel-btn").onclick = close;
-		footer.querySelector(".save-btn").onclick = save;
+		const cancelBtn = footer.querySelector(".cancel-btn");
+		const saveBtn = footer.querySelector(".save-btn");
+		if (cancelBtn) cancelBtn.onclick = close;
+		if (saveBtn) saveBtn.onclick = save;
 		setTimeout(() => {
 			const initial = form.querySelector("#color-scheme");
 			if (initial) initial.focus();
@@ -2056,7 +2067,8 @@ var DialogMethods = class {
 			for (const side of sides) {
 				const key = `${filePath}:${side}`;
 				try {
-					fileContents[key] = (await fetchJSON(`/api/file?path=${encodeURIComponent(filePath)}&side=${side}`)).content.split("\n");
+					const data = await fetchJSON(`/api/file?path=${encodeURIComponent(filePath)}&side=${side}`);
+					fileContents[key] = String(data.content || "").split("\n");
 				} catch (err) {
 					console.error(`Failed to fetch ${key}:`, err);
 					fileContents[key] = [];
@@ -2067,7 +2079,7 @@ var DialogMethods = class {
 			const preview = el("div", { className: "comment-preview" });
 			const previewHeader = el("div", {
 				className: "comment-preview-header",
-				text: `${comment.file}:${comment.start_line} (${comment.side}) — ${comment.severity}`
+				text: `${comment.file}:${comment.start_line} (${comment.side})`
 			});
 			const lines = fileContents[`${comment.file}:${comment.side}`] || [];
 			const lineIndex = comment.start_line - 1;
@@ -2092,6 +2104,7 @@ var DialogMethods = class {
 		});
 		submit = async () => {
 			const submitBtn = footer.querySelector(".confirm-submit-btn");
+			if (!submitBtn) return;
 			submitBtn.disabled = true;
 			submitBtn.textContent = "Submitting...";
 			try {
@@ -2102,8 +2115,11 @@ var DialogMethods = class {
 				});
 				if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
 				submitBtn.textContent = "Submitted!";
-				document.getElementById("submit-review").disabled = true;
-				document.getElementById("submit-review").textContent = "Review Submitted";
+				const submitReviewBtn = document.getElementById("submit-review");
+				if (submitReviewBtn) {
+					submitReviewBtn.disabled = true;
+					submitReviewBtn.textContent = "Review Submitted";
+				}
 				setTimeout(() => {
 					close();
 					if (this.config.auto_close_tab) window.close();
@@ -2114,8 +2130,10 @@ var DialogMethods = class {
 				submitBtn.textContent = "Submit Review";
 			}
 		};
-		footer.querySelector(".cancel-submit-btn").onclick = close;
-		footer.querySelector(".confirm-submit-btn").onclick = submit;
+		const cancelSubmitBtn = footer.querySelector(".cancel-submit-btn");
+		const confirmSubmitBtn = footer.querySelector(".confirm-submit-btn");
+		if (cancelSubmitBtn) cancelSubmitBtn.onclick = close;
+		if (confirmSubmitBtn) confirmSubmitBtn.onclick = submit;
 		setTimeout(() => {
 			const f = footer.querySelector(".confirm-submit-btn");
 			if (f) f.focus();
@@ -2132,6 +2150,29 @@ function applyMixin(TargetClass, MethodsClass) {
 	}
 }
 var MonacoApp = class {
+	commentManager;
+	currentFileIndex;
+	editor;
+	isInline;
+	modifiedDecorations;
+	originalDecorations;
+	focusedHunkDecorations;
+	currentWidget;
+	currentWidgetEditor;
+	diff;
+	files;
+	stats;
+	fileCache;
+	fileHunks;
+	currentHunkIndex;
+	config;
+	context;
+	originalModel;
+	modifiedModel;
+	_eagerPrefetchStarted;
+	_commitPopoverEl;
+	currentFileIsCommit;
+	_commitViewEl;
 	constructor() {
 		this.commentManager = new CommentManager();
 		this.currentFileIndex = 0;
@@ -2143,11 +2184,15 @@ var MonacoApp = class {
 		this.currentWidget = null;
 		this.diff = null;
 		this.files = [];
-		this.stats = null;
+		this.stats = {
+			files_changed: 0,
+			additions: 0,
+			deletions: 0
+		};
 		this.fileCache = {};
 		this.fileHunks = {};
 		this.currentHunkIndex = {};
-		this.config = null;
+		this.config = {};
 		this.originalModel = null;
 		this.modifiedModel = null;
 		this._eagerPrefetchStarted = false;
@@ -2190,7 +2235,7 @@ var MonacoApp = class {
 			const timer = setInterval(() => {
 				if (window.require) {
 					clearInterval(timer);
-					resolve(null);
+					resolve();
 				}
 				if (performance.now() - start > 5e3) {
 					clearInterval(timer);
@@ -2238,7 +2283,8 @@ var MonacoApp = class {
 				Promise.resolve(this.loadFile(0)).then(() => {
 					window.Perf.mark("init:first-file:load:end");
 					window.Perf.measure("init:first-file:load", "init:first-file:load:start", "init:first-file:load:end");
-					document.getElementById("review-time").textContent = (/* @__PURE__ */ new Date()).toLocaleString();
+					const reviewTime = document.getElementById("review-time");
+					if (reviewTime) reviewTime.textContent = (/* @__PURE__ */ new Date()).toLocaleString();
 					this.renderProjectInfo();
 					window.Perf.mark("init:final-paint-wait:start");
 					requestAnimationFrame(() => requestAnimationFrame(() => {
@@ -2342,26 +2388,27 @@ var MonacoApp = class {
 		}
 	}
 	setupUI() {
-		$("#file-list").addEventListener("click", (e) => {
-			const li = e.target.closest("li");
+		$("#file-list")?.addEventListener("click", (e) => {
+			const li = e.target?.closest("li");
 			if (li) if (li.dataset.commit === "1") this.loadCommitView();
 			else {
 				const index = parseInt(li.dataset.index);
 				this.loadFile(index);
 			}
 		});
-		$("#settings-btn").addEventListener("click", () => {
+		$("#settings-btn")?.addEventListener("click", () => {
 			this.showSettingsModal();
 		});
-		$("#help-btn").addEventListener("click", () => this.showKeyboardHelp());
-		$("#submit-review").addEventListener("click", async () => {
+		$("#help-btn")?.addEventListener("click", () => this.showKeyboardHelp());
+		$("#submit-review")?.addEventListener("click", async () => {
 			this.showSubmitConfirmation();
 		});
-		$("#toggle-view").addEventListener("click", () => {
+		$("#toggle-view")?.addEventListener("click", () => {
 			this.isInline = !this.isInline;
 			this.loadFile(this.currentFileIndex);
 		});
-		$("#stats").textContent = `${this.stats.files_changed} files, +${this.stats.additions} -${this.stats.deletions}`;
+		const statsEl = $("#stats");
+		if (statsEl) statsEl.textContent = `${this.stats.files_changed} files, +${this.stats.additions} -${this.stats.deletions}`;
 		if (this.context && this.context.is_public) {
 			const b = $("#public-banner");
 			if (b) b.style.display = "";

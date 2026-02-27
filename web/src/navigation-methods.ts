@@ -1,19 +1,37 @@
-// @ts-nocheck
 import { IS_MAC } from './platform';
-import { KEYBOARD_SHORTCUTS } from './shortcuts';
+import { KEYBOARD_SHORTCUTS, type KeyboardAction } from './shortcuts';
 import { prefersReducedMotion } from './font';
 import { showNavIndicator } from './ui-signals';
+import type { AppContext, Side } from './types/app';
 
 export class NavigationMethods {
+  declare currentWidget: AppContext['currentWidget'];
+  declare isInline: boolean;
+  declare currentFileIndex: number;
+  declare files: AppContext['files'];
+  declare fileHunks: AppContext['fileHunks'];
+  declare currentHunkIndex: AppContext['currentHunkIndex'];
+  declare editor: AppContext['editor'];
+  declare currentFocusedLine?: { side: Side; line: number };
+  declare focusedHunkDecorationsNew?: string[];
+  declare focusedHunkDecorationsOld?: string[];
+  declare focusedLineDecorationsNew?: string[];
+  declare focusedLineDecorationsOld?: string[];
+  declare loadFile: (index: number) => Promise<void>;
+  declare isAddedFile: AppContext['isAddedFile'];
+  declare showSubmitConfirmation: () => Promise<void>;
+  declare showKeyboardHelp: () => void;
+  declare showCommentDialog: AppContext['showCommentDialog'];
+
   setupKeyboardShortcuts() {
-    document.addEventListener('keydown', (e) => {
+    document.addEventListener('keydown', (e: KeyboardEvent) => {
       // Modal-specific key handlers take precedence while a modal is open.
       if (document.querySelector('.submit-modal-overlay')) {
         return;
       }
 
       // Never handle shortcuts while authoring text (inputs, textareas, contenteditable)
-      const activeElement = document.activeElement || document.body;
+      const activeElement = (document.activeElement || document.body) as HTMLElement;
       if (
         activeElement &&
         (activeElement.tagName === 'TEXTAREA' ||
@@ -87,7 +105,7 @@ export class NavigationMethods {
     showNavIndicator(this.isInline ? 'Inline' : 'Side-by-Side');
   }
 
-  matchKeyboardShortcut(e) {
+  matchKeyboardShortcut(e: KeyboardEvent): KeyboardAction | null {
     const modKey = IS_MAC ? e.metaKey : e.ctrlKey;
 
     for (const shortcut of KEYBOARD_SHORTCUTS) {
@@ -100,7 +118,7 @@ export class NavigationMethods {
     return null;
   }
 
-  matchesKeyCombo(e, combo, modKey) {
+  matchesKeyCombo(e: KeyboardEvent, combo: string, modKey: boolean): boolean {
     const parts = combo.split('+');
     let needsMod = false;
     let needsShift = false;
@@ -195,7 +213,7 @@ export class NavigationMethods {
     }
   }
 
-  jumpToHunk(hunkIndex) {
+  jumpToHunk(hunkIndex: number) {
     if (!this.editor) {
       return;
     }
@@ -235,7 +253,7 @@ export class NavigationMethods {
     }
   }
 
-  highlightFocusedHunk(startLine, endLine, side = 'new') {
+  highlightFocusedHunk(startLine: number, endLine: number, side: Side = 'new') {
     if (!this.editor) {
       return;
     }
@@ -267,7 +285,7 @@ export class NavigationMethods {
     }
   }
 
-  setFocusedLine(side, monacoLine, reveal = true) {
+  setFocusedLine(side: Side, monacoLine: number, reveal = true) {
     if (!this.editor) {
       return;
     }
@@ -309,7 +327,7 @@ export class NavigationMethods {
     showNavIndicator(`Line ${monacoLine} • ${side === 'old' ? 'old' : 'new'}`);
   }
 
-  moveLine(delta) {
+  moveLine(delta: number) {
     if (!this.editor) {
       return;
     }

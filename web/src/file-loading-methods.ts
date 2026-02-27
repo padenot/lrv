@@ -1,12 +1,34 @@
-// @ts-nocheck
 import { $ } from './dom';
 import { detectLanguageFromPathAndContent } from './language';
 import { MONACO_HIDE_UNCHANGED } from './diff-utils';
 import { monoFontStack, prefersReducedMotion } from './font';
 import { markAppReady } from './ui-signals';
+import type { AppContext, DiffFile } from './types/app';
 
 export class FileLoadingMethods {
-  isAddedFile(file) {
+  declare currentFileIsCommit: boolean;
+  declare currentFileIndex: number;
+  declare files: AppContext['files'];
+  declare isInline: boolean;
+  declare initFileHunks: AppContext['initFileHunks'];
+  declare renderFileList: () => void;
+  declare originalModel: AppContext['originalModel'];
+  declare modifiedModel: AppContext['modifiedModel'];
+  declare currentWidget: AppContext['currentWidget'];
+  declare currentWidgetEditor?: AppContext['currentWidgetEditor'];
+  declare config: AppContext['config'];
+  declare _commitViewEl: HTMLElement | null;
+  declare editor: AppContext['editor'];
+  declare fetchFilePair: AppContext['fetchFilePair'];
+  declare fileCache: AppContext['fileCache'];
+  declare updateDecorations: () => void;
+  declare showCommentDialog: AppContext['showCommentDialog'];
+  declare fileHunks: AppContext['fileHunks'];
+  declare currentHunkIndex: AppContext['currentHunkIndex'];
+  declare jumpToHunk: AppContext['jumpToHunk'];
+  declare setFocusedLine: AppContext['setFocusedLine'];
+
+  isAddedFile(file: DiffFile) {
     const rawStatus = String(file?.status || '').toLowerCase();
     if (rawStatus === 'added' || rawStatus === 'add' || rawStatus === 'a' || rawStatus === 'new') {
       return true;
@@ -17,7 +39,7 @@ export class FileLoadingMethods {
     return hunks.length > 0 && hunks.every((h) => Number(h?.old_start || 0) === 0);
   }
 
-  async loadFile(index) {
+  async loadFile(index: number) {
     this.currentFileIsCommit = false;
     if (window.DEBUG) {
       console.log('[app] loadFile: index', index);
@@ -55,6 +77,9 @@ export class FileLoadingMethods {
 
     // Create diff editor on first run, reuse afterwards
     const container = document.getElementById('editor-container');
+    if (!container) {
+      return;
+    }
     // Ensure commit view is hidden
     if (this._commitViewEl) {
       this._commitViewEl.style.display = 'none';
@@ -97,7 +122,7 @@ export class FileLoadingMethods {
     const language = detectLanguageFromPathAndContent(detectionPath, newContent || oldContent);
 
     // Show/hide banner when old content is unavailable but new content exists
-    const oldBanner = $('#old-missing-banner');
+    const oldBanner = $<HTMLElement>('#old-missing-banner');
     if (oldBanner) {
       const show =
         !isAddedFile &&
@@ -221,7 +246,11 @@ export class FileLoadingMethods {
     this.applyInitialHunkFocus(file.path);
   }
 
-  setupEditorClickHandlers(filePath, modifiedEditor, originalEditor) {
+  setupEditorClickHandlers(
+    filePath: string,
+    modifiedEditor: any,
+    originalEditor: any,
+  ) {
     modifiedEditor.onMouseDown((e) => {
       if (
         e.target.type === monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS ||
@@ -243,7 +272,7 @@ export class FileLoadingMethods {
     });
   }
 
-  applyInitialHunkFocus(filePath) {
+  applyInitialHunkFocus(filePath: string) {
     const hunks = this.fileHunks[filePath];
     if (hunks && hunks.length > 0) {
       const currentIdx = this.currentHunkIndex[filePath] || 0;

@@ -1,10 +1,19 @@
-// @ts-nocheck
 import { clearEl, el } from './dom';
+import type { AppContext } from './types/app';
 
 export class FileListMethods {
+  declare diff: AppContext['diff'];
+  declare currentFileIsCommit: boolean;
+  declare commentManager: AppContext['commentManager'];
+  declare files: AppContext['files'];
+  declare currentFileIndex: number;
+
   setupSidebarResizer() {
-    const sidebar = document.getElementById('sidebar');
-    const resizer = document.getElementById('sidebar-resizer');
+    const sidebar = document.getElementById('sidebar') as HTMLDivElement | null;
+    const resizer = document.getElementById('sidebar-resizer') as HTMLDivElement | null;
+    if (!sidebar || !resizer) {
+      return;
+    }
     let isResizing = false;
 
     resizer.addEventListener('mousedown', (e) => {
@@ -37,6 +46,9 @@ export class FileListMethods {
 
   renderFileList() {
     const list = document.getElementById('file-list');
+    if (!list) {
+      return;
+    }
     clearEl(list);
 
     // Optional pseudo-file for commit (when reviewing full commits)

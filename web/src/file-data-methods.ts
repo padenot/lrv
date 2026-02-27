@@ -1,21 +1,27 @@
-// @ts-nocheck
 import { fetchJSON } from './api';
 import { computeHunkRanges } from './diff-utils';
+import type { AppContext, DiffFile, FilePair } from './types/app';
 
 export class FileDataMethods {
-  async fetchFilePair(filePath) {
+  declare fileCache: AppContext['fileCache'];
+  declare _eagerPrefetchStarted: boolean;
+  declare files: AppContext['files'];
+  declare fileHunks: AppContext['fileHunks'];
+  declare currentHunkIndex: AppContext['currentHunkIndex'];
+
+  async fetchFilePair(filePath: string): Promise<FilePair> {
     if (this.fileCache[filePath]) {
       return this.fileCache[filePath];
     }
 
     const [oldData, newData] = await Promise.all([
-      fetchJSON(`/api/file?path=${encodeURIComponent(filePath)}&side=old`).catch((err) => {
+      fetchJSON<{ content?: string }>(`/api/file?path=${encodeURIComponent(filePath)}&side=old`).catch((err) => {
         if (window.DEBUG) {
           console.error('[app] old fetch failed', err);
         }
         return { content: '' };
       }),
-      fetchJSON(`/api/file?path=${encodeURIComponent(filePath)}&side=new`).catch((err) => {
+      fetchJSON<{ content?: string }>(`/api/file?path=${encodeURIComponent(filePath)}&side=new`).catch((err) => {
         if (window.DEBUG) {
           console.error('[app] new fetch failed', err);
         }
@@ -52,8 +58,8 @@ export class FileDataMethods {
         const p = toFetch[i];
         batch.push(
           Promise.all([
-            fetchJSON(`/api/file?path=${encodeURIComponent(p)}&side=old`),
-            fetchJSON(`/api/file?path=${encodeURIComponent(p)}&side=new`),
+            fetchJSON<{ content?: string }>(`/api/file?path=${encodeURIComponent(p)}&side=old`),
+            fetchJSON<{ content?: string }>(`/api/file?path=${encodeURIComponent(p)}&side=new`),
           ])
             .then(([oldData, newData]) => {
               this.fileCache[p] = { old: oldData.content || '', new: newData.content || '' };
@@ -71,7 +77,7 @@ export class FileDataMethods {
     }
   }
 
-  initFileHunks(file) {
+  initFileHunks(file: DiffFile): void {
     if (!this.fileHunks[file.path]) {
       const { hunkRanges } = computeHunkRanges(file.hunks);
       this.fileHunks[file.path] = hunkRanges;

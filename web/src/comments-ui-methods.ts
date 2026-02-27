@@ -1,8 +1,18 @@
-// @ts-nocheck
 import { el } from './dom';
 import { MOD_KEY_LABEL } from './platform';
+import type { AppContext, Side } from './types/app';
 
 export class CommentsUIMethods {
+  declare editor: AppContext['editor'];
+  declare files: AppContext['files'];
+  declare currentFileIndex: number;
+  declare commentManager: AppContext['commentManager'];
+  declare modifiedDecorations: string[];
+  declare originalDecorations: string[];
+  declare currentWidget: any;
+  declare currentWidgetEditor?: any;
+  declare renderFileList: () => void;
+
   updateDecorations() {
     if (!this.editor) {
       return;
@@ -47,7 +57,7 @@ export class CommentsUIMethods {
     );
   }
 
-  showCommentDialog(file, fileLineNumber, monacoLineNumber, side) {
+  showCommentDialog(file: string, fileLineNumber: number, monacoLineNumber: number, side: Side) {
     const targetEditor =
       side === 'new' ? this.editor.getModifiedEditor() : this.editor.getOriginalEditor();
 
@@ -103,14 +113,14 @@ export class CommentsUIMethods {
     this.currentWidget = widget;
     this.currentWidgetEditor = targetEditor;
 
-    const saveBtn = domNode.querySelector('.save-btn');
-    const cancelBtn = domNode.querySelector('.cancel-btn');
+    const saveBtn = domNode.querySelector<HTMLButtonElement>('.save-btn');
+    const cancelBtn = domNode.querySelector<HTMLButtonElement>('.cancel-btn');
     if (existingComment) {
       textarea.value = existingComment.body || '';
     }
 
     // Keyboard shortcuts
-    const handleKeydown = (e) => {
+    const handleKeydown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         cleanup();
       } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
@@ -149,11 +159,15 @@ export class CommentsUIMethods {
       cleanup();
     };
 
-    saveBtn.onclick = saveComment;
-    cancelBtn.onclick = cleanup;
+    if (saveBtn) {
+      saveBtn.onclick = saveComment;
+    }
+    if (cancelBtn) {
+      cancelBtn.onclick = cleanup;
+    }
 
     // Delete button (only present for existing comments)
-    const deleteBtnEl = domNode.querySelector('.delete-btn');
+    const deleteBtnEl = domNode.querySelector<HTMLButtonElement>('.delete-btn');
     if (deleteBtnEl) {
       deleteBtnEl.onclick = () => {
         this.commentManager.removeComment(existingIndex);
@@ -168,7 +182,10 @@ export class CommentsUIMethods {
 
   updateUI() {
     const count = this.commentManager.getComments().length;
-    document.getElementById('comment-count').textContent = count.toString();
+    const countEl = document.getElementById('comment-count');
+    if (countEl) {
+      countEl.textContent = count.toString();
+    }
     this.renderFileList();
   }
 }

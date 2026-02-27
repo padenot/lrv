@@ -1,11 +1,18 @@
-// @ts-nocheck
 import { clearEl, el } from './dom';
 import { openModal } from './modal';
 import { MOD_KEY_LABEL } from './platform';
 import { showNavIndicator } from './ui-signals';
+import type { AppContext } from './types/app';
 
 export class CommitMethods {
-  showCommitMessagePopover(anchorEl, message, rev) {
+  declare _commitPopoverEl: HTMLElement | null;
+  declare commentManager: AppContext['commentManager'];
+  declare currentFileIsCommit: boolean;
+  declare _commitViewEl: HTMLElement | null;
+  declare diff: AppContext['diff'];
+  declare renderFileList: () => void;
+
+  showCommitMessagePopover(anchorEl: HTMLElement, message: string, rev: string) {
     // Toggle if already visible
     if (this._commitPopoverEl) {
       this._commitPopoverEl.remove();
@@ -60,12 +67,13 @@ export class CommitMethods {
     pop.style.left = `${Math.max(pad, left)}px`;
     pop.style.top = `${Math.max(pad, top)}px`;
 
-    const onDocClick = (e) => {
-      if (!pop.contains(e.target) && e.target !== anchorEl) {
+    const onDocClick = (e: MouseEvent) => {
+      const target = e.target as Node | null;
+      if (!target || (!pop.contains(target) && target !== anchorEl)) {
         cleanup();
       }
     };
-    const onEsc = (e) => {
+    const onEsc = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         cleanup();
       }
@@ -100,9 +108,8 @@ export class CommitMethods {
         file: '(commit)',
         start_line: 1,
         end_line: 1,
-        side: 'new',
+        side: 'new' as const,
         body,
-        severity: 'comment',
       };
       this.commentManager.addComment(comment);
       showNavIndicator('Commit comment added');
@@ -113,9 +120,15 @@ export class CommitMethods {
   loadCommitView() {
     this.currentFileIsCommit = true;
     const container = document.getElementById('editor-container');
+    if (!container) {
+      return;
+    }
     container.style.display = 'none';
     if (!this._commitViewEl) {
       const host = document.querySelector('.content');
+      if (!host) {
+        return;
+      }
       const viewEl = el('div', { className: 'commit-view' });
       viewEl.style.padding = '16px';
       viewEl.style.overflow = 'auto';
@@ -167,7 +180,7 @@ export class CommitMethods {
       lineNumSpan.style.color = 'var(--text-secondary)';
       lineNumSpan.style.userSelect = 'none';
       lineNumSpan.style.flexShrink = '0';
-      lineNumSpan.textContent = lineNum;
+      lineNumSpan.textContent = String(lineNum);
 
       const lineContent = el('span');
       lineContent.style.paddingRight = '12px';
@@ -202,7 +215,7 @@ export class CommitMethods {
       empty.textContent = 'No comments yet. Click a line in the message above to add one.';
       list.appendChild(empty);
     } else {
-      comments.forEach((c, idx) => {
+      comments.forEach((c) => {
         const row = el('div');
         row.style.display = 'flex';
         row.style.flexDirection = 'column';
@@ -303,17 +316,22 @@ export class CommitMethods {
         file: '(commit)',
         start_line: lineNum,
         end_line: lineNum,
-        side: 'new',
+        side: 'new' as const,
         body: text,
-        severity: 'comment',
       };
       this.commentManager.addComment(comment);
       close();
       this.loadCommitView();
     };
 
-    footer.querySelector('.cancel-btn').onclick = close;
-    footer.querySelector('.save-btn').onclick = save;
+    const cancelBtn = footer.querySelector<HTMLButtonElement>('.cancel-btn');
+    const saveBtn = footer.querySelector<HTMLButtonElement>('.save-btn');
+    if (cancelBtn) {
+      cancelBtn.onclick = close;
+    }
+    if (saveBtn) {
+      saveBtn.onclick = save;
+    }
 
     setTimeout(() => ta.focus(), 100);
   }

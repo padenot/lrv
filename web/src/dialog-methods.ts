@@ -1,11 +1,18 @@
-// @ts-nocheck
 import { el } from './dom';
 import { openModal } from './modal';
 import { fetchJSON } from './api';
 import { IS_MAC } from './platform';
 import { KEYBOARD_SHORTCUTS } from './shortcuts';
+import type { AppContext } from './types/app';
 
 export class DialogMethods {
+  declare config: AppContext['config'];
+  declare isInline: boolean;
+  declare currentFileIndex: number;
+  declare commentManager: AppContext['commentManager'];
+  declare applyThemeToUI: (theme: string) => void;
+  declare loadFile: (index: number) => Promise<void>;
+
   showKeyboardHelp() {
     const { overlay, modal, body, close } = openModal({
       title: 'Keyboard Shortcuts',
@@ -108,8 +115,8 @@ export class DialogMethods {
       });
     }
 
-    const opt = (value, text) => el('option', { attrs: { value }, text });
-    const optGroup = (label, options) =>
+    const opt = (value: string, text: string) => el('option', { attrs: { value }, text });
+    const optGroup = (label: string, options: Array<[string, string]>) =>
       el(
         'optgroup',
         { attrs: { label } },
@@ -191,16 +198,22 @@ export class DialogMethods {
     form.appendChild(autoCloseField);
 
     body.appendChild(form);
-    form.querySelector('#color-scheme').value = currentColorScheme;
+    const colorField = form.querySelector<HTMLSelectElement>('#color-scheme');
+    if (colorField) {
+      colorField.value = currentColorScheme;
+    }
 
     const save = async () => {
-      const saveBtn = footer.querySelector('.save-btn');
+      const saveBtn = footer.querySelector<HTMLButtonElement>('.save-btn');
+      if (!saveBtn) {
+        return;
+      }
       saveBtn.disabled = true;
       saveBtn.textContent = 'Saving...';
 
       const formData = new FormData(form);
       const newConfig = {
-        color_scheme: formData.get('color_scheme'),
+        color_scheme: String(formData.get('color_scheme') || 'vs-dark'),
         font: (formData.get('font') || '').toString().trim() || 'JetBrains Mono',
         split_view: formData.get('split_view') === 'on',
         auto_close_tab: formData.get('auto_close_tab') === 'on',
@@ -236,11 +249,17 @@ export class DialogMethods {
       }
     };
 
-    footer.querySelector('.cancel-btn').onclick = close;
-    footer.querySelector('.save-btn').onclick = save;
+    const cancelBtn = footer.querySelector<HTMLButtonElement>('.cancel-btn');
+    const saveBtn = footer.querySelector<HTMLButtonElement>('.save-btn');
+    if (cancelBtn) {
+      cancelBtn.onclick = close;
+    }
+    if (saveBtn) {
+      saveBtn.onclick = save;
+    }
 
     setTimeout(() => {
-      const initial = form.querySelector('#color-scheme');
+      const initial = form.querySelector<HTMLElement>('#color-scheme');
       if (initial) {
         initial.focus();
       }
@@ -293,10 +312,10 @@ export class DialogMethods {
         for (const side of sides) {
           const key = `${filePath}:${side}`;
           try {
-            const data = await fetchJSON(
+            const data = await fetchJSON<{ content?: string }>(
               `/api/file?path=${encodeURIComponent(filePath)}&side=${side}`,
             );
-            fileContents[key] = data.content.split('\n');
+            fileContents[key] = String(data.content || '').split('\n');
           } catch (err) {
             console.error(`Failed to fetch ${key}:`, err);
             fileContents[key] = [];
@@ -308,7 +327,7 @@ export class DialogMethods {
     comments.forEach((comment) => {
       const preview = el('div', { className: 'comment-preview' });
 
-      const headerText = `${comment.file}:${comment.start_line} (${comment.side}) — ${comment.severity}`;
+      const headerText = `${comment.file}:${comment.start_line} (${comment.side})`;
       const previewHeader = el('div', { className: 'comment-preview-header', text: headerText });
 
       const fileKey = `${comment.file}:${comment.side}`;
@@ -337,7 +356,10 @@ export class DialogMethods {
     });
 
     submit = async () => {
-      const submitBtn = footer.querySelector('.confirm-submit-btn');
+      const submitBtn = footer.querySelector<HTMLButtonElement>('.confirm-submit-btn');
+      if (!submitBtn) {
+        return;
+      }
       submitBtn.disabled = true;
       submitBtn.textContent = 'Submitting...';
 
@@ -352,8 +374,11 @@ export class DialogMethods {
         }
 
         submitBtn.textContent = 'Submitted!';
-        document.getElementById('submit-review').disabled = true;
-        document.getElementById('submit-review').textContent = 'Review Submitted';
+        const submitReviewBtn = document.getElementById('submit-review') as HTMLButtonElement | null;
+        if (submitReviewBtn) {
+          submitReviewBtn.disabled = true;
+          submitReviewBtn.textContent = 'Review Submitted';
+        }
 
         setTimeout(() => {
           close();
@@ -368,11 +393,17 @@ export class DialogMethods {
       }
     };
 
-    footer.querySelector('.cancel-submit-btn').onclick = close;
-    footer.querySelector('.confirm-submit-btn').onclick = submit;
+    const cancelSubmitBtn = footer.querySelector<HTMLButtonElement>('.cancel-submit-btn');
+    const confirmSubmitBtn = footer.querySelector<HTMLButtonElement>('.confirm-submit-btn');
+    if (cancelSubmitBtn) {
+      cancelSubmitBtn.onclick = close;
+    }
+    if (confirmSubmitBtn) {
+      confirmSubmitBtn.onclick = submit;
+    }
 
     setTimeout(() => {
-      const f = footer.querySelector('.confirm-submit-btn');
+      const f = footer.querySelector<HTMLElement>('.confirm-submit-btn');
       if (f) {
         f.focus();
       }

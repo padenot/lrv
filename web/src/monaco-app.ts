@@ -1,8 +1,8 @@
-// @ts-nocheck
 import { $, clearEl, el } from './dom';
 import { CommentManager } from './comments';
 import { fetchJSON } from './api';
 import { CUSTOM_THEMES } from './themes';
+import { markAppReady } from './ui-signals';
 
 import { FileDataMethods } from './file-data-methods';
 import { FileListMethods } from './file-list-methods';
@@ -11,8 +11,9 @@ import { NavigationMethods } from './navigation-methods';
 import { CommitMethods } from './commit-methods';
 import { CommentsUIMethods } from './comments-ui-methods';
 import { DialogMethods } from './dialog-methods';
+import type { AppConfig, AppContextData, DiffFile, DiffStats, FilePair, HunkRange } from './types/app';
 
-function applyMixin(TargetClass, MethodsClass) {
+function applyMixin(TargetClass: any, MethodsClass: any) {
   for (const name of Object.getOwnPropertyNames(MethodsClass.prototype)) {
     if (name === 'constructor') {
       continue;
@@ -26,6 +27,40 @@ function applyMixin(TargetClass, MethodsClass) {
 }
 
 export class MonacoApp {
+  commentManager: CommentManager;
+  currentFileIndex: number;
+  editor: any;
+  isInline: boolean;
+  modifiedDecorations: string[];
+  originalDecorations: string[];
+  focusedHunkDecorations: string[];
+  currentWidget: any;
+  currentWidgetEditor?: any;
+  diff: { files: DiffFile[]; stats: DiffStats; commit_message?: string; commit_hash?: string } | null;
+  files: DiffFile[];
+  stats: DiffStats;
+  fileCache: Record<string, FilePair>;
+  fileHunks: Record<string, HunkRange[]>;
+  currentHunkIndex: Record<string, number>;
+  config: AppConfig;
+  context!: AppContextData;
+  originalModel: any;
+  modifiedModel: any;
+  _eagerPrefetchStarted: boolean;
+  _commitPopoverEl: HTMLElement | null;
+  currentFileIsCommit: boolean;
+  _commitViewEl: HTMLElement | null;
+  declare updateUI: () => void;
+  declare renderFileList: () => void;
+  declare loadFile: (index: number) => Promise<void>;
+  declare showCommitMessagePopover: (anchorEl: HTMLElement, message: string, rev: string) => void;
+  declare loadCommitView: () => void;
+  declare showSettingsModal: () => void;
+  declare showKeyboardHelp: () => void;
+  declare showSubmitConfirmation: () => Promise<void>;
+  declare setupSidebarResizer: () => void;
+  declare setupKeyboardShortcuts: () => void;
+
   constructor() {
     this.commentManager = new CommentManager();
     this.currentFileIndex = 0;
@@ -37,11 +72,11 @@ export class MonacoApp {
     this.currentWidget = null;
     this.diff = null;
     this.files = [];
-    this.stats = null;
+    this.stats = { files_changed: 0, additions: 0, deletions: 0 };
     this.fileCache = {};
     this.fileHunks = {}; // Track hunk start lines per file: { [path]: number[] }
     this.currentHunkIndex = {}; // Track current hunk index per file
-    this.config = null; // User config from server
+    this.config = {}; // User config from server
     this.originalModel = null;
     this.modifiedModel = null;
     this._eagerPrefetchStarted = false;
@@ -65,9 +100,9 @@ export class MonacoApp {
     window.Perf.mark('init:fetch:start');
     const t0 = performance.now();
     const [configData, contextData, diffData] = await Promise.all([
-      fetchJSON('/api/config'),
-      fetchJSON('/api/context'),
-      fetchJSON('/api/diff'),
+      fetchJSON<AppConfig>('/api/config'),
+      fetchJSON<AppContextData>('/api/context'),
+      fetchJSON<{ files: DiffFile[]; stats: DiffStats; commit_message?: string; commit_hash?: string }>('/api/diff'),
       document.fonts.ready,
     ]);
     window.Perf.mark('init:fetch:end');
@@ -95,12 +130,12 @@ export class MonacoApp {
 
     // Wait for AMD loader to be ready
     window.Perf.mark('init:amd-wait:start');
-    await new Promise((resolve, reject) => {
+    await new Promise<void>((resolve, reject) => {
       const start = performance.now();
       const timer = setInterval(() => {
         if (window.require) {
           clearInterval(timer);
-          resolve(null);
+          resolve();
         }
         if (performance.now() - start > 5000) {
           clearInterval(timer);
@@ -118,7 +153,7 @@ export class MonacoApp {
     this.applyThemeToUI(this.config.color_scheme || 'vs-dark');
     document.documentElement.setAttribute('data-ui-ready', '1');
 
-    return new Promise((resolve) => {
+    return new Promise<void>((resolve) => {
       window.Perf.mark('init:monaco:load:start');
       window.require(['vs/editor/editor.main'], () => {
         window.Perf.mark('init:monaco:load:end');
@@ -171,7 +206,10 @@ export class MonacoApp {
             'init:first-file:load:end',
           );
           // Set review timestamp
-          document.getElementById('review-time').textContent = new Date().toLocaleString();
+          const reviewTime = document.getElementById('review-time');
+          if (reviewTime) {
+            reviewTime.textContent = new Date().toLocaleString();
+          }
           // Set project info
           this.renderProjectInfo();
           // Wait for paint and record init end
@@ -204,16 +242,16 @@ export class MonacoApp {
     });
   }
 
-  applyThemeToUI(themeName) {
+  applyThemeToUI(themeName: string) {
     // Derive UI colors from the Monaco theme definitions we register locally.
-    const setVar = (k, v) => {
+    const setVar = (k: string, v: string) => {
       if (v) {
         document.documentElement.style.setProperty(k, v);
       }
     };
 
     // Accent from theme rules: prefer the 'keyword' token color defined in our theme
-    const defs = window.UI_THEME_DEFS || {};
+    const defs = (window.UI_THEME_DEFS || {}) as Record<string, any>;
     const def = defs[themeName];
     if (def && Array.isArray(def.rules)) {
       const kw = def.rules.find((r) => r && r.token === 'keyword' && r.foreground);
@@ -293,7 +331,7 @@ export class MonacoApp {
       }
       mm.addEventListener('click', (ev) => {
         this.showCommitMessagePopover(
-          ev.currentTarget,
+          ev.currentTarget as HTMLElement,
           String(this.diff.commit_message || ''),
           String(this.diff.commit_hash || ''),
         );
@@ -304,8 +342,8 @@ export class MonacoApp {
 
   setupUI() {
     // File list clicks
-    $('#file-list').addEventListener('click', (e) => {
-      const li = e.target.closest('li');
+    $('#file-list')?.addEventListener('click', (e) => {
+      const li = (e.target as Element | null)?.closest('li');
       if (li) {
         if (li.dataset.commit === '1') {
           this.loadCommitView();
@@ -317,31 +355,34 @@ export class MonacoApp {
     });
 
     // Settings button
-    $('#settings-btn').addEventListener('click', () => {
+    $('#settings-btn')?.addEventListener('click', () => {
       this.showSettingsModal();
     });
 
     // Help button
-    $('#help-btn').addEventListener('click', () => this.showKeyboardHelp());
+    $('#help-btn')?.addEventListener('click', () => this.showKeyboardHelp());
 
     // Submit button
-    $('#submit-review').addEventListener('click', async () => {
+    $('#submit-review')?.addEventListener('click', async () => {
       this.showSubmitConfirmation();
     });
 
     // Toggle view
-    $('#toggle-view').addEventListener('click', () => {
+    $('#toggle-view')?.addEventListener('click', () => {
       this.isInline = !this.isInline;
       this.loadFile(this.currentFileIndex);
     });
 
     // Stats
-    $('#stats').textContent =
-      `${this.stats.files_changed} files, +${this.stats.additions} -${this.stats.deletions}`;
+    const statsEl = $('#stats');
+    if (statsEl) {
+      statsEl.textContent =
+        `${this.stats.files_changed} files, +${this.stats.additions} -${this.stats.deletions}`;
+    }
 
     // Show banner for public mode
     if (this.context && this.context.is_public) {
-      const b = $('#public-banner');
+      const b = $<HTMLElement>('#public-banner');
       if (b) {
         b.style.display = '';
       }
