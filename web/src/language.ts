@@ -113,7 +113,7 @@ export function detectLanguageFromPathAndContent(
     }
   }
 
-  const firstLine = content.split('\n', 1)[0].toLowerCase();
+  const firstLine = (content.split('\n', 1)[0] ?? '').toLowerCase();
   if (firstLine.startsWith('#!')) {
     if (
       firstLine.includes('bash') ||

@@ -299,16 +299,14 @@ export class DialogMethods {
 
     const commentsByFile: Record<string, ReviewComment[]> = {};
     comments.forEach((comment) => {
-      if (!commentsByFile[comment.file]) {
-        commentsByFile[comment.file] = [];
-      }
-      commentsByFile[comment.file].push(comment);
+      commentsByFile[comment.file] ??= [];
+      commentsByFile[comment.file]!.push(comment);
     });
 
     const fileContents: Record<string, string[]> = {};
     await Promise.all(
       Object.keys(commentsByFile).map(async (filePath) => {
-        const fileComments = commentsByFile[filePath];
+        const fileComments = commentsByFile[filePath] ?? [];
         const sides = [...new Set(fileComments.map((c) => c.side))];
 
         for (const side of sides) {

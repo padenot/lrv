@@ -55,9 +55,9 @@ export class FileDataMethods {
     const concurrency = 8;
     let i = 0;
     const nextBatch = () => {
-      const batch = [];
+      const batch: Array<Promise<void>> = [];
       for (let k = 0; k < concurrency && i < toFetch.length; k++, i++) {
-        const p = toFetch[i];
+        const p = toFetch[i]!;
         batch.push(
           Promise.all([
             fetchJSON<FileContentResponse>(`/api/file?path=${encodeURIComponent(p)}&side=old`),

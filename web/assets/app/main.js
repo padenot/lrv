@@ -429,10 +429,10 @@ var CommentManager = class {
 		return this.comments.findIndex((c) => c.file === file && c.side === side && commentContainsLine(c, line));
 	}
 	updateComment(index, newBody) {
-		if (index >= 0 && index < this.comments.length) {
-			this.comments[index].body = newBody;
-			this.notifyListeners();
-		}
+		const comment = this.comments[index];
+		if (!comment) return;
+		comment.body = newBody;
+		this.notifyListeners();
 	}
 	getComments() {
 		return [...this.comments];
@@ -471,7 +471,7 @@ function showFetchSpinnerDelayed() {
 	if (fileFetchDelayTimer) return;
 	fileFetchDelayTimer = setTimeout(() => {
 		if (fileFetchPending > 0) {
-			fetchSpinnerEl.classList.add("visible");
+			fetchSpinnerEl?.classList.add("visible");
 			const app = window.__APP;
 			if (app && typeof app.eagerPrefetchAllFiles === "function") app.eagerPrefetchAllFiles();
 		}
@@ -737,7 +737,7 @@ var FileListMethods = class {
 			]));
 			right.appendChild(el("span", {
 				className: `file-status ${file.status}`,
-				text: file.status[0].toUpperCase()
+				text: file.status.charAt(0).toUpperCase()
 			}));
 			li.appendChild(left);
 			li.appendChild(right);
@@ -830,7 +830,7 @@ function detectLanguageFromPathAndContent(path = "", content = "") {
 		".dart": "dart",
 		".dockerfile": "dockerfile"
 	})) if (lowerBase.endsWith(ext)) return language;
-	const firstLine = content.split("\n", 1)[0].toLowerCase();
+	const firstLine = (content.split("\n", 1)[0] ?? "").toLowerCase();
 	if (firstLine.startsWith("#!")) {
 		if (firstLine.includes("bash") || firstLine.includes("sh") || firstLine.includes("zsh") || firstLine.includes("fish")) return "shell";
 		if (firstLine.includes("python")) return "python";
@@ -865,6 +865,9 @@ function prefersReducedMotion() {
 //#endregion
 //#region web/src/file-loading-methods.ts
 var FileLoadingMethods = class {
+	getCurrentFile(index) {
+		return this.files[index];
+	}
 	isAddedFile(file) {
 		const rawStatus = file.status.toLowerCase();
 		if (rawStatus === "added" || rawStatus === "add" || rawStatus === "a" || rawStatus === "new") return true;
@@ -876,7 +879,7 @@ var FileLoadingMethods = class {
 		window.Perf.mark("loadFile:start");
 		window.Perf.recordFileSwitchStart();
 		this.currentFileIndex = index;
-		const file = this.files[index];
+		const file = this.getCurrentFile(index);
 		const isAddedFile = this.isAddedFile(file);
 		const renderSideBySide = !this.isInline && !isAddedFile;
 		if (window.DEBUG) console.log("[app] loadFile: path", file.path, "status", file.status);
@@ -929,12 +932,13 @@ var FileLoadingMethods = class {
 		await this.fetchFilePair(file.path);
 		window.Perf.mark("loadFile:fetch:end");
 		window.Perf.measure("loadFile:fetch", "loadFile:fetch:start", "loadFile:fetch:end");
-		const oldContent = this.fileCache[file.path].old;
-		const newContent = this.fileCache[file.path].new;
+		const filePair = this.fileCache[file.path];
+		const oldContent = filePair.old;
+		const newContent = filePair.new;
 		const language = detectLanguageFromPathAndContent(file.path || file.old_path || "", newContent || oldContent);
 		const oldBanner = $("#old-missing-banner");
 		if (oldBanner) {
-			const show = !isAddedFile && this.fileCache[file.path].old.length === 0 && this.fileCache[file.path].new.length > 0;
+			const show = !isAddedFile && filePair.old.length === 0 && filePair.new.length > 0;
 			oldBanner.style.display = show ? "" : "none";
 		}
 		window.Perf.mark("loadFile:models:start");
@@ -944,18 +948,19 @@ var FileLoadingMethods = class {
 		window.Perf.measure("loadFile:models", "loadFile:models:start", "loadFile:models:end");
 		if (window.DEBUG) console.log("[app] models created for", file.path, "lang", language, "old/new lines", oldContent.split("\n").length, newContent.split("\n").length);
 		window.Perf.mark("loadFile:setModel:start");
-		this.editor.setModel({
+		const diffEditor = this.editor;
+		diffEditor.setModel({
 			original: this.originalModel,
 			modified: this.modifiedModel
 		});
 		window.Perf.mark("loadFile:setModel:end");
 		window.Perf.measure("loadFile:setModel", "loadFile:setModel:start", "loadFile:setModel:end");
-		const scrollReset = this.editor.onDidUpdateDiff(() => {
+		const scrollReset = diffEditor.onDidUpdateDiff(() => {
 			scrollReset.dispose();
-			this.editor.getModifiedEditor().setScrollTop(0);
-			this.editor.getOriginalEditor().setScrollTop(0);
+			diffEditor.getModifiedEditor().setScrollTop(0);
+			diffEditor.getOriginalEditor().setScrollTop(0);
 		});
-		this.editor.updateOptions({
+		diffEditor.updateOptions({
 			renderSideBySide,
 			fontFamily: mono,
 			glyphMargin: true,
@@ -971,8 +976,8 @@ var FileLoadingMethods = class {
 			folding: false,
 			scrollBeyondLastLine: true
 		};
-		const me = this.editor.getModifiedEditor();
-		const oe = this.editor.getOriginalEditor();
+		const me = diffEditor.getModifiedEditor();
+		const oe = diffEditor.getOriginalEditor();
 		if (me.getModel()) me.updateOptions(opts);
 		if (oe.getModel()) oe.updateOptions(opts);
 		window.Perf.mark("loadFile:paint-wait:start");
@@ -984,7 +989,7 @@ var FileLoadingMethods = class {
 			window.Perf.measure("loadFile:total", "loadFile:start", "loadFile:end");
 			if (window.DEBUG) {
 				const e = performance.getEntriesByName("fileSwitch");
-				const d = e && e.length ? e[e.length - 1].duration : null;
+				const d = e.length > 0 ? e[e.length - 1].duration : null;
 				if (d != null) console.log("[perf] fileSwitch ms:", Math.round(d));
 			}
 			const prefs = [
@@ -1000,7 +1005,7 @@ var FileLoadingMethods = class {
 			const spans = Array.from(document.querySelectorAll(".monaco-editor .view-line span"));
 			let found = null;
 			for (const p of prefs) {
-				for (const s of spans) if ((s.textContent || "").trim() === p) {
+				for (const s of spans) if ((s.textContent ?? "").trim() === p) {
 					found = s;
 					break;
 				}
@@ -1012,8 +1017,8 @@ var FileLoadingMethods = class {
 			}
 			markAppReady();
 		}));
-		const modifiedEditor = this.editor.getModifiedEditor();
-		const originalEditor = this.editor.getOriginalEditor();
+		const modifiedEditor = diffEditor.getModifiedEditor();
+		const originalEditor = diffEditor.getOriginalEditor();
 		modifiedEditor.updateOptions({ lineNumbers: "on" });
 		originalEditor.updateOptions({ lineNumbers: "on" });
 		this.setupEditorClickHandlers(file.path, modifiedEditor, originalEditor);
@@ -1023,12 +1028,14 @@ var FileLoadingMethods = class {
 	setupEditorClickHandlers(filePath, modifiedEditor, originalEditor) {
 		modifiedEditor.onMouseDown((e) => {
 			if (e.target.type === monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS || e.target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN) {
+				if (!e.target.position) return;
 				const monacoLine = e.target.position.lineNumber;
 				this.showCommentDialog(filePath, monacoLine, monacoLine, "new");
 			}
 		});
 		originalEditor.onMouseDown((e) => {
 			if (e.target.type === monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS || e.target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN) {
+				if (!e.target.position) return;
 				const monacoLine = e.target.position.lineNumber;
 				this.showCommentDialog(filePath, monacoLine, monacoLine, "old");
 			}
@@ -1116,6 +1123,9 @@ const KEYBOARD_SHORTCUTS = [
 //#endregion
 //#region web/src/navigation-methods.ts
 var NavigationMethods = class {
+	getCurrentFile() {
+		return this.files[this.currentFileIndex];
+	}
 	setupKeyboardShortcuts() {
 		document.addEventListener("keydown", (e) => {
 			if (document.querySelector(".submit-modal-overlay")) return;
@@ -1165,7 +1175,7 @@ var NavigationMethods = class {
 	toggleView() {
 		this.isInline = !this.isInline;
 		this.loadFile(this.currentFileIndex);
-		const file = this.files[this.currentFileIndex];
+		const file = this.getCurrentFile();
 		if (this.isAddedFile(file)) {
 			showNavIndicator("Inline (new file)");
 			return;
@@ -1220,7 +1230,7 @@ var NavigationMethods = class {
 		}
 	}
 	nextHunk() {
-		const file = this.files[this.currentFileIndex];
+		const file = this.getCurrentFile();
 		const hunks = this.fileHunks[file.path];
 		if (!hunks || hunks.length === 0) {
 			this.nextFile();
@@ -1235,7 +1245,7 @@ var NavigationMethods = class {
 		}
 	}
 	previousHunk() {
-		const file = this.files[this.currentFileIndex];
+		const file = this.getCurrentFile();
 		const hunks = this.fileHunks[file.path];
 		if (!hunks || hunks.length === 0) {
 			this.previousFile();
@@ -1251,7 +1261,7 @@ var NavigationMethods = class {
 	}
 	jumpToHunk(hunkIndex) {
 		if (!this.editor) return;
-		const file = this.files[this.currentFileIndex];
+		const file = this.getCurrentFile();
 		const hunks = this.fileHunks[file.path];
 		if (!hunks || hunkIndex >= hunks.length) return;
 		const hunkRange = hunks[hunkIndex];
@@ -1319,7 +1329,7 @@ var NavigationMethods = class {
 	}
 	moveLine(delta) {
 		if (!this.editor) return;
-		const file = this.files[this.currentFileIndex];
+		const file = this.getCurrentFile();
 		const hunks = this.fileHunks[file.path];
 		if (!hunks || hunks.length === 0) return;
 		let idx = this.currentHunkIndex[file.path] ?? 0;
@@ -1364,7 +1374,7 @@ var NavigationMethods = class {
 	}
 	openCommentOnCurrentFocus() {
 		if (!this.editor) return;
-		const file = this.files[this.currentFileIndex];
+		const file = this.getCurrentFile();
 		const hunks = this.fileHunks[file.path];
 		if (!hunks || hunks.length === 0) return;
 		if (this.currentFocusedLine) {
@@ -1744,6 +1754,7 @@ var CommentsUIMethods = class {
 	updateDecorations() {
 		if (!this.editor) return;
 		const file = this.files[this.currentFileIndex];
+		if (!file) return;
 		const comments = this.commentManager.getCommentsForFile(file.path);
 		const modifiedEditor = this.editor.getModifiedEditor();
 		const originalEditor = this.editor.getOriginalEditor();
@@ -1767,6 +1778,7 @@ var CommentsUIMethods = class {
 		this.originalDecorations = originalEditor.deltaDecorations(this.originalDecorations, originalDecorations);
 	}
 	showCommentDialog(file, fileLineNumber, monacoLineNumber, side) {
+		if (!this.editor) return;
 		const targetEditor = side === "new" ? this.editor.getModifiedEditor() : this.editor.getOriginalEditor();
 		if (this.currentWidget) {
 			if (this.currentWidgetEditor) this.currentWidgetEditor.removeContentWidget(this.currentWidget);
@@ -2084,12 +2096,12 @@ var DialogMethods = class {
 		}
 		const commentsByFile = {};
 		comments.forEach((comment) => {
-			if (!commentsByFile[comment.file]) commentsByFile[comment.file] = [];
+			commentsByFile[comment.file] ??= [];
 			commentsByFile[comment.file].push(comment);
 		});
 		const fileContents = {};
 		await Promise.all(Object.keys(commentsByFile).map(async (filePath) => {
-			const fileComments = commentsByFile[filePath];
+			const fileComments = commentsByFile[filePath] ?? [];
 			const sides = [...new Set(fileComments.map((c) => c.side))];
 			for (const side of sides) {
 				const key = `${filePath}:${side}`;
@@ -2175,7 +2187,9 @@ var DialogMethods = class {
 function applyMixin(TargetClass, MethodsClass) {
 	for (const name of Object.getOwnPropertyNames(MethodsClass.prototype)) {
 		if (name === "constructor") continue;
-		Object.defineProperty(TargetClass.prototype, name, Object.getOwnPropertyDescriptor(MethodsClass.prototype, name));
+		const descriptor = Object.getOwnPropertyDescriptor(MethodsClass.prototype, name);
+		if (!descriptor) continue;
+		Object.defineProperty(TargetClass.prototype, name, descriptor);
 	}
 }
 var MonacoApp = class {
@@ -2282,12 +2296,13 @@ var MonacoApp = class {
 		});
 		window.Perf.mark("init:amd-wait:end");
 		window.Perf.measure("init:amd-wait", "init:amd-wait:start", "init:amd-wait:end");
-		window.require.config({ paths: { vs: window.MONACO_VS_BASE ?? "/assets/vendor/monaco/min/vs" } });
+		const amdRequire = window.require;
+		amdRequire.config({ paths: { vs: window.MONACO_VS_BASE ?? "/assets/vendor/monaco/min/vs" } });
 		this.applyThemeToUI(this.config.color_scheme);
 		document.documentElement.setAttribute("data-ui-ready", "1");
 		return new Promise((resolve) => {
 			window.Perf.mark("init:monaco:load:start");
-			window.require(["vs/editor/editor.main"], () => {
+			amdRequire(["vs/editor/editor.main"], () => {
 				window.Perf.mark("init:monaco:load:end");
 				window.Perf.measure("init:monaco:load", "init:monaco:load:start", "init:monaco:load:end");
 				if (window.DEBUG) console.log("[app] monaco loaded");
@@ -2332,7 +2347,7 @@ var MonacoApp = class {
 						window.Perf.measure("init:total", "init:start", "init:end");
 						if (window.DEBUG) {
 							const e = performance.getEntriesByName("appInit");
-							const d = e && e.length ? e[e.length - 1].duration : null;
+							const d = e.length > 0 ? e[e.length - 1].duration : null;
 							if (d != null) console.log("[perf] appInit ms:", Math.round(d));
 						}
 						markAppReady();
@@ -2375,10 +2390,10 @@ var MonacoApp = class {
 		}
 	}
 	defineCustomThemes() {
-		window.UI_THEME_DEFS ??= {};
+		const defs = window.UI_THEME_DEFS ??= {};
 		Object.entries(CUSTOM_THEMES).forEach(([name, theme]) => {
 			monaco.editor.defineTheme(name, theme);
-			window.UI_THEME_DEFS[name] = theme;
+			defs[name] = theme;
 		});
 	}
 	renderProjectInfo() {
@@ -2429,8 +2444,8 @@ var MonacoApp = class {
 			const li = e.target?.closest("li");
 			if (li) if (li.dataset.commit === "1") this.loadCommitView();
 			else {
-				const index = parseInt(li.dataset.index);
-				this.loadFile(index);
+				const index = Number(li.dataset.index ?? -1);
+				if (index >= 0) this.loadFile(index);
 			}
 		});
 		$("#settings-btn")?.addEventListener("click", () => {

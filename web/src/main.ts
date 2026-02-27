@@ -1,6 +1,7 @@
 import './perf';
 import './themes';
 import { MonacoApp } from './monaco-app';
+import type { AppContext } from './types/app';
 
 document.title = 'lrv — Loading…';
 
@@ -30,7 +31,7 @@ window.addEventListener(
 );
 
 const app = new MonacoApp();
-window.__APP = app as typeof window.__APP;
+window.__APP = app as Partial<Pick<AppContext, 'eagerPrefetchAllFiles'>>;
 app.init().then(() => {
   if (window.DEBUG) {
     console.log('Monaco Editor initialized');

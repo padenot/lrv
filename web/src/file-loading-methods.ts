@@ -29,6 +29,10 @@ export class FileLoadingMethods {
   declare jumpToHunk: AppContext['jumpToHunk'];
   declare setFocusedLine: AppContext['setFocusedLine'];
 
+  private getCurrentFile(index: number) {
+    return this.files[index]!;
+  }
+
   isAddedFile(file: DiffFile) {
     const rawStatus = file.status.toLowerCase();
     if (rawStatus === 'added' || rawStatus === 'add' || rawStatus === 'a' || rawStatus === 'new') {
@@ -47,7 +51,7 @@ export class FileLoadingMethods {
     window.Perf.mark('loadFile:start');
     window.Perf.recordFileSwitchStart();
     this.currentFileIndex = index;
-    const file = this.files[index];
+    const file = this.getCurrentFile(index);
     const isAddedFile = this.isAddedFile(file);
     const renderSideBySide = !this.isInline && !isAddedFile;
     if (window.DEBUG) {
@@ -116,8 +120,9 @@ export class FileLoadingMethods {
     await this.fetchFilePair(file.path);
     window.Perf.mark('loadFile:fetch:end');
     window.Perf.measure('loadFile:fetch', 'loadFile:fetch:start', 'loadFile:fetch:end');
-    const oldContent = this.fileCache[file.path].old;
-    const newContent = this.fileCache[file.path].new;
+    const filePair = this.fileCache[file.path]!;
+    const oldContent = filePair.old;
+    const newContent = filePair.new;
     const detectionPath = file.path || file.old_path || '';
     const language = detectLanguageFromPathAndContent(detectionPath, newContent || oldContent);
 
@@ -126,8 +131,8 @@ export class FileLoadingMethods {
     if (oldBanner) {
       const show =
         !isAddedFile &&
-        this.fileCache[file.path].old.length === 0 &&
-        this.fileCache[file.path].new.length > 0;
+        filePair.old.length === 0 &&
+        filePair.new.length > 0;
       oldBanner.style.display = show ? '' : 'none';
     }
     window.Perf.mark('loadFile:models:start');
@@ -148,9 +153,10 @@ export class FileLoadingMethods {
     }
 
     window.Perf.mark('loadFile:setModel:start');
-    this.editor.setModel({
-      original: this.originalModel,
-      modified: this.modifiedModel,
+    const diffEditor = this.editor!;
+    diffEditor.setModel({
+      original: this.originalModel!,
+      modified: this.modifiedModel!,
     });
     window.Perf.mark('loadFile:setModel:end');
     window.Perf.measure('loadFile:setModel', 'loadFile:setModel:start', 'loadFile:setModel:end');
@@ -159,12 +165,12 @@ export class FileLoadingMethods {
     // Monaco finishes its async diff/hideUnchangedRegions computation; a plain
     // setScrollTop(0) here would be overridden by that async step. The
     // listener fires well before the 100 ms jumpToHunk timer.
-    const scrollReset = this.editor.onDidUpdateDiff(() => {
+    const scrollReset = diffEditor.onDidUpdateDiff(() => {
       scrollReset.dispose();
-      this.editor.getModifiedEditor().setScrollTop(0);
-      this.editor.getOriginalEditor().setScrollTop(0);
+      diffEditor.getModifiedEditor().setScrollTop(0);
+      diffEditor.getOriginalEditor().setScrollTop(0);
     });
-    this.editor.updateOptions({
+    diffEditor.updateOptions({
       renderSideBySide,
       fontFamily: mono,
       glyphMargin: true,
@@ -180,8 +186,8 @@ export class FileLoadingMethods {
       folding: false,
       scrollBeyondLastLine: true,
     };
-    const me = this.editor.getModifiedEditor();
-    const oe = this.editor.getOriginalEditor();
+    const me = diffEditor.getModifiedEditor();
+    const oe = diffEditor.getOriginalEditor();
     if (me.getModel()) {
       me.updateOptions(opts);
     }
@@ -203,7 +209,7 @@ export class FileLoadingMethods {
         window.Perf.measure('loadFile:total', 'loadFile:start', 'loadFile:end');
         if (window.DEBUG) {
           const e = performance.getEntriesByName('fileSwitch');
-          const d = e && e.length ? e[e.length - 1].duration : null;
+          const d = e.length > 0 ? e[e.length - 1]!.duration : null;
           if (d != null) {
             console.log('[perf] fileSwitch ms:', Math.round(d));
           }
@@ -211,10 +217,10 @@ export class FileLoadingMethods {
         // Derive accent color from a visible keyword token if present (prefer 'function'/'const'/'import')
         const prefs = ['function', 'const', 'import', 'class', 'return', 'if', 'export', 'let'];
         const spans = Array.from(document.querySelectorAll('.monaco-editor .view-line span'));
-        let found = null;
+        let found: Element | null = null;
         for (const p of prefs) {
           for (const s of spans) {
-            const txt = (s.textContent || '').trim();
+            const txt = (s.textContent ?? '').trim();
             if (txt === p) {
               found = s;
               break;
@@ -234,8 +240,8 @@ export class FileLoadingMethods {
       }),
     );
 
-    const modifiedEditor = this.editor.getModifiedEditor();
-    const originalEditor = this.editor.getOriginalEditor();
+    const modifiedEditor = diffEditor.getModifiedEditor();
+    const originalEditor = diffEditor.getOriginalEditor();
 
     modifiedEditor.updateOptions({ lineNumbers: 'on' });
     originalEditor.updateOptions({ lineNumbers: 'on' });
@@ -255,6 +261,9 @@ export class FileLoadingMethods {
         e.target.type === monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS ||
         e.target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN
       ) {
+        if (!e.target.position) {
+          return;
+        }
         const monacoLine = e.target.position.lineNumber;
         this.showCommentDialog(filePath, monacoLine, monacoLine, 'new');
       }
@@ -265,6 +274,9 @@ export class FileLoadingMethods {
         e.target.type === monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS ||
         e.target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN
       ) {
+        if (!e.target.position) {
+          return;
+        }
         const monacoLine = e.target.position.lineNumber;
         this.showCommentDialog(filePath, monacoLine, monacoLine, 'old');
       }
@@ -277,7 +289,7 @@ export class FileLoadingMethods {
       const currentIdx = this.currentHunkIndex[filePath] ?? 0;
       setTimeout(() => {
         this.jumpToHunk(currentIdx);
-        const hr = hunks[currentIdx];
+        const hr = hunks[currentIdx]!;
         const side = hr.side === 'old' ? 'old' : 'new';
         this.setFocusedLine(side, hr.start, false);
       }, 100);

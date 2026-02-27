@@ -30,10 +30,14 @@ function applyMixin(TargetClass: Constructor, MethodsClass: Constructor) {
     if (name === 'constructor') {
       continue;
     }
+    const descriptor = Object.getOwnPropertyDescriptor(MethodsClass.prototype, name);
+    if (!descriptor) {
+      continue;
+    }
     Object.defineProperty(
       TargetClass.prototype,
       name,
-      Object.getOwnPropertyDescriptor(MethodsClass.prototype, name),
+      descriptor,
     );
   }
 }
@@ -165,7 +169,8 @@ export class MonacoApp {
     });
     window.Perf.mark('init:amd-wait:end');
     window.Perf.measure('init:amd-wait', 'init:amd-wait:start', 'init:amd-wait:end');
-    window.require.config({
+    const amdRequire = window.require!;
+    amdRequire.config({
       paths: { vs: window.MONACO_VS_BASE ?? '/assets/vendor/monaco/min/vs' },
     });
 
@@ -175,7 +180,7 @@ export class MonacoApp {
 
     return new Promise<void>((resolve) => {
       window.Perf.mark('init:monaco:load:start');
-      window.require(['vs/editor/editor.main'], () => {
+      amdRequire(['vs/editor/editor.main'], () => {
         window.Perf.mark('init:monaco:load:end');
         window.Perf.measure('init:monaco:load', 'init:monaco:load:start', 'init:monaco:load:end');
         if (window.DEBUG) {
@@ -248,7 +253,7 @@ export class MonacoApp {
               // Minimal perf log (gated behind DEBUG)
               if (window.DEBUG) {
                 const e = performance.getEntriesByName('appInit');
-                const d = e && e.length ? e[e.length - 1].duration : null;
+                const d = e.length > 0 ? e[e.length - 1]!.duration : null;
                 if (d != null) {
                   console.log('[perf] appInit ms:', Math.round(d));
                 }
@@ -307,10 +312,10 @@ export class MonacoApp {
   }
 
   defineCustomThemes() {
-    window.UI_THEME_DEFS ??= {};
+    const defs = (window.UI_THEME_DEFS ??= {});
     Object.entries(CUSTOM_THEMES).forEach(([name, theme]) => {
       monaco.editor.defineTheme(name, theme);
-      window.UI_THEME_DEFS[name] = theme;
+      defs[name] = theme;
     });
   }
 
@@ -368,8 +373,10 @@ export class MonacoApp {
         if (li.dataset.commit === '1') {
           this.loadCommitView();
         } else {
-          const index = parseInt(li.dataset.index);
-          this.loadFile(index);
+          const index = Number(li.dataset.index ?? -1);
+          if (index >= 0) {
+            this.loadFile(index);
+          }
         }
       }
     });

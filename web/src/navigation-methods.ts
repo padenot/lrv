@@ -3,6 +3,7 @@ import { KEYBOARD_SHORTCUTS, type KeyboardAction } from './shortcuts';
 import { prefersReducedMotion } from './font';
 import { showNavIndicator } from './ui-signals';
 import type { AppContext, Side } from './types/app';
+import type { editor } from 'monaco-editor';
 
 export class NavigationMethods {
   declare currentWidget: AppContext['currentWidget'];
@@ -22,6 +23,10 @@ export class NavigationMethods {
   declare showSubmitConfirmation: () => Promise<void>;
   declare showKeyboardHelp: () => void;
   declare showCommentDialog: AppContext['showCommentDialog'];
+
+  private getCurrentFile() {
+    return this.files[this.currentFileIndex]!;
+  }
 
   setupKeyboardShortcuts() {
     document.addEventListener('keydown', (e: KeyboardEvent) => {
@@ -96,7 +101,7 @@ export class NavigationMethods {
   toggleView() {
     this.isInline = !this.isInline;
     this.loadFile(this.currentFileIndex);
-    const file = this.files[this.currentFileIndex];
+    const file = this.getCurrentFile();
     const isAddedFile = this.isAddedFile(file);
     if (isAddedFile) {
       showNavIndicator('Inline (new file)');
@@ -178,7 +183,7 @@ export class NavigationMethods {
   }
 
   nextHunk() {
-    const file = this.files[this.currentFileIndex];
+    const file = this.getCurrentFile();
     const hunks = this.fileHunks[file.path];
     if (!hunks || hunks.length === 0) {
       this.nextFile();
@@ -196,7 +201,7 @@ export class NavigationMethods {
   }
 
   previousHunk() {
-    const file = this.files[this.currentFileIndex];
+    const file = this.getCurrentFile();
     const hunks = this.fileHunks[file.path];
     if (!hunks || hunks.length === 0) {
       this.previousFile();
@@ -218,13 +223,13 @@ export class NavigationMethods {
       return;
     }
 
-    const file = this.files[this.currentFileIndex];
+    const file = this.getCurrentFile();
     const hunks = this.fileHunks[file.path];
     if (!hunks || hunkIndex >= hunks.length) {
       return;
     }
 
-    const hunkRange = hunks[hunkIndex];
+    const hunkRange = hunks[hunkIndex]!;
     const reduceMotion = prefersReducedMotion();
     const smooth = monaco.editor.ScrollType.Smooth;
 
@@ -261,7 +266,7 @@ export class NavigationMethods {
     const modifiedEditor = this.editor.getModifiedEditor();
     const originalEditor = this.editor.getOriginalEditor();
 
-    const decorations = [];
+    const decorations: editor.IModelDeltaDecoration[] = [];
     for (let line = startLine; line <= endLine; line++) {
       decorations.push({
         range: new monaco.Range(line, 1, line, 1),
@@ -331,14 +336,14 @@ export class NavigationMethods {
     if (!this.editor) {
       return;
     }
-    const file = this.files[this.currentFileIndex];
+    const file = this.getCurrentFile();
     const hunks = this.fileHunks[file.path];
     if (!hunks || hunks.length === 0) {
       return;
     }
     // Initialize focus if needed: start of current hunk
     let idx = this.currentHunkIndex[file.path] ?? 0;
-    const hr = hunks[idx];
+    const hr = hunks[idx]!;
     if (!this.currentFocusedLine) {
       const side = hr.side === 'old' ? 'old' : 'new';
       this.setFocusedLine(side, hr.start, true);
@@ -363,14 +368,14 @@ export class NavigationMethods {
     if (delta > 0 && idx < hunks.length - 1) {
       idx += 1;
       this.currentHunkIndex[file.path] = idx;
-      const nhr = hunks[idx];
+      const nhr = hunks[idx]!;
       const ns = nhr.side === 'old' ? 'old' : 'new';
       this.jumpToHunk(idx);
       this.setFocusedLine(ns, nhr.start, true);
     } else if (delta < 0 && idx > 0) {
       idx -= 1;
       this.currentHunkIndex[file.path] = idx;
-      const phr = hunks[idx];
+      const phr = hunks[idx]!;
       const ps = phr.side === 'old' ? 'old' : 'new';
       this.jumpToHunk(idx);
       this.setFocusedLine(ps, phr.end, true);
@@ -398,7 +403,7 @@ export class NavigationMethods {
       return;
     }
 
-    const file = this.files[this.currentFileIndex];
+    const file = this.getCurrentFile();
     const hunks = this.fileHunks[file.path];
     if (!hunks || hunks.length === 0) {
       return;
@@ -412,7 +417,7 @@ export class NavigationMethods {
 
     // Fallback to current hunk start if no line is focused
     const currentIdx = this.currentHunkIndex[file.path] ?? 0;
-    const hunkRange = hunks[currentIdx];
+    const hunkRange = hunks[currentIdx]!;
     const side = hunkRange.side === 'old' ? 'old' : 'new';
     this.showCommentDialog(file.path, hunkRange.start, hunkRange.start, side);
   }

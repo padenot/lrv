@@ -124,7 +124,7 @@ export class FileListMethods {
       right.appendChild(
         el('span', {
           className: `file-status ${file.status}`,
-          text: file.status[0].toUpperCase(),
+          text: file.status.charAt(0).toUpperCase(),
         }),
       );
 

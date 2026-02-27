@@ -53,10 +53,12 @@ export class CommentManager {
   }
 
   updateComment(index: number, newBody: string): void {
-    if (index >= 0 && index < this.comments.length) {
-      this.comments[index].body = newBody;
-      this.notifyListeners();
+    const comment = this.comments[index];
+    if (!comment) {
+      return;
     }
+    comment.body = newBody;
+    this.notifyListeners();
   }
 
   getComments(): ReviewComment[] {

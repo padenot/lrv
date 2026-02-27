@@ -20,6 +20,9 @@ export class CommentsUIMethods {
     }
 
     const file = this.files[this.currentFileIndex];
+    if (!file) {
+      return;
+    }
     const comments = this.commentManager.getCommentsForFile(file.path);
     const modifiedEditor = this.editor.getModifiedEditor();
     const originalEditor = this.editor.getOriginalEditor();
@@ -59,6 +62,9 @@ export class CommentsUIMethods {
   }
 
   showCommentDialog(file: string, fileLineNumber: number, monacoLineNumber: number, side: Side) {
+    if (!this.editor) {
+      return;
+    }
     const targetEditor =
       side === 'new' ? this.editor.getModifiedEditor() : this.editor.getOriginalEditor();
 
