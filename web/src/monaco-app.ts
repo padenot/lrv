@@ -12,8 +12,10 @@ import { CommitMethods } from './commit-methods';
 import { CommentsUIMethods } from './comments-ui-methods';
 import { DialogMethods } from './dialog-methods';
 import type { AppConfig, AppContextData, DiffFile, DiffStats, FilePair, HunkRange } from './types/app';
+import type { editor } from 'monaco-editor';
 
-function applyMixin(TargetClass: any, MethodsClass: any) {
+type Constructor = { prototype: object };
+function applyMixin(TargetClass: Constructor, MethodsClass: Constructor) {
   for (const name of Object.getOwnPropertyNames(MethodsClass.prototype)) {
     if (name === 'constructor') {
       continue;
@@ -29,13 +31,13 @@ function applyMixin(TargetClass: any, MethodsClass: any) {
 export class MonacoApp {
   commentManager: CommentManager;
   currentFileIndex: number;
-  editor: any;
+  editor: editor.IStandaloneDiffEditor | null;
   isInline: boolean;
   modifiedDecorations: string[];
   originalDecorations: string[];
   focusedHunkDecorations: string[];
-  currentWidget: any;
-  currentWidgetEditor?: any;
+  currentWidget: editor.IContentWidget | null;
+  currentWidgetEditor?: editor.ICodeEditor | null;
   diff: { files: DiffFile[]; stats: DiffStats; commit_message?: string; commit_hash?: string } | null;
   files: DiffFile[];
   stats: DiffStats;
@@ -44,8 +46,8 @@ export class MonacoApp {
   currentHunkIndex: Record<string, number>;
   config: AppConfig;
   context!: AppContextData;
-  originalModel: any;
-  modifiedModel: any;
+  originalModel: editor.ITextModel | null;
+  modifiedModel: editor.ITextModel | null;
   _eagerPrefetchStarted: boolean;
   _commitPopoverEl: HTMLElement | null;
   currentFileIsCommit: boolean;
@@ -251,7 +253,10 @@ export class MonacoApp {
     };
 
     // Accent from theme rules: prefer the 'keyword' token color defined in our theme
-    const defs = (window.UI_THEME_DEFS || {}) as Record<string, any>;
+    const defs = (window.UI_THEME_DEFS || {}) as Record<
+      string,
+      { rules?: Array<{ token?: string; foreground?: string }> }
+    >;
     const def = defs[themeName];
     if (def && Array.isArray(def.rules)) {
       const kw = def.rules.find((r) => r && r.token === 'keyword' && r.foreground);

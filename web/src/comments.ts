@@ -3,6 +3,8 @@ export type ReviewComment = {
   start_line: number;
   side: 'old' | 'new';
   body: string;
+  severity?: string;
+  end_line?: number;
 };
 
 export class CommentManager {

@@ -4,6 +4,7 @@ import { MONACO_HIDE_UNCHANGED } from './diff-utils';
 import { monoFontStack, prefersReducedMotion } from './font';
 import { markAppReady } from './ui-signals';
 import type { AppContext, DiffFile } from './types/app';
+import type { editor } from 'monaco-editor';
 
 export class FileLoadingMethods {
   declare currentFileIsCommit: boolean;
@@ -167,7 +168,6 @@ export class FileLoadingMethods {
     });
     this.editor.updateOptions({
       renderSideBySide,
-      theme: theme,
       fontFamily: mono,
       glyphMargin: true,
       folding: false,
@@ -175,6 +175,7 @@ export class FileLoadingMethods {
       scrollBeyondLastLine: true,
       hideUnchangedRegions: MONACO_HIDE_UNCHANGED,
     });
+    monaco.editor.setTheme(theme);
     const opts = {
       smoothScrolling: !reduceMotion,
       glyphMargin: true,
@@ -248,8 +249,8 @@ export class FileLoadingMethods {
 
   setupEditorClickHandlers(
     filePath: string,
-    modifiedEditor: any,
-    originalEditor: any,
+    modifiedEditor: editor.IStandaloneCodeEditor,
+    originalEditor: editor.IStandaloneCodeEditor,
   ) {
     modifiedEditor.onMouseDown((e) => {
       if (

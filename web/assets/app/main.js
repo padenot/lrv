@@ -926,7 +926,6 @@ var FileLoadingMethods = class {
 		});
 		this.editor.updateOptions({
 			renderSideBySide,
-			theme,
 			fontFamily: mono,
 			glyphMargin: true,
 			folding: false,
@@ -934,6 +933,7 @@ var FileLoadingMethods = class {
 			scrollBeyondLastLine: true,
 			hideUnchangedRegions: MONACO_HIDE_UNCHANGED
 		});
+		monaco.editor.setTheme(theme);
 		const opts = {
 			smoothScrolling: !reduceMotion,
 			glyphMargin: true,

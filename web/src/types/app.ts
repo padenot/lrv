@@ -1,4 +1,5 @@
 import type { ReviewComment } from '../comments';
+import type { editor } from 'monaco-editor';
 
 export type Side = 'old' | 'new';
 
@@ -62,7 +63,7 @@ export interface AppContext {
     onChange(listener: () => void): void;
   };
   currentFileIndex: number;
-  editor: any;
+  editor: editor.IStandaloneDiffEditor | null;
   isInline: boolean;
   modifiedDecorations: string[];
   originalDecorations: string[];
@@ -71,8 +72,8 @@ export interface AppContext {
   focusedLineDecorationsNew?: string[];
   focusedLineDecorationsOld?: string[];
   currentFocusedLine?: { side: Side; line: number };
-  currentWidget: any;
-  currentWidgetEditor?: any;
+  currentWidget: editor.IContentWidget | null;
+  currentWidgetEditor?: editor.ICodeEditor | null;
   diff: { files: DiffFile[]; stats: DiffStats; commit_message?: string; commit_hash?: string } | null;
   files: DiffFile[];
   stats: DiffStats;
@@ -81,8 +82,8 @@ export interface AppContext {
   currentHunkIndex: Record<string, number>;
   config: AppConfig;
   context: AppContextData;
-  originalModel: any;
-  modifiedModel: any;
+  originalModel: editor.ITextModel | null;
+  modifiedModel: editor.ITextModel | null;
   _eagerPrefetchStarted: boolean;
   _commitPopoverEl: HTMLElement | null;
   currentFileIsCommit: boolean;

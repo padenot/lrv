@@ -9,8 +9,8 @@ export class CommentsUIMethods {
   declare commentManager: AppContext['commentManager'];
   declare modifiedDecorations: string[];
   declare originalDecorations: string[];
-  declare currentWidget: any;
-  declare currentWidgetEditor?: any;
+  declare currentWidget: AppContext['currentWidget'];
+  declare currentWidgetEditor?: AppContext['currentWidgetEditor'];
   declare renderFileList: () => void;
 
   updateDecorations() {
