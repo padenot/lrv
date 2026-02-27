@@ -30,7 +30,7 @@ window.Perf = {
 		});
 	},
 	getMetrics: () => {
-		const toDurations = (name) => (performance.getEntriesByName(name) || []).map((e) => e.duration);
+		const toDurations = (name) => performance.getEntriesByName(name).map((e) => e.duration);
 		return {
 			fileSwitch: toDurations("fileSwitch"),
 			appInit: toDurations("appInit")
@@ -528,6 +528,19 @@ function resolveAppConfig(input) {
 //#endregion
 //#region web/src/ui-signals.ts
 let navTimer = null;
+const FIRST_LINE_SELECTOR = ".monaco-editor .view-lines .view-line";
+function recordFirstLineVisible() {
+	if (performance.getEntriesByName("init:first-line-visible").length !== 0) return;
+	window.Perf.mark("init:first-line-visible");
+	if (performance.getEntriesByName("init:start").length > 0) window.Perf.measure("init:to-first-line-visible", "init:start", "init:first-line-visible");
+	if (performance.getEntriesByName("page:script-start").length > 0) window.Perf.measure("page:script-to-first-line-visible", "page:script-start", "init:first-line-visible");
+}
+function setAppReady(debugMessage) {
+	window.__APP_READY = true;
+	window.Perf.mark("init:app-ready");
+	if (performance.getEntriesByName("appInit").length > 0) window.Perf.measure("init:app-ready-after-appInit", "appInitEnd", "init:app-ready");
+	if (window.DEBUG) console.log(debugMessage);
+}
 function showNavIndicator(text) {
 	const indicatorEl = document.getElementById("nav-indicator");
 	if (!indicatorEl) return;
@@ -540,32 +553,18 @@ function showNavIndicator(text) {
 }
 function markAppReady() {
 	if (window.__APP_READY) return;
-	if (document.querySelectorAll(".monaco-editor .view-lines .view-line").length > 0) {
-		if (performance.getEntriesByName("init:first-line-visible").length === 0) {
-			window.Perf.mark("init:first-line-visible");
-			if (performance.getEntriesByName("init:start").length > 0) window.Perf.measure("init:to-first-line-visible", "init:start", "init:first-line-visible");
-			if (performance.getEntriesByName("page:script-start").length > 0) window.Perf.measure("page:script-to-first-line-visible", "page:script-start", "init:first-line-visible");
-		}
-		window.__APP_READY = true;
-		window.Perf.mark("init:app-ready");
-		if (performance.getEntriesByName("appInit").length > 0) window.Perf.measure("init:app-ready-after-appInit", "appInitEnd", "init:app-ready");
-		if (window.DEBUG) console.log("[app] APP_READY: diff lines visible");
+	if (document.querySelectorAll(FIRST_LINE_SELECTOR).length > 0) {
+		recordFirstLineVisible();
+		setAppReady("[app] APP_READY: diff lines visible");
 		return;
 	}
 	const container = document.querySelector(".monaco-editor .view-lines");
-	if (container && !window.__APP_READY) {
+	if (container) {
 		if (window.DEBUG) console.log("[app] Waiting for first view-line via MutationObserver");
 		const obs = new MutationObserver(() => {
-			if (document.querySelectorAll(".monaco-editor .view-lines .view-line").length > 0) {
-				if (performance.getEntriesByName("init:first-line-visible").length === 0) {
-					window.Perf.mark("init:first-line-visible");
-					if (performance.getEntriesByName("init:start").length > 0) window.Perf.measure("init:to-first-line-visible", "init:start", "init:first-line-visible");
-					if (performance.getEntriesByName("page:script-start").length > 0) window.Perf.measure("page:script-to-first-line-visible", "page:script-start", "init:first-line-visible");
-				}
-				window.__APP_READY = true;
-				window.Perf.mark("init:app-ready");
-				if (performance.getEntriesByName("appInit").length > 0) window.Perf.measure("init:app-ready-after-appInit", "appInitEnd", "init:app-ready");
-				if (window.DEBUG) console.log("[app] APP_READY: observer saw first line");
+			if (document.querySelectorAll(FIRST_LINE_SELECTOR).length > 0) {
+				recordFirstLineVisible();
+				setAppReady("[app] APP_READY: observer saw first line");
 				obs.disconnect();
 			}
 		});
@@ -2015,8 +2014,8 @@ var DialogMethods = class {
 			saveBtn.textContent = "Saving...";
 			const formData = new FormData(form);
 			const newConfig = resolveAppConfig({
-				color_scheme: String(formData.get("color_scheme") || "vs-dark"),
-				font: (formData.get("font") || "").toString(),
+				color_scheme: String(formData.get("color_scheme") ?? "vs-dark"),
+				font: String(formData.get("font") ?? ""),
 				split_view: formData.get("split_view") === "on",
 				auto_close_tab: formData.get("auto_close_tab") === "on"
 			});
@@ -2096,7 +2095,7 @@ var DialogMethods = class {
 				const key = `${filePath}:${side}`;
 				try {
 					const data = await fetchJSON(`/api/file?path=${encodeURIComponent(filePath)}&side=${side}`);
-					fileContents[key] = String(data.content || "").split("\n");
+					fileContents[key] = String(data.content ?? "").split("\n");
 				} catch (err) {
 					console.error(`Failed to fetch ${key}:`, err);
 					fileContents[key] = [];
@@ -2109,7 +2108,7 @@ var DialogMethods = class {
 				className: "comment-preview-header",
 				text: `${comment.file}:${commentLineLabel(comment)} (${comment.side})`
 			});
-			const lines = fileContents[`${comment.file}:${comment.side}`] || [];
+			const lines = fileContents[`${comment.file}:${comment.side}`] ?? [];
 			const rangeStart = commentStartLine(comment);
 			const rangeEnd = commentEndLine(comment);
 			const startLine = Math.max(0, rangeStart - 2);

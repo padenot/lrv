@@ -215,8 +215,8 @@ export class DialogMethods {
 
       const formData = new FormData(form);
       const newConfig = resolveAppConfig({
-        color_scheme: String(formData.get('color_scheme') || 'vs-dark'),
-        font: (formData.get('font') || '').toString(),
+        color_scheme: String(formData.get('color_scheme') ?? 'vs-dark'),
+        font: String(formData.get('font') ?? ''),
         split_view: formData.get('split_view') === 'on',
         auto_close_tab: formData.get('auto_close_tab') === 'on',
       });
@@ -317,7 +317,7 @@ export class DialogMethods {
             const data = await fetchJSON<{ content?: string }>(
               `/api/file?path=${encodeURIComponent(filePath)}&side=${side}`,
             );
-            fileContents[key] = String(data.content || '').split('\n');
+            fileContents[key] = String(data.content ?? '').split('\n');
           } catch (err) {
             console.error(`Failed to fetch ${key}:`, err);
             fileContents[key] = [];
@@ -333,7 +333,7 @@ export class DialogMethods {
       const previewHeader = el('div', { className: 'comment-preview-header', text: headerText });
 
       const fileKey = `${comment.file}:${comment.side}`;
-      const lines = fileContents[fileKey] || [];
+      const lines = fileContents[fileKey] ?? [];
       const rangeStart = commentStartLine(comment);
       const rangeEnd = commentEndLine(comment);
       const startLine = Math.max(0, rangeStart - 2);

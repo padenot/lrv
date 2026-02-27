@@ -20,8 +20,7 @@ window.Perf = {
     performance.measure('appInit', { start: 'appInitStart', end: 'appInitEnd' });
   },
   getMetrics: () => {
-    const toDurations = (name: string) =>
-      (performance.getEntriesByName(name) || []).map((e) => e.duration);
+    const toDurations = (name: string) => performance.getEntriesByName(name).map((e) => e.duration);
     return { fileSwitch: toDurations('fileSwitch'), appInit: toDurations('appInit') };
   },
   clear: () => {
