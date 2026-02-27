@@ -369,7 +369,7 @@ window.UIThemeAccentsHex = UI_THEME_ACCENTS_HEX;
 //#endregion
 //#region web/src/dom.ts
 const $ = (sel, root = document) => root.querySelector(sel);
-const el = (tag, { className, text, attrs } = {}, children = null) => {
+const el = (tag, { className, text, attrs } = {}, children = []) => {
 	const node = document.createElement(tag);
 	if (className) node.className = className;
 	if (text !== void 0 && text !== null) node.textContent = String(text);
@@ -377,7 +377,7 @@ const el = (tag, { className, text, attrs } = {}, children = null) => {
 		if (value === void 0 || value === null || value === false) return;
 		node.setAttribute(key, value === true ? "" : String(value));
 	});
-	if (children) children.forEach((child) => {
+	children.forEach((child) => {
 		if (child === void 0 || child === null) return;
 		if (typeof child === "string" || typeof child === "number") {
 			node.appendChild(document.createTextNode(String(child)));
@@ -586,14 +586,14 @@ const MONACO_HIDE_UNCHANGED = {
 };
 function computeHunkRanges(hunks) {
 	const hunkRanges = [];
-	(hunks || []).forEach((hunk) => {
-		const newLines = hunk.lines.filter((l) => Boolean(l.new_line)).map((l) => l.new_line);
+	hunks.forEach((hunk) => {
+		const newLines = hunk.lines.filter((l) => l.new_line !== void 0).map((l) => l.new_line);
 		if (newLines.length > 0) hunkRanges.push({
 			side: "new",
 			start: Math.min(...newLines),
 			end: Math.max(...newLines)
 		});
-		const deletedOldLines = hunk.lines.filter((l) => Boolean(l.old_line) && l.type === "delete").map((l) => l.old_line);
+		const deletedOldLines = hunk.lines.filter((l) => l.old_line !== void 0 && l.type === "delete").map((l) => l.old_line);
 		if (deletedOldLines.length > 0) hunkRanges.push({
 			side: "old",
 			start: Math.min(...deletedOldLines),
@@ -753,8 +753,8 @@ function globPatternToRegExp(pattern) {
 	const regexBody = String(pattern).replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".");
 	return new RegExp(`^${regexBody}$`, "i");
 }
-function detectLanguageFromPathAndContent(path, content) {
-	const normalizedPath = String(path || "").replace(/\\/g, "/").replace(/[?#].*$/, "");
+function detectLanguageFromPathAndContent(path = "", content = "") {
+	const normalizedPath = path.replace(/\\/g, "/").replace(/[?#].*$/, "");
 	const baseName = normalizedPath.split("/").pop() || normalizedPath;
 	const lowerPath = normalizedPath.toLowerCase();
 	const lowerBase = baseName.toLowerCase();
@@ -769,7 +769,7 @@ function detectLanguageFromPathAndContent(path, content) {
 	};
 	if (fileNameMap[lowerBase]) return fileNameMap[lowerBase];
 	if (typeof monaco !== "undefined" && monaco.languages.getLanguages) {
-		const languages = monaco.languages.getLanguages() || [];
+		const languages = monaco.languages.getLanguages();
 		for (const lang of languages) {
 			if (!lang || !lang.id) continue;
 			if ((Array.isArray(lang.filenames) ? lang.filenames : []).some((name) => String(name).toLowerCase() === lowerBase)) return lang.id;
@@ -831,7 +831,7 @@ function detectLanguageFromPathAndContent(path, content) {
 		".dart": "dart",
 		".dockerfile": "dockerfile"
 	})) if (lowerBase.endsWith(ext)) return language;
-	const firstLine = String(content || "").split("\n", 1)[0].toLowerCase();
+	const firstLine = content.split("\n", 1)[0].toLowerCase();
 	if (firstLine.startsWith("#!")) {
 		if (firstLine.includes("bash") || firstLine.includes("sh") || firstLine.includes("zsh") || firstLine.includes("fish")) return "shell";
 		if (firstLine.includes("python")) return "python";
@@ -867,10 +867,9 @@ function prefersReducedMotion() {
 //#region web/src/file-loading-methods.ts
 var FileLoadingMethods = class {
 	isAddedFile(file) {
-		const rawStatus = String(file?.status || "").toLowerCase();
+		const rawStatus = file.status.toLowerCase();
 		if (rawStatus === "added" || rawStatus === "add" || rawStatus === "a" || rawStatus === "new") return true;
-		const hunks = Array.isArray(file?.hunks) ? file.hunks : [];
-		return hunks.length > 0 && hunks.every((h) => Number(h?.old_start || 0) === 0);
+		return file.hunks.length > 0 && file.hunks.every((h) => (h.old_start ?? 0) === 0);
 	}
 	async loadFile(index) {
 		this.currentFileIsCommit = false;
@@ -931,12 +930,12 @@ var FileLoadingMethods = class {
 		await this.fetchFilePair(file.path);
 		window.Perf.mark("loadFile:fetch:end");
 		window.Perf.measure("loadFile:fetch", "loadFile:fetch:start", "loadFile:fetch:end");
-		const oldContent = this.fileCache[file.path].old || "";
-		const newContent = this.fileCache[file.path].new || "";
+		const oldContent = this.fileCache[file.path].old;
+		const newContent = this.fileCache[file.path].new;
 		const language = detectLanguageFromPathAndContent(file.path || file.old_path || "", newContent || oldContent);
 		const oldBanner = $("#old-missing-banner");
 		if (oldBanner) {
-			const show = !isAddedFile && (!this.fileCache[file.path].old || this.fileCache[file.path].old.length === 0) && this.fileCache[file.path].new && this.fileCache[file.path].new.length > 0;
+			const show = !isAddedFile && this.fileCache[file.path].old.length === 0 && this.fileCache[file.path].new.length > 0;
 			oldBanner.style.display = show ? "" : "none";
 		}
 		window.Perf.mark("loadFile:models:start");
@@ -1039,7 +1038,7 @@ var FileLoadingMethods = class {
 	applyInitialHunkFocus(filePath) {
 		const hunks = this.fileHunks[filePath];
 		if (hunks && hunks.length > 0) {
-			const currentIdx = this.currentHunkIndex[filePath] || 0;
+			const currentIdx = this.currentHunkIndex[filePath] ?? 0;
 			setTimeout(() => {
 				this.jumpToHunk(currentIdx);
 				const hr = hunks[currentIdx];

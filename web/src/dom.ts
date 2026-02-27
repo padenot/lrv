@@ -14,7 +14,7 @@ type ElChild = Node | string | number | null | undefined;
 export const el = <K extends keyof HTMLElementTagNameMap>(
   tag: K,
   { className, text, attrs }: ElOptions = {},
-  children: ElChild[] | null = null,
+  children: ElChild[] = [],
 ): HTMLElementTagNameMap[K] => {
   const node = document.createElement(tag);
   if (className) {
@@ -31,18 +31,16 @@ export const el = <K extends keyof HTMLElementTagNameMap>(
       node.setAttribute(key, value === true ? '' : String(value));
     });
   }
-  if (children) {
-    children.forEach((child) => {
-      if (child === undefined || child === null) {
-        return;
-      }
-      if (typeof child === 'string' || typeof child === 'number') {
-        node.appendChild(document.createTextNode(String(child)));
-        return;
-      }
-      node.appendChild(child);
-    });
-  }
+  children.forEach((child) => {
+    if (child === undefined || child === null) {
+      return;
+    }
+    if (typeof child === 'string' || typeof child === 'number') {
+      node.appendChild(document.createTextNode(String(child)));
+      return;
+    }
+    node.appendChild(child);
+  });
   return node;
 };
 

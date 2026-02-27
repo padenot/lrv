@@ -5,12 +5,10 @@ function globPatternToRegExp(pattern: string): RegExp {
 }
 
 export function detectLanguageFromPathAndContent(
-  path: string | null | undefined,
-  content: string | null | undefined,
+  path = '',
+  content = '',
 ): string {
-  const normalizedPath = String(path || '')
-    .replace(/\\/g, '/')
-    .replace(/[?#].*$/, '');
+  const normalizedPath = path.replace(/\\/g, '/').replace(/[?#].*$/, '');
   const baseName = normalizedPath.split('/').pop() || normalizedPath;
   const lowerPath = normalizedPath.toLowerCase();
   const lowerBase = baseName.toLowerCase();
@@ -29,7 +27,7 @@ export function detectLanguageFromPathAndContent(
   }
 
   if (typeof monaco !== 'undefined' && monaco.languages.getLanguages) {
-    const languages = monaco.languages.getLanguages() || [];
+    const languages = monaco.languages.getLanguages();
     for (const lang of languages) {
       if (!lang || !lang.id) {
         continue;
@@ -115,9 +113,7 @@ export function detectLanguageFromPathAndContent(
     }
   }
 
-  const firstLine = String(content || '')
-    .split('\n', 1)[0]
-    .toLowerCase();
+  const firstLine = content.split('\n', 1)[0].toLowerCase();
   if (firstLine.startsWith('#!')) {
     if (
       firstLine.includes('bash') ||

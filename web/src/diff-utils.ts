@@ -5,27 +5,13 @@ export const MONACO_HIDE_UNCHANGED = {
   revealLineCount: 20,
 };
 
-type DiffLine = {
-  new_line?: number;
-  old_line?: number;
-  type?: string;
-};
+import type { DiffHunk, DiffLine, HunkRange } from './types/app';
 
-type Hunk = {
-  lines: DiffLine[];
-};
-
-type HunkRange = {
-  side: 'old' | 'new';
-  start: number;
-  end: number;
-};
-
-export function computeHunkRanges(hunks: Hunk[] | null | undefined): { hunkRanges: HunkRange[] } {
+export function computeHunkRanges(hunks: DiffHunk[]): { hunkRanges: HunkRange[] } {
   const hunkRanges: HunkRange[] = [];
-  (hunks || []).forEach((hunk) => {
+  hunks.forEach((hunk) => {
     const newLines = hunk.lines
-      .filter((l): l is DiffLine & { new_line: number } => Boolean(l.new_line))
+      .filter((l): l is DiffLine & { new_line: number } => l.new_line !== undefined)
       .map((l) => l.new_line);
     if (newLines.length > 0) {
       hunkRanges.push({
@@ -35,7 +21,10 @@ export function computeHunkRanges(hunks: Hunk[] | null | undefined): { hunkRange
       });
     }
     const deletedOldLines = hunk.lines
-      .filter((l): l is DiffLine & { old_line: number } => Boolean(l.old_line) && l.type === 'delete')
+      .filter(
+        (l): l is DiffLine & { old_line: number } =>
+          l.old_line !== undefined && l.type === 'delete',
+      )
       .map((l) => l.old_line);
     if (deletedOldLines.length > 0) {
       hunkRanges.push({

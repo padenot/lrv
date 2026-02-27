@@ -30,14 +30,13 @@ export class FileLoadingMethods {
   declare setFocusedLine: AppContext['setFocusedLine'];
 
   isAddedFile(file: DiffFile) {
-    const rawStatus = String(file?.status || '').toLowerCase();
+    const rawStatus = file.status.toLowerCase();
     if (rawStatus === 'added' || rawStatus === 'add' || rawStatus === 'a' || rawStatus === 'new') {
       return true;
     }
 
     // Fallback for non-git emitters: new files typically have hunks rooted at old line 0.
-    const hunks = Array.isArray(file?.hunks) ? file.hunks : [];
-    return hunks.length > 0 && hunks.every((h) => Number(h?.old_start || 0) === 0);
+    return file.hunks.length > 0 && file.hunks.every((h) => (h.old_start ?? 0) === 0);
   }
 
   async loadFile(index: number) {
@@ -117,8 +116,8 @@ export class FileLoadingMethods {
     await this.fetchFilePair(file.path);
     window.Perf.mark('loadFile:fetch:end');
     window.Perf.measure('loadFile:fetch', 'loadFile:fetch:start', 'loadFile:fetch:end');
-    const oldContent = this.fileCache[file.path].old || '';
-    const newContent = this.fileCache[file.path].new || '';
+    const oldContent = this.fileCache[file.path].old;
+    const newContent = this.fileCache[file.path].new;
     const detectionPath = file.path || file.old_path || '';
     const language = detectLanguageFromPathAndContent(detectionPath, newContent || oldContent);
 
@@ -127,8 +126,7 @@ export class FileLoadingMethods {
     if (oldBanner) {
       const show =
         !isAddedFile &&
-        (!this.fileCache[file.path].old || this.fileCache[file.path].old.length === 0) &&
-        this.fileCache[file.path].new &&
+        this.fileCache[file.path].old.length === 0 &&
         this.fileCache[file.path].new.length > 0;
       oldBanner.style.display = show ? '' : 'none';
     }
@@ -276,7 +274,7 @@ export class FileLoadingMethods {
   applyInitialHunkFocus(filePath: string) {
     const hunks = this.fileHunks[filePath];
     if (hunks && hunks.length > 0) {
-      const currentIdx = this.currentHunkIndex[filePath] || 0;
+      const currentIdx = this.currentHunkIndex[filePath] ?? 0;
       setTimeout(() => {
         this.jumpToHunk(currentIdx);
         const hr = hunks[currentIdx];
