@@ -2,6 +2,8 @@ import { fetchJSON } from './api';
 import { computeHunkRanges } from './diff-utils';
 import type { AppContext, DiffFile, FilePair } from './types/app';
 
+type FileContentResponse = { content?: string };
+
 export class FileDataMethods {
   declare fileCache: AppContext['fileCache'];
   declare _eagerPrefetchStarted: boolean;
@@ -15,13 +17,13 @@ export class FileDataMethods {
     }
 
     const [oldData, newData] = await Promise.all([
-      fetchJSON<{ content?: string }>(`/api/file?path=${encodeURIComponent(filePath)}&side=old`).catch((err) => {
+      fetchJSON<FileContentResponse>(`/api/file?path=${encodeURIComponent(filePath)}&side=old`).catch((err) => {
         if (window.DEBUG) {
           console.error('[app] old fetch failed', err);
         }
         return { content: '' };
       }),
-      fetchJSON<{ content?: string }>(`/api/file?path=${encodeURIComponent(filePath)}&side=new`).catch((err) => {
+      fetchJSON<FileContentResponse>(`/api/file?path=${encodeURIComponent(filePath)}&side=new`).catch((err) => {
         if (window.DEBUG) {
           console.error('[app] new fetch failed', err);
         }
@@ -30,8 +32,8 @@ export class FileDataMethods {
     ]);
 
     this.fileCache[filePath] = {
-      old: oldData.content || '',
-      new: newData.content || '',
+      old: oldData.content ?? '',
+      new: newData.content ?? '',
     };
     return this.fileCache[filePath];
   }
@@ -42,7 +44,7 @@ export class FileDataMethods {
       return;
     }
     this._eagerPrefetchStarted = true;
-    const paths = (this.files || []).map((f) => f.path).filter(Boolean);
+    const paths = this.files.map((f) => f.path);
     const toFetch = paths.filter((p) => !this.fileCache[p]);
     if (toFetch.length === 0) {
       return;
@@ -58,11 +60,11 @@ export class FileDataMethods {
         const p = toFetch[i];
         batch.push(
           Promise.all([
-            fetchJSON<{ content?: string }>(`/api/file?path=${encodeURIComponent(p)}&side=old`),
-            fetchJSON<{ content?: string }>(`/api/file?path=${encodeURIComponent(p)}&side=new`),
+            fetchJSON<FileContentResponse>(`/api/file?path=${encodeURIComponent(p)}&side=old`),
+            fetchJSON<FileContentResponse>(`/api/file?path=${encodeURIComponent(p)}&side=new`),
           ])
             .then(([oldData, newData]) => {
-              this.fileCache[p] = { old: oldData.content || '', new: newData.content || '' };
+              this.fileCache[p] = { old: oldData.content ?? '', new: newData.content ?? '' };
             })
             .catch(() => {}),
         );

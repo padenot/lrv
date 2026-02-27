@@ -69,11 +69,11 @@ export interface AppContext {
   isInline: boolean;
   modifiedDecorations: string[];
   originalDecorations: string[];
-  focusedHunkDecorationsNew?: string[];
-  focusedHunkDecorationsOld?: string[];
-  focusedLineDecorationsNew?: string[];
-  focusedLineDecorationsOld?: string[];
-  currentFocusedLine?: { side: Side; line: number };
+  focusedHunkDecorationsNew: string[];
+  focusedHunkDecorationsOld: string[];
+  focusedLineDecorationsNew: string[];
+  focusedLineDecorationsOld: string[];
+  currentFocusedLine: { side: Side; line: number } | null;
   currentWidget: editor.IContentWidget | null;
   currentWidgetEditor?: editor.ICodeEditor | null;
   diff: { files: DiffFile[]; stats: DiffStats; commit_message?: string; commit_hash?: string } | null;

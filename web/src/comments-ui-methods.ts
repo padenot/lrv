@@ -49,11 +49,11 @@ export class CommentsUIMethods {
       }));
 
     this.modifiedDecorations = modifiedEditor.deltaDecorations(
-      this.modifiedDecorations || [],
+      this.modifiedDecorations,
       modifiedDecorations,
     );
     this.originalDecorations = originalEditor.deltaDecorations(
-      this.originalDecorations || [],
+      this.originalDecorations,
       originalDecorations,
     );
   }
@@ -117,7 +117,7 @@ export class CommentsUIMethods {
     const saveBtn = domNode.querySelector<HTMLButtonElement>('.save-btn');
     const cancelBtn = domNode.querySelector<HTMLButtonElement>('.cancel-btn');
     if (existingComment) {
-      textarea.value = existingComment.body || '';
+      textarea.value = existingComment.body;
     }
 
     // Keyboard shortcuts

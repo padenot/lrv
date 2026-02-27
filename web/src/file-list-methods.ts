@@ -52,7 +52,7 @@ export class FileListMethods {
     clearEl(list);
 
     // Optional pseudo-file for commit (when reviewing full commits)
-    const hasCommit = !!(this.diff && (this.diff.commit_message || this.diff.commit_hash));
+    const hasCommit = this.diff !== null && (this.diff.commit_message || this.diff.commit_hash);
     if (hasCommit) {
       const li = el('li', {
         className: this.currentFileIsCommit ? 'active' : '',
@@ -104,12 +104,12 @@ export class FileListMethods {
       const right = el('span', { className: 'file-right' });
 
       // Compute per-file additions/deletions (serde lowercases enum and renames to `type`)
-      const added = (file.hunks || []).reduce(
-        (acc, h) => acc + (h.lines || []).filter((l) => l && l.type === 'add').length,
+      const added = file.hunks.reduce(
+        (acc, h) => acc + h.lines.filter((line) => line.type === 'add').length,
         0,
       );
-      const deleted = (file.hunks || []).reduce(
-        (acc, h) => acc + (h.lines || []).filter((l) => l && l.type === 'delete').length,
+      const deleted = file.hunks.reduce(
+        (acc, h) => acc + h.lines.filter((line) => line.type === 'delete').length,
         0,
       );
 

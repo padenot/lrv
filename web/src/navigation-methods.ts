@@ -12,11 +12,11 @@ export class NavigationMethods {
   declare fileHunks: AppContext['fileHunks'];
   declare currentHunkIndex: AppContext['currentHunkIndex'];
   declare editor: AppContext['editor'];
-  declare currentFocusedLine?: { side: Side; line: number };
-  declare focusedHunkDecorationsNew?: string[];
-  declare focusedHunkDecorationsOld?: string[];
-  declare focusedLineDecorationsNew?: string[];
-  declare focusedLineDecorationsOld?: string[];
+  declare currentFocusedLine: AppContext['currentFocusedLine'];
+  declare focusedHunkDecorationsNew: AppContext['focusedHunkDecorationsNew'];
+  declare focusedHunkDecorationsOld: AppContext['focusedHunkDecorationsOld'];
+  declare focusedLineDecorationsNew: AppContext['focusedLineDecorationsNew'];
+  declare focusedLineDecorationsOld: AppContext['focusedLineDecorationsOld'];
   declare loadFile: (index: number) => Promise<void>;
   declare isAddedFile: AppContext['isAddedFile'];
   declare showSubmitConfirmation: () => Promise<void>;
@@ -185,7 +185,7 @@ export class NavigationMethods {
       return;
     }
 
-    const currentIdx = this.currentHunkIndex[file.path] || 0;
+    const currentIdx = this.currentHunkIndex[file.path] ?? 0;
     if (currentIdx >= hunks.length - 1) {
       this.nextFile();
     } else {
@@ -203,7 +203,7 @@ export class NavigationMethods {
       return;
     }
 
-    const currentIdx = this.currentHunkIndex[file.path] || 0;
+    const currentIdx = this.currentHunkIndex[file.path] ?? 0;
     if (currentIdx <= 0) {
       this.previousFile();
     } else {
@@ -236,8 +236,8 @@ export class NavigationMethods {
       );
       this.highlightFocusedHunk(hunkRange.start, hunkRange.end, 'old');
       this.setFocusedLine('old', hunkRange.start, false);
-      const idx = (this.currentHunkIndex[file.path] || 0) + 1;
-      const total = (this.fileHunks[file.path] || []).length;
+      const idx = (this.currentHunkIndex[file.path] ?? 0) + 1;
+      const total = hunks.length;
       showNavIndicator(`Hunk ${idx}/${total} • old`);
     } else {
       const modifiedEditor = this.editor.getModifiedEditor();
@@ -247,8 +247,8 @@ export class NavigationMethods {
       );
       this.highlightFocusedHunk(hunkRange.start, hunkRange.end, 'new');
       this.setFocusedLine('new', hunkRange.start, false);
-      const idx = (this.currentHunkIndex[file.path] || 0) + 1;
-      const total = (this.fileHunks[file.path] || []).length;
+      const idx = (this.currentHunkIndex[file.path] ?? 0) + 1;
+      const total = hunks.length;
       showNavIndicator(`Hunk ${idx}/${total} • new`);
     }
   }
@@ -271,11 +271,11 @@ export class NavigationMethods {
 
     // Clear both sides, then apply to the chosen side
     this.focusedHunkDecorationsNew = modifiedEditor.deltaDecorations(
-      this.focusedHunkDecorationsNew || [],
+      this.focusedHunkDecorationsNew,
       [],
     );
     this.focusedHunkDecorationsOld = originalEditor.deltaDecorations(
-      this.focusedHunkDecorationsOld || [],
+      this.focusedHunkDecorationsOld,
       [],
     );
     if (side === 'old') {
@@ -299,11 +299,11 @@ export class NavigationMethods {
 
     // Clear existing
     this.focusedLineDecorationsNew = modifiedEditor.deltaDecorations(
-      this.focusedLineDecorationsNew || [],
+      this.focusedLineDecorationsNew,
       [],
     );
     this.focusedLineDecorationsOld = originalEditor.deltaDecorations(
-      this.focusedLineDecorationsOld || [],
+      this.focusedLineDecorationsOld,
       [],
     );
 
@@ -337,7 +337,7 @@ export class NavigationMethods {
       return;
     }
     // Initialize focus if needed: start of current hunk
-    let idx = this.currentHunkIndex[file.path] || 0;
+    let idx = this.currentHunkIndex[file.path] ?? 0;
     const hr = hunks[idx];
     if (!this.currentFocusedLine) {
       const side = hr.side === 'old' ? 'old' : 'new';
@@ -347,7 +347,7 @@ export class NavigationMethods {
 
     let { side, line } = this.currentFocusedLine;
     // Verify current focus lies within current hunk; adjust if not
-    if (side !== (hr.side || 'new') || line < hr.start || line > hr.end) {
+    if (side !== hr.side || line < hr.start || line > hr.end) {
       side = hr.side === 'old' ? 'old' : 'new';
       line = hr.start;
     }
@@ -384,11 +384,11 @@ export class NavigationMethods {
     const modifiedEditor = this.editor.getModifiedEditor();
     const originalEditor = this.editor.getOriginalEditor();
     this.focusedHunkDecorationsNew = modifiedEditor.deltaDecorations(
-      this.focusedHunkDecorationsNew || [],
+      this.focusedHunkDecorationsNew,
       [],
     );
     this.focusedHunkDecorationsOld = originalEditor.deltaDecorations(
-      this.focusedHunkDecorationsOld || [],
+      this.focusedHunkDecorationsOld,
       [],
     );
   }
@@ -411,7 +411,7 @@ export class NavigationMethods {
     }
 
     // Fallback to current hunk start if no line is focused
-    const currentIdx = this.currentHunkIndex[file.path] || 0;
+    const currentIdx = this.currentHunkIndex[file.path] ?? 0;
     const hunkRange = hunks[currentIdx];
     const side = hunkRange.side === 'old' ? 'old' : 'new';
     this.showCommentDialog(file.path, hunkRange.start, hunkRange.start, side);

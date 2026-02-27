@@ -616,15 +616,15 @@ var FileDataMethods = class {
 			return { content: "" };
 		})]);
 		this.fileCache[filePath] = {
-			old: oldData.content || "",
-			new: newData.content || ""
+			old: oldData.content ?? "",
+			new: newData.content ?? ""
 		};
 		return this.fileCache[filePath];
 	}
 	async eagerPrefetchAllFiles() {
 		if (this._eagerPrefetchStarted) return;
 		this._eagerPrefetchStarted = true;
-		const toFetch = (this.files || []).map((f) => f.path).filter(Boolean).filter((p) => !this.fileCache[p]);
+		const toFetch = this.files.map((f) => f.path).filter((p) => !this.fileCache[p]);
 		if (toFetch.length === 0) return;
 		if (window.DEBUG) console.log("[prefetch] warming", toFetch.length, "files");
 		const concurrency = 8;
@@ -635,8 +635,8 @@ var FileDataMethods = class {
 				const p = toFetch[i];
 				batch.push(Promise.all([fetchJSON(`/api/file?path=${encodeURIComponent(p)}&side=old`), fetchJSON(`/api/file?path=${encodeURIComponent(p)}&side=new`)]).then(([oldData, newData]) => {
 					this.fileCache[p] = {
-						old: oldData.content || "",
-						new: newData.content || ""
+						old: oldData.content ?? "",
+						new: newData.content ?? ""
 					};
 				}).catch(() => {}));
 			}
@@ -687,7 +687,7 @@ var FileListMethods = class {
 		const list = document.getElementById("file-list");
 		if (!list) return;
 		clearEl(list);
-		if (!!(this.diff && (this.diff.commit_message || this.diff.commit_hash))) {
+		if (this.diff !== null && (this.diff.commit_message || this.diff.commit_hash)) {
 			const li = el("li", {
 				className: this.currentFileIsCommit ? "active" : "",
 				attrs: { "data-commit": "1" }
@@ -723,8 +723,8 @@ var FileListMethods = class {
 				text: String(commentCount)
 			}));
 			const right = el("span", { className: "file-right" });
-			const added = (file.hunks || []).reduce((acc, h) => acc + (h.lines || []).filter((l) => l && l.type === "add").length, 0);
-			const deleted = (file.hunks || []).reduce((acc, h) => acc + (h.lines || []).filter((l) => l && l.type === "delete").length, 0);
+			const added = file.hunks.reduce((acc, h) => acc + h.lines.filter((line) => line.type === "add").length, 0);
+			const deleted = file.hunks.reduce((acc, h) => acc + h.lines.filter((line) => line.type === "delete").length, 0);
 			right.appendChild(el("span", { className: "file-delta" }, [
 				el("span", {
 					className: "delta-add",
@@ -1228,7 +1228,7 @@ var NavigationMethods = class {
 			this.nextFile();
 			return;
 		}
-		const currentIdx = this.currentHunkIndex[file.path] || 0;
+		const currentIdx = this.currentHunkIndex[file.path] ?? 0;
 		if (currentIdx >= hunks.length - 1) this.nextFile();
 		else {
 			const nextIdx = currentIdx + 1;
@@ -1243,7 +1243,7 @@ var NavigationMethods = class {
 			this.previousFile();
 			return;
 		}
-		const currentIdx = this.currentHunkIndex[file.path] || 0;
+		const currentIdx = this.currentHunkIndex[file.path] ?? 0;
 		if (currentIdx <= 0) this.previousFile();
 		else {
 			const prevIdx = currentIdx - 1;
@@ -1263,15 +1263,15 @@ var NavigationMethods = class {
 			this.editor.getOriginalEditor().revealLineInCenter(hunkRange.start, reduceMotion ? monaco.editor.ScrollType.Immediate : smooth);
 			this.highlightFocusedHunk(hunkRange.start, hunkRange.end, "old");
 			this.setFocusedLine("old", hunkRange.start, false);
-			const idx = (this.currentHunkIndex[file.path] || 0) + 1;
-			const total = (this.fileHunks[file.path] || []).length;
+			const idx = (this.currentHunkIndex[file.path] ?? 0) + 1;
+			const total = hunks.length;
 			showNavIndicator(`Hunk ${idx}/${total} • old`);
 		} else {
 			this.editor.getModifiedEditor().revealLineInCenter(hunkRange.start, reduceMotion ? monaco.editor.ScrollType.Immediate : smooth);
 			this.highlightFocusedHunk(hunkRange.start, hunkRange.end, "new");
 			this.setFocusedLine("new", hunkRange.start, false);
-			const idx = (this.currentHunkIndex[file.path] || 0) + 1;
-			const total = (this.fileHunks[file.path] || []).length;
+			const idx = (this.currentHunkIndex[file.path] ?? 0) + 1;
+			const total = hunks.length;
 			showNavIndicator(`Hunk ${idx}/${total} • new`);
 		}
 	}
@@ -1287,8 +1287,8 @@ var NavigationMethods = class {
 				className: "focused-hunk-line"
 			}
 		});
-		this.focusedHunkDecorationsNew = modifiedEditor.deltaDecorations(this.focusedHunkDecorationsNew || [], []);
-		this.focusedHunkDecorationsOld = originalEditor.deltaDecorations(this.focusedHunkDecorationsOld || [], []);
+		this.focusedHunkDecorationsNew = modifiedEditor.deltaDecorations(this.focusedHunkDecorationsNew, []);
+		this.focusedHunkDecorationsOld = originalEditor.deltaDecorations(this.focusedHunkDecorationsOld, []);
 		if (side === "old") this.focusedHunkDecorationsOld = originalEditor.deltaDecorations([], decorations);
 		else this.focusedHunkDecorationsNew = modifiedEditor.deltaDecorations([], decorations);
 	}
@@ -1301,8 +1301,8 @@ var NavigationMethods = class {
 		const modifiedEditor = this.editor.getModifiedEditor();
 		const originalEditor = this.editor.getOriginalEditor();
 		const scrollType = prefersReducedMotion() ? monaco.editor.ScrollType.Immediate : monaco.editor.ScrollType.Smooth;
-		this.focusedLineDecorationsNew = modifiedEditor.deltaDecorations(this.focusedLineDecorationsNew || [], []);
-		this.focusedLineDecorationsOld = originalEditor.deltaDecorations(this.focusedLineDecorationsOld || [], []);
+		this.focusedLineDecorationsNew = modifiedEditor.deltaDecorations(this.focusedLineDecorationsNew, []);
+		this.focusedLineDecorationsOld = originalEditor.deltaDecorations(this.focusedLineDecorationsOld, []);
 		const dec = [{
 			range: new monaco.Range(monacoLine, 1, monacoLine, 1),
 			options: {
@@ -1324,7 +1324,7 @@ var NavigationMethods = class {
 		const file = this.files[this.currentFileIndex];
 		const hunks = this.fileHunks[file.path];
 		if (!hunks || hunks.length === 0) return;
-		let idx = this.currentHunkIndex[file.path] || 0;
+		let idx = this.currentHunkIndex[file.path] ?? 0;
 		const hr = hunks[idx];
 		if (!this.currentFocusedLine) {
 			const side = hr.side === "old" ? "old" : "new";
@@ -1332,7 +1332,7 @@ var NavigationMethods = class {
 			return;
 		}
 		let { side, line } = this.currentFocusedLine;
-		if (side !== (hr.side || "new") || line < hr.start || line > hr.end) {
+		if (side !== hr.side || line < hr.start || line > hr.end) {
 			side = hr.side === "old" ? "old" : "new";
 			line = hr.start;
 		}
@@ -1361,8 +1361,8 @@ var NavigationMethods = class {
 		if (!this.editor) return;
 		const modifiedEditor = this.editor.getModifiedEditor();
 		const originalEditor = this.editor.getOriginalEditor();
-		this.focusedHunkDecorationsNew = modifiedEditor.deltaDecorations(this.focusedHunkDecorationsNew || [], []);
-		this.focusedHunkDecorationsOld = originalEditor.deltaDecorations(this.focusedHunkDecorationsOld || [], []);
+		this.focusedHunkDecorationsNew = modifiedEditor.deltaDecorations(this.focusedHunkDecorationsNew, []);
+		this.focusedHunkDecorationsOld = originalEditor.deltaDecorations(this.focusedHunkDecorationsOld, []);
 	}
 	openCommentOnCurrentFocus() {
 		if (!this.editor) return;
@@ -1374,7 +1374,7 @@ var NavigationMethods = class {
 			this.showCommentDialog(file.path, line, line, side);
 			return;
 		}
-		const hunkRange = hunks[this.currentHunkIndex[file.path] || 0];
+		const hunkRange = hunks[this.currentHunkIndex[file.path] ?? 0];
 		const side = hunkRange.side === "old" ? "old" : "new";
 		this.showCommentDialog(file.path, hunkRange.start, hunkRange.start, side);
 	}
@@ -1465,14 +1465,14 @@ var CommitMethods = class {
 			return;
 		}
 		const pop = el("div", { className: "commit-popover" });
-		const first = (message || "").split("\n")[0] || "(no message)";
+		const first = message.split("\n")[0] || "(no message)";
 		const title = el("div", {
 			className: "commit-popover-title",
-			text: (rev ? rev + ": " : "") + first
+			text: rev ? `${rev}: ${first}` : first
 		});
 		const body = el("div", {
 			className: "commit-popover-body",
-			text: message || ""
+			text: message
 		});
 		pop.appendChild(title);
 		pop.appendChild(body);
@@ -1537,7 +1537,7 @@ var CommitMethods = class {
 		};
 		addBtn.onclick = (e) => {
 			e.preventDefault();
-			const body = (ta.value || "").trim();
+			const body = ta.value.trim();
 			if (!body) {
 				ta.focus();
 				return;
@@ -1575,9 +1575,9 @@ var CommitMethods = class {
 		meta.style.color = "var(--text-secondary)";
 		meta.style.fontSize = "11px";
 		meta.style.marginBottom = "12px";
-		meta.textContent = this.diff && this.diff.commit_hash ? String(this.diff.commit_hash) : "";
+		meta.textContent = this.diff?.commit_hash ?? "";
 		viewEl.appendChild(meta);
-		const msgLines = String(this.diff && this.diff.commit_message || "(no message)").split("\n");
+		const msgLines = (this.diff?.commit_message ?? "(no message)").split("\n");
 		const msgContainer = el("div");
 		msgContainer.style.border = "1px solid var(--border-color)";
 		msgContainer.style.borderRadius = "4px";
@@ -1717,7 +1717,7 @@ var CommitMethods = class {
 		hint.textContent = `${modKey}+Enter to save, Escape to cancel`;
 		body.appendChild(hint);
 		const save = () => {
-			const text = (ta.value || "").trim();
+			const text = ta.value.trim();
 			if (!text) {
 				ta.focus();
 				return;
@@ -1765,8 +1765,8 @@ var CommentsUIMethods = class {
 				glyphMarginHoverMessage: { value: comment.body }
 			}
 		}));
-		this.modifiedDecorations = modifiedEditor.deltaDecorations(this.modifiedDecorations || [], modifiedDecorations);
-		this.originalDecorations = originalEditor.deltaDecorations(this.originalDecorations || [], originalDecorations);
+		this.modifiedDecorations = modifiedEditor.deltaDecorations(this.modifiedDecorations, modifiedDecorations);
+		this.originalDecorations = originalEditor.deltaDecorations(this.originalDecorations, originalDecorations);
 	}
 	showCommentDialog(file, fileLineNumber, monacoLineNumber, side) {
 		const targetEditor = side === "new" ? this.editor.getModifiedEditor() : this.editor.getOriginalEditor();
@@ -1824,7 +1824,7 @@ var CommentsUIMethods = class {
 		this.currentWidgetEditor = targetEditor;
 		const saveBtn = domNode.querySelector(".save-btn");
 		const cancelBtn = domNode.querySelector(".cancel-btn");
-		if (existingComment) textarea.value = existingComment.body || "";
+		if (existingComment) textarea.value = existingComment.body;
 		const handleKeydown = (e) => {
 			if (e.key === "Escape") cleanup();
 			else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
@@ -2187,7 +2187,11 @@ var MonacoApp = class {
 	isInline;
 	modifiedDecorations;
 	originalDecorations;
-	focusedHunkDecorations;
+	focusedHunkDecorationsNew;
+	focusedHunkDecorationsOld;
+	focusedLineDecorationsNew;
+	focusedLineDecorationsOld;
+	currentFocusedLine;
 	currentWidget;
 	currentWidgetEditor;
 	diff;
@@ -2211,7 +2215,11 @@ var MonacoApp = class {
 		this.isInline = false;
 		this.modifiedDecorations = [];
 		this.originalDecorations = [];
-		this.focusedHunkDecorations = [];
+		this.focusedHunkDecorationsNew = [];
+		this.focusedHunkDecorationsOld = [];
+		this.focusedLineDecorationsNew = [];
+		this.focusedLineDecorationsOld = [];
+		this.currentFocusedLine = null;
 		this.currentWidget = null;
 		this.diff = null;
 		this.files = [];

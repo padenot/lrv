@@ -45,7 +45,11 @@ export class MonacoApp {
   isInline: boolean;
   modifiedDecorations: string[];
   originalDecorations: string[];
-  focusedHunkDecorations: string[];
+  focusedHunkDecorationsNew: string[];
+  focusedHunkDecorationsOld: string[];
+  focusedLineDecorationsNew: string[];
+  focusedLineDecorationsOld: string[];
+  currentFocusedLine: { side: 'old' | 'new'; line: number } | null;
   currentWidget: editor.IContentWidget | null;
   currentWidgetEditor?: editor.ICodeEditor | null;
   diff: { files: DiffFile[]; stats: DiffStats; commit_message?: string; commit_hash?: string } | null;
@@ -80,7 +84,11 @@ export class MonacoApp {
     this.isInline = false;
     this.modifiedDecorations = [];
     this.originalDecorations = [];
-    this.focusedHunkDecorations = [];
+    this.focusedHunkDecorationsNew = [];
+    this.focusedHunkDecorationsOld = [];
+    this.focusedLineDecorationsNew = [];
+    this.focusedLineDecorationsOld = [];
+    this.currentFocusedLine = null;
     this.currentWidget = null;
     this.diff = null;
     this.files = [];

@@ -21,12 +21,12 @@ export class CommitMethods {
       return;
     }
     const pop = el('div', { className: 'commit-popover' });
-    const first = (message || '').split('\n')[0] || '(no message)';
+    const first = message.split('\n')[0] || '(no message)';
     const title = el('div', {
       className: 'commit-popover-title',
-      text: (rev ? rev + ': ' : '') + first,
+      text: rev ? `${rev}: ${first}` : first,
     });
-    const body = el('div', { className: 'commit-popover-body', text: message || '' });
+    const body = el('div', { className: 'commit-popover-body', text: message });
     pop.appendChild(title);
     pop.appendChild(body);
 
@@ -100,7 +100,7 @@ export class CommitMethods {
     };
     addBtn.onclick = (e) => {
       e.preventDefault();
-      const body = (ta.value || '').trim();
+      const body = ta.value.trim();
       if (!body) {
         ta.focus();
         return;
@@ -144,11 +144,11 @@ export class CommitMethods {
     meta.style.color = 'var(--text-secondary)';
     meta.style.fontSize = '11px';
     meta.style.marginBottom = '12px';
-    const rev = this.diff && this.diff.commit_hash ? String(this.diff.commit_hash) : '';
+    const rev = this.diff?.commit_hash ?? '';
     meta.textContent = rev;
     viewEl.appendChild(meta);
 
-    const msgText = String((this.diff && this.diff.commit_message) || '(no message)');
+    const msgText = this.diff?.commit_message ?? '(no message)';
     const msgLines = msgText.split('\n');
 
     const msgContainer = el('div');
@@ -266,7 +266,7 @@ export class CommitMethods {
     this.renderFileList();
   }
 
-  showCommitLineCommentDialog(lineNum) {
+  showCommitLineCommentDialog(lineNum: number) {
     const modKey = MOD_KEY_LABEL;
 
     const footerContent = [
@@ -307,7 +307,7 @@ export class CommitMethods {
     body.appendChild(hint);
 
     const save = () => {
-      const text = (ta.value || '').trim();
+      const text = ta.value.trim();
       if (!text) {
         ta.focus();
         return;
