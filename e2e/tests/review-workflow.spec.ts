@@ -426,6 +426,9 @@ test.describe('Review Workflow E2E', () => {
     await fileListItem.click();
     await page.locator('.monaco-editor').first().waitFor({ timeout: 7000 });
 
+    // Added files should force unified view (no empty original side-by-side pane)
+    await expect(page.locator('.monaco-diff-editor.side-by-side')).toHaveCount(0);
+
     // Verify the added content is visible in the diff view
     await expect(page.locator('text=new content')).toBeVisible({ timeout: 5000 });
 

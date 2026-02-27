@@ -5,6 +5,17 @@ import { monoFontStack, prefersReducedMotion } from './font.js';
 import { markAppReady } from './ui-signals.js';
 
 export class FileLoadingMethods {
+  isAddedFile(file) {
+    const rawStatus = String(file?.status || '').toLowerCase();
+    if (rawStatus === 'added' || rawStatus === 'add' || rawStatus === 'a' || rawStatus === 'new') {
+      return true;
+    }
+
+    // Fallback for non-git emitters: new files typically have hunks rooted at old line 0.
+    const hunks = Array.isArray(file?.hunks) ? file.hunks : [];
+    return hunks.length > 0 && hunks.every((h) => Number(h?.old_start || 0) === 0);
+  }
+
   async loadFile(index) {
     this.currentFileIsCommit = false;
     if (window.DEBUG) {
@@ -14,6 +25,8 @@ export class FileLoadingMethods {
     window.Perf.recordFileSwitchStart();
     this.currentFileIndex = index;
     const file = this.files[index];
+    const isAddedFile = this.isAddedFile(file);
+    const renderSideBySide = !this.isInline && !isAddedFile;
     if (window.DEBUG) {
       console.log('[app] loadFile: path', file.path, 'status', file.status);
     }
@@ -51,7 +64,7 @@ export class FileLoadingMethods {
     if (!this.editor) {
       this.editor = monaco.editor.createDiffEditor(container, {
         theme: theme,
-        renderSideBySide: !this.isInline,
+        renderSideBySide,
         readOnly: true,
         originalEditable: false,
         automaticLayout: true,
@@ -85,10 +98,8 @@ export class FileLoadingMethods {
     // Show/hide banner when old content is unavailable but new content exists
     const oldBanner = $('#old-missing-banner');
     if (oldBanner) {
-      const status = String((this.files[index] && this.files[index].status) || '').toLowerCase();
-      const isAdded = status === 'added';
       const show =
-        !isAdded &&
+        !isAddedFile &&
         (!this.fileCache[file.path].old || this.fileCache[file.path].old.length === 0) &&
         this.fileCache[file.path].new &&
         this.fileCache[file.path].new.length > 0;
@@ -129,7 +140,7 @@ export class FileLoadingMethods {
       this.editor.getOriginalEditor().setScrollTop(0);
     });
     this.editor.updateOptions({
-      renderSideBySide: !this.isInline,
+      renderSideBySide,
       theme: theme,
       fontFamily: mono,
       glyphMargin: true,

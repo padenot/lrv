@@ -77,6 +77,12 @@ export class NavigationMethods {
   toggleView() {
     this.isInline = !this.isInline;
     this.loadFile(this.currentFileIndex);
+    const file = this.files[this.currentFileIndex];
+    const isAddedFile = this.isAddedFile(file);
+    if (isAddedFile) {
+      showNavIndicator('Inline (new file)');
+      return;
+    }
     showNavIndicator(this.isInline ? 'Inline' : 'Side-by-Side');
   }
 

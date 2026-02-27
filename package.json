@@ -4,10 +4,12 @@
   "version": "0.0.0",
   "devDependencies": {
     "eslint": "^10.0.0",
-    "eslint-plugin-html": "^8.1.1"
+    "eslint-plugin-html": "^8.1.1",
+    "monaco-editor": "^0.55.1",
+    "rolldown": "^1.0.0-rc.6",
+    "typescript": "^5.9.3"
   },
   "scripts": {
     "lint:web": "eslint web e2e scripts"
   }
 }
-
