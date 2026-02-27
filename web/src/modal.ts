@@ -4,8 +4,8 @@ type OpenModalParams = {
   title: string;
   titleId?: string;
   modalClass?: string;
-  footerContent?: Node | Node[] | null;
-  onKeydown?: ((e: KeyboardEvent) => void) | null;
+  footerContent?: Node | Node[];
+  onKeydown?: (e: KeyboardEvent) => void;
 };
 
 type OpenModalResult = {
@@ -20,8 +20,8 @@ export function openModal({
   title,
   titleId,
   modalClass = '',
-  footerContent = null,
-  onKeydown = null,
+  footerContent = [],
+  onKeydown,
 }: OpenModalParams): OpenModalResult {
   const overlay = el('div', { className: 'submit-modal-overlay' });
 
@@ -39,14 +39,12 @@ export function openModal({
   const body = el('div', { className: 'submit-modal-body' });
 
   const footer = el('div', { className: 'submit-modal-footer' });
-  if (footerContent) {
-    const nodes = Array.isArray(footerContent) ? footerContent : [footerContent];
-    nodes.forEach((node) => {
-      if (node) {
-        footer.appendChild(node);
-      }
-    });
-  }
+  const nodes = Array.isArray(footerContent) ? footerContent : [footerContent];
+  nodes.forEach((node) => {
+    if (node) {
+      footer.appendChild(node);
+    }
+  });
 
   modal.appendChild(header);
   modal.appendChild(body);

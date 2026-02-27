@@ -133,9 +133,9 @@ export class MonacoApp {
     this.config = resolveAppConfig(configData);
     this.context = contextData;
     if (this.context.title) {
-      document.title = String(this.context.title);
+      document.title = this.context.title;
     } else {
-      const dirName = (this.context.working_directory || '').split('/').pop() || '';
+      const dirName = (this.context.working_directory ?? '').split('/').pop() ?? '';
       document.title = dirName || 'lrv';
     }
     if (window.DEBUG) {
@@ -271,7 +271,7 @@ export class MonacoApp {
     };
 
     // Accent from theme rules: prefer the 'keyword' token color defined in our theme
-    const defs: UIThemeDefinitionMap = window.UI_THEME_DEFS || {};
+    const defs: UIThemeDefinitionMap = window.UI_THEME_DEFS ?? {};
     const def = defs[themeName];
     if (def && Array.isArray(def.rules)) {
       const kw = def.rules.find((r) => r && r.token === 'keyword' && r.foreground);
@@ -295,7 +295,7 @@ export class MonacoApp {
       const cs = getComputedStyle(editorEl);
       setVar('--bg-primary', cs.backgroundColor);
       // Derive secondary/elevated as slight variants
-      const overlay = document.querySelector('.monaco-editor .margin') || editorEl;
+      const overlay = document.querySelector('.monaco-editor .margin') ?? editorEl;
       const cs2 = getComputedStyle(overlay);
       setVar('--bg-secondary', cs2.backgroundColor || cs.backgroundColor);
       setVar('--bg-elevated', cs2.backgroundColor || cs.backgroundColor);
@@ -307,7 +307,7 @@ export class MonacoApp {
   }
 
   defineCustomThemes() {
-    window.UI_THEME_DEFS = window.UI_THEME_DEFS || {};
+    window.UI_THEME_DEFS ??= {};
     Object.entries(CUSTOM_THEMES).forEach(([name, theme]) => {
       monaco.editor.defineTheme(name, theme);
       window.UI_THEME_DEFS[name] = theme;
@@ -320,15 +320,15 @@ export class MonacoApp {
       return;
     }
     clearEl(container);
-    if (this.context && this.context.title) {
-      const t = String(this.context.title);
+    if (this.context.title) {
+      const t = this.context.title;
       container.appendChild(
         el('span', { className: 'project-info-value', text: t, attrs: { title: t } }),
       );
       // fall through to optionally show commit message as well
     }
-    const wd = String(this.context.working_directory || '');
-    const dirName = (wd || '').split('/').pop() || wd;
+    const wd = this.context.working_directory ?? '';
+    const dirName = wd.split('/').pop() || wd;
     container.appendChild(
       el('span', { className: 'project-info-value', text: dirName, attrs: { title: wd } }),
     );
@@ -343,17 +343,17 @@ export class MonacoApp {
     if (this.diff && (this.diff.commit_message || this.diff.commit_hash)) {
       container.appendChild(el('span', { className: 'project-info-separator', text: '·' }));
       const mm = el('span', { className: 'commit-message' });
-      const rev = this.diff.commit_hash ? String(this.diff.commit_hash).substring(0, 7) + ': ' : '';
-      const firstLine = String(this.diff.commit_message || '').split('\n')[0];
+      const rev = this.diff.commit_hash ? `${this.diff.commit_hash.substring(0, 7)}: ` : '';
+      const firstLine = (this.diff.commit_message ?? '').split('\n')[0];
       mm.textContent = rev + firstLine;
       if (this.diff.commit_message) {
-        mm.title = String(this.diff.commit_message);
+        mm.title = this.diff.commit_message;
       }
       mm.addEventListener('click', (ev) => {
         this.showCommitMessagePopover(
           ev.currentTarget as HTMLElement,
-          String(this.diff.commit_message || ''),
-          String(this.diff.commit_hash || ''),
+          this.diff?.commit_message ?? '',
+          this.diff?.commit_hash ?? '',
         );
       });
       container.appendChild(mm);
@@ -401,7 +401,7 @@ export class MonacoApp {
     }
 
     // Show banner for public mode
-    if (this.context && this.context.is_public) {
+    if (this.context.is_public) {
       const b = $<HTMLElement>('#public-banner');
       if (b) {
         b.style.display = '';

@@ -488,7 +488,7 @@ function hideFetchSpinnerMaybe() {
 	}
 }
 async function fetchJSON(url, options) {
-	const isFile = typeof url === "string" && url.startsWith("/api/file");
+	const isFile = url.startsWith("/api/file");
 	if (isFile) {
 		fileFetchPending++;
 		if (fileFetchPending === 1) showFetchSpinnerDelayed();
@@ -1381,7 +1381,7 @@ var NavigationMethods = class {
 
 //#endregion
 //#region web/src/modal.ts
-function openModal({ title, titleId, modalClass = "", footerContent = null, onKeydown = null }) {
+function openModal({ title, titleId, modalClass = "", footerContent = [], onKeydown }) {
 	const overlay = el("div", { className: "submit-modal-overlay" });
 	const modal = el("div", { className: `submit-modal${modalClass ? " " + modalClass : ""}` });
 	const header = el("div", { className: "submit-modal-header" }, [el("h2", titleId ? {
@@ -1394,7 +1394,7 @@ function openModal({ title, titleId, modalClass = "", footerContent = null, onKe
 	})]);
 	const body = el("div", { className: "submit-modal-body" });
 	const footer = el("div", { className: "submit-modal-footer" });
-	if (footerContent) (Array.isArray(footerContent) ? footerContent : [footerContent]).forEach((node) => {
+	(Array.isArray(footerContent) ? footerContent : [footerContent]).forEach((node) => {
 		if (node) footer.appendChild(node);
 	});
 	modal.appendChild(header);
@@ -2257,9 +2257,9 @@ var MonacoApp = class {
 		if (window.DEBUG) console.log("[app] init: responses received in", Math.round(performance.now() - t0), "ms");
 		this.config = resolveAppConfig(configData);
 		this.context = contextData;
-		if (this.context.title) document.title = String(this.context.title);
+		if (this.context.title) document.title = this.context.title;
 		else {
-			const dirName = (this.context.working_directory || "").split("/").pop() || "";
+			const dirName = (this.context.working_directory ?? "").split("/").pop() ?? "";
 			document.title = dirName || "lrv";
 		}
 		if (window.DEBUG) console.log("[app] init: parsed config/context/diff");
@@ -2347,7 +2347,7 @@ var MonacoApp = class {
 		const setVar = (k, v) => {
 			if (v) document.documentElement.style.setProperty(k, v);
 		};
-		const def = (window.UI_THEME_DEFS || {})[themeName];
+		const def = (window.UI_THEME_DEFS ?? {})[themeName];
 		if (def && Array.isArray(def.rules)) {
 			const kw = def.rules.find((r) => r && r.token === "keyword" && r.foreground);
 			if (kw && kw.foreground) {
@@ -2367,7 +2367,7 @@ var MonacoApp = class {
 		if (editorEl) {
 			const cs = getComputedStyle(editorEl);
 			setVar("--bg-primary", cs.backgroundColor);
-			const overlay = document.querySelector(".monaco-editor .margin") || editorEl;
+			const overlay = document.querySelector(".monaco-editor .margin") ?? editorEl;
 			const cs2 = getComputedStyle(overlay);
 			setVar("--bg-secondary", cs2.backgroundColor || cs.backgroundColor);
 			setVar("--bg-elevated", cs2.backgroundColor || cs.backgroundColor);
@@ -2376,7 +2376,7 @@ var MonacoApp = class {
 		}
 	}
 	defineCustomThemes() {
-		window.UI_THEME_DEFS = window.UI_THEME_DEFS || {};
+		window.UI_THEME_DEFS ??= {};
 		Object.entries(CUSTOM_THEMES).forEach(([name, theme]) => {
 			monaco.editor.defineTheme(name, theme);
 			window.UI_THEME_DEFS[name] = theme;
@@ -2386,16 +2386,16 @@ var MonacoApp = class {
 		const container = $("#project-info");
 		if (!container) return;
 		clearEl(container);
-		if (this.context && this.context.title) {
-			const t = String(this.context.title);
+		if (this.context.title) {
+			const t = this.context.title;
 			container.appendChild(el("span", {
 				className: "project-info-value",
 				text: t,
 				attrs: { title: t }
 			}));
 		}
-		const wd = String(this.context.working_directory || "");
-		const dirName = (wd || "").split("/").pop() || wd;
+		const wd = this.context.working_directory ?? "";
+		const dirName = wd.split("/").pop() || wd;
 		container.appendChild(el("span", {
 			className: "project-info-value",
 			text: dirName,
@@ -2417,10 +2417,10 @@ var MonacoApp = class {
 				text: "·"
 			}));
 			const mm = el("span", { className: "commit-message" });
-			mm.textContent = (this.diff.commit_hash ? String(this.diff.commit_hash).substring(0, 7) + ": " : "") + String(this.diff.commit_message || "").split("\n")[0];
-			if (this.diff.commit_message) mm.title = String(this.diff.commit_message);
+			mm.textContent = (this.diff.commit_hash ? `${this.diff.commit_hash.substring(0, 7)}: ` : "") + (this.diff.commit_message ?? "").split("\n")[0];
+			if (this.diff.commit_message) mm.title = this.diff.commit_message;
 			mm.addEventListener("click", (ev) => {
-				this.showCommitMessagePopover(ev.currentTarget, String(this.diff.commit_message || ""), String(this.diff.commit_hash || ""));
+				this.showCommitMessagePopover(ev.currentTarget, this.diff?.commit_message ?? "", this.diff?.commit_hash ?? "");
 			});
 			container.appendChild(mm);
 		}
@@ -2447,7 +2447,7 @@ var MonacoApp = class {
 		});
 		const statsEl = $("#stats");
 		if (statsEl) statsEl.textContent = `${this.stats.files_changed} files, +${this.stats.additions} -${this.stats.deletions}`;
-		if (this.context && this.context.is_public) {
+		if (this.context.is_public) {
 			const b = $("#public-banner");
 			if (b) b.style.display = "";
 		}

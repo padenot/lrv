@@ -49,7 +49,7 @@ function hideFetchSpinnerMaybe() {
 }
 
 export async function fetchJSON<T>(url: string, options?: RequestInit): Promise<T> {
-  const isFile = typeof url === 'string' && url.startsWith('/api/file');
+  const isFile = url.startsWith('/api/file');
   if (isFile) {
     fileFetchPending++;
     if (fileFetchPending === 1) {
