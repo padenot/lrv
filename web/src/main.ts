@@ -30,7 +30,7 @@ window.addEventListener(
 );
 
 const app = new MonacoApp();
-window.__APP = app;
+window.__APP = app as typeof window.__APP;
 app.init().then(() => {
   if (window.DEBUG) {
     console.log('Monaco Editor initialized');

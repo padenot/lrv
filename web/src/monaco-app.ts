@@ -13,6 +13,7 @@ import { CommentsUIMethods } from './comments-ui-methods';
 import { DialogMethods } from './dialog-methods';
 import type { AppConfig, AppContextData, DiffFile, DiffStats, FilePair, HunkRange } from './types/app';
 import type { editor } from 'monaco-editor';
+import type { UIThemeDefinitionMap } from './themes';
 
 type Constructor = { prototype: object };
 function applyMixin(TargetClass: Constructor, MethodsClass: Constructor) {
@@ -253,10 +254,7 @@ export class MonacoApp {
     };
 
     // Accent from theme rules: prefer the 'keyword' token color defined in our theme
-    const defs = (window.UI_THEME_DEFS || {}) as Record<
-      string,
-      { rules?: Array<{ token?: string; foreground?: string }> }
-    >;
+    const defs: UIThemeDefinitionMap = window.UI_THEME_DEFS || {};
     const def = defs[themeName];
     if (def && Array.isArray(def.rules)) {
       const kw = def.rules.find((r) => r && r.token === 'keyword' && r.foreground);

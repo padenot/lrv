@@ -1,5 +1,6 @@
 import { el } from './dom';
 import { commentEndLine, commentLineLabel, commentStartLine } from './comments';
+import type { ReviewComment } from './comments';
 import { openModal } from './modal';
 import { fetchJSON } from './api';
 import { IS_MAC } from './platform';
@@ -269,7 +270,7 @@ export class DialogMethods {
 
   async showSubmitConfirmation() {
     const comments = this.commentManager.getComments();
-    let submit = () => {};
+    let submit: () => void | Promise<void> = () => {};
 
     const footerContent = [
       el('button', { className: 'btn-secondary cancel-submit-btn', text: 'Cancel' }),
@@ -296,7 +297,7 @@ export class DialogMethods {
       body.appendChild(noCommentsMsg);
     }
 
-    const commentsByFile = {};
+    const commentsByFile: Record<string, ReviewComment[]> = {};
     comments.forEach((comment) => {
       if (!commentsByFile[comment.file]) {
         commentsByFile[comment.file] = [];
@@ -304,7 +305,7 @@ export class DialogMethods {
       commentsByFile[comment.file].push(comment);
     });
 
-    const fileContents = {};
+    const fileContents: Record<string, string[]> = {};
     await Promise.all(
       Object.keys(commentsByFile).map(async (filePath) => {
         const fileComments = commentsByFile[filePath];

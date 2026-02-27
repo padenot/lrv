@@ -1,3 +1,6 @@
+import type { AppContext } from './app';
+import type { UIThemeDefinitionMap } from '../themes';
+
 interface PerfHelpers {
   mark(name: string): void;
   measure(name: string, startMark: string, endMark: string): void;
@@ -20,11 +23,11 @@ declare global {
   interface Window {
     DEBUG: boolean;
     __APP_READY: boolean;
-    __APP?: unknown;
+    __APP?: Partial<Pick<AppContext, 'eagerPrefetchAllFiles'>>;
     __ACCENT_READY?: boolean;
     MONACO_VS_BASE?: string;
     Perf: PerfHelpers;
-    UI_THEME_DEFS?: Record<string, unknown>;
+    UI_THEME_DEFS?: UIThemeDefinitionMap;
     UIThemeAccentsHex?: Record<string, string>;
     require?: RequireLike;
   }

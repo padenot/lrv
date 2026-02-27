@@ -27,7 +27,7 @@ function showFetchSpinnerDelayed() {
   fileFetchDelayTimer = setTimeout(() => {
     if (fileFetchPending > 0) {
       fetchSpinnerEl.classList.add('visible');
-      const app = window.__APP as { eagerPrefetchAllFiles?: () => Promise<void> } | undefined;
+      const app = window.__APP;
       if (app && typeof app.eagerPrefetchAllFiles === 'function') {
         app.eagerPrefetchAllFiles();
       }

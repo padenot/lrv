@@ -1,6 +1,10 @@
 import type { editor } from 'monaco-editor';
 
 type ThemeMap = Record<string, editor.IStandaloneThemeData>;
+export type UIThemeDefinition = {
+  rules?: Array<{ token?: string; foreground?: string }>;
+};
+export type UIThemeDefinitionMap = Record<string, UIThemeDefinition>;
 
 export const CUSTOM_THEMES: ThemeMap = {
   'solarized-dark': {
@@ -154,5 +158,5 @@ export const UI_THEME_ACCENTS_HEX = {
   'hc-black': '#007acc',
   vs: '#007acc',
   'hc-light': '#007acc',
-};
+} as const;
 window.UIThemeAccentsHex = UI_THEME_ACCENTS_HEX;
