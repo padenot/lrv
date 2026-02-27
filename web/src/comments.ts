@@ -15,6 +15,18 @@ export function commentEndLine(comment: ReviewComment): number {
   return Array.isArray(comment.line) ? comment.line[1] : comment.line;
 }
 
+export function commentContainsLine(comment: ReviewComment, line: number): boolean {
+  const start = commentStartLine(comment);
+  const end = commentEndLine(comment);
+  return line >= start && line <= end;
+}
+
+export function commentLineLabel(comment: ReviewComment): string {
+  const start = commentStartLine(comment);
+  const end = commentEndLine(comment);
+  return start === end ? String(start) : `${start}-${end}`;
+}
+
 export class CommentManager {
   private comments: ReviewComment[];
   private listeners: Array<() => void>;
@@ -36,7 +48,7 @@ export class CommentManager {
 
   findComment(file: string, line: number, side: 'old' | 'new'): number {
     return this.comments.findIndex(
-      (c) => c.file === file && commentStartLine(c) === line && c.side === side,
+      (c) => c.file === file && c.side === side && commentContainsLine(c, line),
     );
   }
 

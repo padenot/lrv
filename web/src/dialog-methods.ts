@@ -1,5 +1,5 @@
 import { el } from './dom';
-import { commentStartLine } from './comments';
+import { commentEndLine, commentLineLabel, commentStartLine } from './comments';
 import { openModal } from './modal';
 import { fetchJSON } from './api';
 import { IS_MAC } from './platform';
@@ -328,20 +328,22 @@ export class DialogMethods {
     comments.forEach((comment) => {
       const preview = el('div', { className: 'comment-preview' });
 
-      const headerText = `${comment.file}:${commentStartLine(comment)} (${comment.side})`;
+      const headerText = `${comment.file}:${commentLineLabel(comment)} (${comment.side})`;
       const previewHeader = el('div', { className: 'comment-preview-header', text: headerText });
 
       const fileKey = `${comment.file}:${comment.side}`;
       const lines = fileContents[fileKey] || [];
-      const lineIndex = commentStartLine(comment) - 1;
-      const startLine = Math.max(0, lineIndex - 1);
-      const endLine = Math.min(lines.length, lineIndex + 2);
+      const rangeStart = commentStartLine(comment);
+      const rangeEnd = commentEndLine(comment);
+      const startLine = Math.max(0, rangeStart - 2);
+      const endLine = Math.min(lines.length, rangeEnd + 1);
       const excerpt = lines.slice(startLine, endLine);
 
       const codeBlock = el('div', { className: 'comment-preview-code' });
       excerpt.forEach((line, idx) => {
         const lineDiv = el('div', { className: 'comment-preview-code-line' });
-        if (startLine + idx === lineIndex) {
+        const lineNumber = startLine + idx + 1;
+        if (lineNumber >= rangeStart && lineNumber <= rangeEnd) {
           lineDiv.classList.add('target');
         }
         lineDiv.textContent = line || ' ';

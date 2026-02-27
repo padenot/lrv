@@ -1,6 +1,6 @@
 import { el } from './dom';
 import { MOD_KEY_LABEL } from './platform';
-import { commentStartLine } from './comments';
+import { commentEndLine, commentLineLabel, commentStartLine } from './comments';
 import type { AppContext, Side } from './types/app';
 
 export class CommentsUIMethods {
@@ -28,7 +28,7 @@ export class CommentsUIMethods {
     const modifiedDecorations = comments
       .filter((c) => c.side === 'new')
       .map((comment) => ({
-        range: new monaco.Range(commentStartLine(comment), 1, commentStartLine(comment), 1),
+        range: new monaco.Range(commentStartLine(comment), 1, commentEndLine(comment), 1),
         options: {
           isWholeLine: true,
           glyphMarginClassName: 'codicon codicon-comment',
@@ -40,7 +40,7 @@ export class CommentsUIMethods {
     const originalDecorations = comments
       .filter((c) => c.side === 'old')
       .map((comment) => ({
-        range: new monaco.Range(commentStartLine(comment), 1, commentStartLine(comment), 1),
+        range: new monaco.Range(commentStartLine(comment), 1, commentEndLine(comment), 1),
         options: {
           isWholeLine: true,
           glyphMarginClassName: 'codicon codicon-comment',
@@ -79,7 +79,7 @@ export class CommentsUIMethods {
     const domNode = el('div', { className: 'inline-comment-box' });
     const modKey = MOD_KEY_LABEL;
     const title = el('h3', {
-      text: `Line ${fileLineNumber}${existingComment ? ' - Edit' : ''}`,
+      text: `Line ${existingComment ? commentLineLabel(existingComment) : fileLineNumber}${existingComment ? ' - Edit' : ''}`,
     });
     const textarea = el('textarea', {
       className: 'comment-textarea',

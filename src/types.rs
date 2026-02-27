@@ -79,6 +79,15 @@ pub enum CommentLine {
     Range((usize, usize)),
 }
 
+impl CommentLine {
+    pub fn is_valid(&self) -> bool {
+        match self {
+            CommentLine::Single(line) => *line > 0,
+            CommentLine::Range((start, end)) => *start > 0 && *end > 0 && start <= end,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Side {
@@ -89,6 +98,12 @@ pub enum Side {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReviewComplete {
     pub comments: Vec<Comment>,
+}
+
+impl Comment {
+    pub fn is_valid(&self) -> bool {
+        self.line.is_valid()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

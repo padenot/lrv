@@ -78,6 +78,15 @@ fn test_comment_line_serde() {
     assert!(matches!(l2, lrv::types::CommentLine::Range((10, 15))));
 }
 
+#[test]
+fn test_comment_line_validation() {
+    assert!(lrv::types::CommentLine::Single(1).is_valid());
+    assert!(lrv::types::CommentLine::Range((3, 8)).is_valid());
+    assert!(!lrv::types::CommentLine::Single(0).is_valid());
+    assert!(!lrv::types::CommentLine::Range((0, 8)).is_valid());
+    assert!(!lrv::types::CommentLine::Range((9, 8)).is_valid());
+}
+
 /// Test Side enum
 #[test]
 fn test_side_serde() {

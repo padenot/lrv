@@ -1,5 +1,5 @@
 import { clearEl, el } from './dom';
-import { commentStartLine } from './comments';
+import { commentLineLabel, commentStartLine } from './comments';
 import { openModal } from './modal';
 import { MOD_KEY_LABEL } from './platform';
 import { showNavIndicator } from './ui-signals';
@@ -229,7 +229,7 @@ export class CommitMethods {
         const lineLabel = el('div');
         lineLabel.style.fontSize = '11px';
         lineLabel.style.color = 'var(--text-secondary)';
-        lineLabel.textContent = `Line ${commentStartLine(c)}`;
+        lineLabel.textContent = `Line ${commentLineLabel(c)}`;
 
         const bodyRow = el('div');
         bodyRow.style.display = 'flex';

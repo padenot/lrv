@@ -397,6 +397,19 @@ const clearEl = (node) => {
 function commentStartLine(comment) {
 	return Array.isArray(comment.line) ? comment.line[0] : comment.line;
 }
+function commentEndLine(comment) {
+	return Array.isArray(comment.line) ? comment.line[1] : comment.line;
+}
+function commentContainsLine(comment, line) {
+	const start = commentStartLine(comment);
+	const end = commentEndLine(comment);
+	return line >= start && line <= end;
+}
+function commentLineLabel(comment) {
+	const start = commentStartLine(comment);
+	const end = commentEndLine(comment);
+	return start === end ? String(start) : `${start}-${end}`;
+}
 var CommentManager = class {
 	comments;
 	listeners;
@@ -413,7 +426,7 @@ var CommentManager = class {
 		this.notifyListeners();
 	}
 	findComment(file, line, side) {
-		return this.comments.findIndex((c) => c.file === file && commentStartLine(c) === line && c.side === side);
+		return this.comments.findIndex((c) => c.file === file && c.side === side && commentContainsLine(c, line));
 	}
 	updateComment(index, newBody) {
 		if (index >= 0 && index < this.comments.length) {
@@ -1615,7 +1628,7 @@ var CommitMethods = class {
 			const lineLabel = el("div");
 			lineLabel.style.fontSize = "11px";
 			lineLabel.style.color = "var(--text-secondary)";
-			lineLabel.textContent = `Line ${commentStartLine(c)}`;
+			lineLabel.textContent = `Line ${commentLineLabel(c)}`;
 			const bodyRow = el("div");
 			bodyRow.style.display = "flex";
 			bodyRow.style.justifyContent = "space-between";
@@ -1720,7 +1733,7 @@ var CommentsUIMethods = class {
 		const modifiedEditor = this.editor.getModifiedEditor();
 		const originalEditor = this.editor.getOriginalEditor();
 		const modifiedDecorations = comments.filter((c) => c.side === "new").map((comment) => ({
-			range: new monaco.Range(commentStartLine(comment), 1, commentStartLine(comment), 1),
+			range: new monaco.Range(commentStartLine(comment), 1, commentEndLine(comment), 1),
 			options: {
 				isWholeLine: true,
 				glyphMarginClassName: "codicon codicon-comment",
@@ -1728,7 +1741,7 @@ var CommentsUIMethods = class {
 			}
 		}));
 		const originalDecorations = comments.filter((c) => c.side === "old").map((comment) => ({
-			range: new monaco.Range(commentStartLine(comment), 1, commentStartLine(comment), 1),
+			range: new monaco.Range(commentStartLine(comment), 1, commentEndLine(comment), 1),
 			options: {
 				isWholeLine: true,
 				glyphMarginClassName: "codicon codicon-comment",
@@ -1749,7 +1762,7 @@ var CommentsUIMethods = class {
 		const existingComment = existingIndex >= 0 ? this.commentManager.comments[existingIndex] : null;
 		const domNode = el("div", { className: "inline-comment-box" });
 		const modKey = MOD_KEY_LABEL;
-		const title = el("h3", { text: `Line ${fileLineNumber}${existingComment ? " - Edit" : ""}` });
+		const title = el("h3", { text: `Line ${existingComment ? commentLineLabel(existingComment) : fileLineNumber}${existingComment ? " - Edit" : ""}` });
 		const textarea = el("textarea", {
 			className: "comment-textarea",
 			attrs: {
@@ -2078,17 +2091,19 @@ var DialogMethods = class {
 			const preview = el("div", { className: "comment-preview" });
 			const previewHeader = el("div", {
 				className: "comment-preview-header",
-				text: `${comment.file}:${commentStartLine(comment)} (${comment.side})`
+				text: `${comment.file}:${commentLineLabel(comment)} (${comment.side})`
 			});
 			const lines = fileContents[`${comment.file}:${comment.side}`] || [];
-			const lineIndex = commentStartLine(comment) - 1;
-			const startLine = Math.max(0, lineIndex - 1);
-			const endLine = Math.min(lines.length, lineIndex + 2);
+			const rangeStart = commentStartLine(comment);
+			const rangeEnd = commentEndLine(comment);
+			const startLine = Math.max(0, rangeStart - 2);
+			const endLine = Math.min(lines.length, rangeEnd + 1);
 			const excerpt = lines.slice(startLine, endLine);
 			const codeBlock = el("div", { className: "comment-preview-code" });
 			excerpt.forEach((line, idx) => {
 				const lineDiv = el("div", { className: "comment-preview-code-line" });
-				if (startLine + idx === lineIndex) lineDiv.classList.add("target");
+				const lineNumber = startLine + idx + 1;
+				if (lineNumber >= rangeStart && lineNumber <= rangeEnd) lineDiv.classList.add("target");
 				lineDiv.textContent = line || " ";
 				codeBlock.appendChild(lineDiv);
 			});

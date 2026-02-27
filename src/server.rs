@@ -637,6 +637,9 @@ async fn get_file_content(
 }
 
 async fn add_comment(State(state): State<AppState>, Json(comment): Json<Comment>) -> StatusCode {
+    if !comment.is_valid() {
+        return StatusCode::BAD_REQUEST;
+    }
     let mut comments = state.comments.lock().await;
     comments.push(comment);
     StatusCode::OK
@@ -646,6 +649,9 @@ async fn complete_review(
     State(state): State<AppState>,
     Json(payload): Json<ReviewComplete>,
 ) -> StatusCode {
+    if payload.comments.iter().any(|c| !c.is_valid()) {
+        return StatusCode::BAD_REQUEST;
+    }
     let mut comments = state.comments.lock().await;
     *comments = payload.comments;
 
