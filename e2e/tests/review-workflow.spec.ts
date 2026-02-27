@@ -244,6 +244,65 @@ test.describe('Review Workflow E2E', () => {
     await expect(page.locator('#comment-count')).toHaveText('1');
   });
 
+  test('should handle range comments for decoration + edit/delete', async ({ page }) => {
+    await openApp(page);
+    await page.locator('.monaco-editor').first().waitFor({ timeout: 7000 });
+
+    await page.evaluate(() => {
+      const app = (window as any).__APP;
+      const file = app.files[app.currentFileIndex];
+      app.commentManager.addComment({
+        file: file.path,
+        line: [2, 4],
+        side: 'new',
+        body: 'Range comment',
+      });
+      app.updateDecorations();
+    });
+
+    await expect(page.locator('#comment-count')).toHaveText('1');
+
+    const hasRangeDecorations = await page.evaluate(() => {
+      const app = (window as any).__APP;
+      const ed = app.editor.getModifiedEditor();
+      const lines = [2, 3, 4];
+      return lines.every((ln) =>
+        (ed.getLineDecorations(ln) || []).some((d: any) => d.options?.glyphMarginClassName),
+      );
+    });
+    expect(hasRangeDecorations).toBeTruthy();
+
+    await page.locator('.modified .line-numbers').nth(2).click({ position: { x: 10, y: 10 } }); // line 3
+    await expect(page.locator('.inline-comment-box h3')).toContainText('Line 2-4 - Edit');
+
+    await page.locator('.delete-btn').click();
+    await expect(page.locator('#comment-count')).toHaveText('0');
+  });
+
+  test('should preview full range comments in submit modal', async ({ page }) => {
+    await openApp(page);
+    await page.locator('.monaco-editor').first().waitFor({ timeout: 7000 });
+
+    await page.evaluate(() => {
+      const app = (window as any).__APP;
+      const file = app.files[app.currentFileIndex];
+      app.commentManager.addComment({
+        file: file.path,
+        line: [2, 4],
+        side: 'new',
+        body: 'Range preview comment',
+      });
+      app.updateDecorations();
+    });
+
+    await page.locator('#submit-review').click();
+    await expect(page.locator('text=Review Comments')).toBeVisible();
+    await expect(page.locator('.comment-preview-header')).toContainText(':2-4 (new)');
+
+    const highlighted = await page.locator('.comment-preview-code-line.target').count();
+    expect(highlighted).toBe(3);
+  });
+
   test('should show keyboard shortcuts help', async ({ page }) => {
     await openApp(page);
 

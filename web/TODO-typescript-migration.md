@@ -13,7 +13,7 @@ Port `web/assets/app/*.js` to TypeScript source with a fast bundle step that out
 - [x] Wire build commands (`npm run build:web`, `npm run typecheck:web`)
 - [x] Wire Rust build workflow to run web build before `cargo build`
 - [x] Verify `npm run build:web`, `npm run typecheck:web`, `just build`
-- [ ] Remove or archive legacy JS source modules (follow-up decision)
+- [x] Remove or archive legacy JS source modules (kept only generated `web/assets/app/main.js`)
 - [x] Remove `@ts-nocheck` incrementally (current: 0 files remaining)
 
 ## Port order

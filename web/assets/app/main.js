@@ -410,6 +410,14 @@ function commentLineLabel(comment) {
 	const end = commentEndLine(comment);
 	return start === end ? String(start) : `${start}-${end}`;
 }
+function commentLineIsValid(line) {
+	if (typeof line === "number") return Number.isInteger(line) && line > 0;
+	if (Array.isArray(line) && line.length === 2) {
+		const [start, end] = line;
+		return Number.isInteger(start) && Number.isInteger(end) && start > 0 && end > 0 && start <= end;
+	}
+	return false;
+}
 var CommentManager = class {
 	comments;
 	listeners;
@@ -418,6 +426,7 @@ var CommentManager = class {
 		this.listeners = [];
 	}
 	addComment(comment) {
+		if (!commentLineIsValid(comment.line)) throw new Error(`Invalid comment line: ${JSON.stringify(comment.line)}`);
 		this.comments.push(comment);
 		this.notifyListeners();
 	}
@@ -2119,6 +2128,11 @@ var DialogMethods = class {
 		submit = async () => {
 			const submitBtn = footer.querySelector(".confirm-submit-btn");
 			if (!submitBtn) return;
+			const invalid = comments.find((c) => !commentLineIsValid(c.line));
+			if (invalid) {
+				alert(`Invalid comment line range for ${invalid.file}: ${JSON.stringify(invalid.line)}`);
+				return;
+			}
 			submitBtn.disabled = true;
 			submitBtn.textContent = "Submitting...";
 			try {

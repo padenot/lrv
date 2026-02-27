@@ -20,6 +20,7 @@ Notes:
 - TypeScript sources live in `web/src/`.
 - Bundled output is written to `web/assets/app/main.js` via:
   - `npm run build:web`
+- Legacy source modules in `web/assets/app/*.js` were removed after the TypeScript migration; `main.js` is generated from `web/src/main.ts`.
 - `just build` and `just build-release` run the web build before `cargo build`.
 - When publishing, ensure assets are present so `rust-embed` includes them in the binary.
 - See `THIRD_PARTY_NOTICES.md` for license links (add appropriately).

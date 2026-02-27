@@ -27,6 +27,17 @@ export function commentLineLabel(comment: ReviewComment): string {
   return start === end ? String(start) : `${start}-${end}`;
 }
 
+export function commentLineIsValid(line: CommentLine): boolean {
+  if (typeof line === 'number') {
+    return Number.isInteger(line) && line > 0;
+  }
+  if (Array.isArray(line) && line.length === 2) {
+    const [start, end] = line;
+    return Number.isInteger(start) && Number.isInteger(end) && start > 0 && end > 0 && start <= end;
+  }
+  return false;
+}
+
 export class CommentManager {
   private comments: ReviewComment[];
   private listeners: Array<() => void>;
@@ -37,6 +48,9 @@ export class CommentManager {
   }
 
   addComment(comment: ReviewComment): void {
+    if (!commentLineIsValid(comment.line)) {
+      throw new Error(`Invalid comment line: ${JSON.stringify(comment.line)}`);
+    }
     this.comments.push(comment);
     this.notifyListeners();
   }

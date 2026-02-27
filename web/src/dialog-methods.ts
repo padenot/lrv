@@ -1,5 +1,5 @@
 import { el } from './dom';
-import { commentEndLine, commentLineLabel, commentStartLine } from './comments';
+import { commentEndLine, commentLineIsValid, commentLineLabel, commentStartLine } from './comments';
 import type { ReviewComment } from './comments';
 import { openModal } from './modal';
 import { fetchJSON } from './api';
@@ -362,6 +362,11 @@ export class DialogMethods {
     submit = async () => {
       const submitBtn = footer.querySelector<HTMLButtonElement>('.confirm-submit-btn');
       if (!submitBtn) {
+        return;
+      }
+      const invalid = comments.find((c) => !commentLineIsValid(c.line));
+      if (invalid) {
+        alert(`Invalid comment line range for ${invalid.file}: ${JSON.stringify(invalid.line)}`);
         return;
       }
       submitBtn.disabled = true;
