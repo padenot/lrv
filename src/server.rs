@@ -12,8 +12,8 @@ use rust_embed::RustEmbed;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::os::unix::process::ExitStatusExt;
 use std::path::{Component, Path};
+use std::process::{ExitStatus, Output};
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -22,6 +22,11 @@ use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, Mutex, Semaphore};
 use tokio::task::JoinSet;
 use tower_http::trace::TraceLayer;
+
+#[cfg(unix)]
+use std::os::unix::process::ExitStatusExt;
+#[cfg(windows)]
+use std::os::windows::process::ExitStatusExt;
 
 #[derive(Deserialize)]
 struct FileQuery {
@@ -38,6 +43,24 @@ pub struct AppState {
     pub context: Arc<ProjectContext>,
     // Cache for expensive old-side content fetches, keyed by new-path used by the UI
     pub old_cache: Arc<Mutex<HashMap<String, String>>>,
+}
+
+fn failed_output() -> Output {
+    Output {
+        status: failed_status(),
+        stdout: Vec::new(),
+        stderr: Vec::new(),
+    }
+}
+
+#[cfg(unix)]
+fn failed_status() -> ExitStatus {
+    ExitStatus::from_raw(1)
+}
+
+#[cfg(windows)]
+fn failed_status() -> ExitStatus {
+    ExitStatus::from_raw(1)
 }
 
 fn is_jj_repo(root: &str) -> bool {
@@ -188,11 +211,7 @@ fn resolve_old_content(state: &AppState, req_path: &str) -> String {
                         &old_key,
                     ])
                     .output()
-                    .unwrap_or_else(|_| std::process::Output {
-                        status: std::process::ExitStatus::from_raw(1),
-                        stdout: Vec::new(),
-                        stderr: Vec::new(),
-                    })
+                    .unwrap_or_else(|_| failed_output())
             };
             let out = run_with_delayed_notice(
                 format!(
@@ -231,11 +250,7 @@ fn resolve_old_content(state: &AppState, req_path: &str) -> String {
             std::process::Command::new("git")
                 .args(["show", &format!("HEAD:{}", rel_for_vcs)])
                 .output()
-                .unwrap_or_else(|_| std::process::Output {
-                    status: std::process::ExitStatus::from_raw(1),
-                    stdout: Vec::new(),
-                    stderr: Vec::new(),
-                })
+                .unwrap_or_else(|_| failed_output())
         },
     );
     if output.status.success() {
@@ -590,11 +605,7 @@ async fn get_file_content(
                             .current_dir(repo)
                             .args(["file", "show", "-r", rev, "--", &path])
                             .output()
-                            .unwrap_or_else(|_| std::process::Output {
-                                status: std::process::ExitStatus::from_raw(1),
-                                stdout: Vec::new(),
-                                stderr: Vec::new(),
-                            })
+                            .unwrap_or_else(|_| failed_output())
                     };
                     let out = run_with_delayed_notice(
                         format!("Fetching new content from jj (@-, then @) for {}...", path),
