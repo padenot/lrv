@@ -95,7 +95,7 @@ async function startServer(port: number = 0): Promise<void> {
       ? `cd "${testRepoPath}" && cat "${benchDiff}" | "${cargoPath}" --port ${port} --no-open`
       : `cd "${testRepoPath}" && git diff HEAD | "${cargoPath}" --port ${port} --no-open`;
     serverUrl = null;
-    console.log(`[server] starting with cmd: ${cmd}`);
+    console.info(`[server] starting with cmd: ${cmd}`);
     const serverLog = path.join(outDir, `server-${Date.now()}.log`);
     fs.writeFileSync(serverLog, `[start] ${new Date().toISOString()}\nCMD: ${cmd}\n`);
     serverProcess = spawn('bash', ['-c', cmd], { stdio: ['inherit', 'pipe', 'pipe'] });
@@ -105,7 +105,7 @@ async function startServer(port: number = 0): Promise<void> {
       output += t;
       for (const line of t.split(/\r?\n/)) {
         if (line.trim()) {
-          console.log(`[server] ${line}`);
+          console.info(`[server] ${line}`);
         }
       }
       try {
@@ -184,27 +184,27 @@ test.describe('Perf Bench', () => {
     };
     page.on('pageerror', (e) => {
       const s = `[pageerror] ${String(e)}`;
-      console.log(s);
+      console.info(s);
       w(s);
     });
     page.on('console', (msg) => {
       const s = `[pageconsole] ${msg.type()} ${msg.text()}`;
-      console.log(s);
+      console.info(s);
       w(s);
     });
     page.on('request', (req) => {
       const s = `[request] ${req.method()} ${req.url()}`;
-      console.log(s);
+      console.info(s);
       w(s);
     });
     page.on('response', async (res) => {
       const s = `[response] ${res.status()} ${res.url()}`;
-      console.log(s);
+      console.info(s);
       w(s);
     });
     page.on('requestfailed', (req) => {
       const s = `[requestfailed] ${req.url()} ${req.failure()?.errorText}`;
-      console.log(s);
+      console.info(s);
       w(s);
     });
     const url = (serverUrl ?? 'http://localhost:9999') + '/';
@@ -217,7 +217,7 @@ test.describe('Perf Bench', () => {
       return Number.isFinite(raw) && raw > 0 ? raw : 1;
     })();
     for (let i = 0; i < iterations; i++) {
-      console.log(`[iter] start ${i}`);
+      console.info(`[iter] start ${i}`);
       const navStart = process.hrtime.bigint();
       await page.goto(url + `?r=${Date.now()}-${i}`, { waitUntil: 'load' });
       // App is ready when it declares readiness after first diff
@@ -235,14 +235,14 @@ test.describe('Perf Bench', () => {
       } catch (e) {
         // Dump some diagnostics
         const html = await page.content();
-        console.log('[diag] __APP_READY wait timeout. Snippet of body:', html.slice(0, 500));
+        console.info('[diag] __APP_READY wait timeout. Snippet of body:', html.slice(0, 500));
         const perf = await page.evaluate(() => ({
           marks: performance.getEntriesByType('mark').map((e) => e.name),
           measures: performance
             .getEntriesByType('measure')
             .map((e) => ({ n: e.name, d: e.duration })),
         }));
-        console.log('[diag] performance entries:', JSON.stringify(perf));
+        console.info('[diag] performance entries:', JSON.stringify(perf));
         throw e;
       }
       const ms = await page.evaluate(() => {
@@ -284,11 +284,11 @@ test.describe('Perf Bench', () => {
       const navHarnessMs = navToDiffVisibleHarness.length
         ? navToDiffVisibleHarness[navToDiffVisibleHarness.length - 1]
         : null;
-      console.log(
+      console.info(
         `[iter] end ${i} appInit=${ms} navToDiffVisible(browser)=${navMs} navToDiffVisibleHarness=${navHarnessMs}`,
       );
       const timelineText = formatTimeline(timeline);
-      console.log(`[timeline][iter ${i}]\n${timelineText}`);
+      console.info(`[timeline][iter ${i}]\n${timelineText}`);
       w(`[timeline][iter ${i}]\n${timelineText}`);
       const navToLine = navMs;
       const initStart = findMark(timeline, 'init:start');
@@ -303,7 +303,7 @@ test.describe('Perf Bench', () => {
           : null;
       const postInitToLine =
         firstLine && initEnd ? Math.max(0, firstLine.startTime - initEnd.startTime) : null;
-      console.log(
+      console.info(
         `[timeline-summary][iter ${i}] navToDiffVisible(browser)=${navToLine} navToDiffVisibleHarness=${navHarnessMs} preInit=${preInit} init=${initDur} postInitToLine=${postInitToLine} firstLine=${firstLine?.startTime ?? null}`,
       );
       w(
@@ -347,7 +347,7 @@ test.describe('Perf Bench', () => {
           2,
         ),
       );
-      console.log(`[perf-init] wrote metrics to ${outPath}`);
+      console.info(`[perf-init] wrote metrics to ${outPath}`);
     } catch {}
     expect(samples.length).toBe(iterations);
     expect(navToDiffVisible.length).toBe(iterations);
@@ -365,27 +365,27 @@ test.describe('Perf Bench', () => {
     };
     page.on('pageerror', (e) => {
       const s = `[pageerror] ${String(e)}`;
-      console.log(s);
+      console.info(s);
       w(s);
     });
     page.on('console', (msg) => {
       const s = `[pageconsole] ${msg.type()} ${msg.text()}`;
-      console.log(s);
+      console.info(s);
       w(s);
     });
     page.on('request', (req) => {
       const s = `[request] ${req.method()} ${req.url()}`;
-      console.log(s);
+      console.info(s);
       w(s);
     });
     page.on('response', async (res) => {
       const s = `[response] ${res.status()} ${res.url()}`;
-      console.log(s);
+      console.info(s);
       w(s);
     });
     page.on('requestfailed', (req) => {
       const s = `[requestfailed] ${req.url()} ${req.failure()?.errorText}`;
-      console.log(s);
+      console.info(s);
       w(s);
     });
 
@@ -430,7 +430,7 @@ test.describe('Perf Bench', () => {
       }
       const outPath = path.join(outDir, 'perf-switch.json');
       fs.writeFileSync(outPath, JSON.stringify({ fileSwitch: metrics?.fileSwitch || [] }, null, 2));
-      console.log(`[perf] wrote metrics to ${outPath}`);
+      console.info(`[perf] wrote metrics to ${outPath}`);
     } catch {}
   });
 });

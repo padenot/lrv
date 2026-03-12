@@ -10,6 +10,9 @@
 
 # Logs
 *.log
+
+# Generated bench outputs
+bench-results/
  
 # Node
 node_modules/

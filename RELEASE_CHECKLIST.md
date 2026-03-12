@@ -17,29 +17,20 @@ Work this from the top.
 
 ## 3. Decide How Strict Linting Should Be
 
-- Review current ESLint warnings in `web/src` and `e2e/tests`.
-- Decide whether to:
-  - keep warnings as-is,
-  - clean them up now,
-  - or tighten CI later after cleanup.
-- The current warnings are mostly `console.*` usage.
+- Clean up the remaining ESLint warnings in `web/src` and `e2e/tests`.
+- Keep diagnostic logging limited to allowed levels or gated debug paths.
 
 ## 4. Tighten Security Messaging
 
-- Add a short explicit note about the security model:
+- Add a short explicit note about the security model in [README.md](/home/padenot/src/repositories/lrv/README.md):
   - localhost by default,
   - `--public` only for trusted networks,
   - `--tailscale` for private mesh use.
-- This can live in [README.md](/home/padenot/src/repositories/lrv/README.md) or a short dedicated doc.
 
 ## 5. Clean Up Repo Noise
 
-- Decide what to do with:
-  - [TODO.md](/home/padenot/src/repositories/lrv/TODO.md)
-  - [fix-tests.sh](/home/padenot/src/repositories/lrv/fix-tests.sh)
-  - [server.log](/home/padenot/src/repositories/lrv/server.log)
-  - `bench-results/`
-- None of these are hard blockers, but they make the repo look less finished.
+- Remove leftover scratch files and generated artifacts from the repo.
+- Keep `server.log` and `bench-results/` out of version control.
 
 ## 6. Optional: Add Integration Coverage for Old-Content Resolution
 
@@ -52,4 +43,3 @@ Work this from the top.
   - `0.1.0`
   - `0.1.0-rc1`
   - or another prerelease version
-

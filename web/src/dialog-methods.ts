@@ -109,7 +109,7 @@ export class DialogMethods {
     const currentAutoCloseTab = this.config.auto_close_tab;
 
     if (window.DEBUG) {
-      console.log('Settings modal - current values:', {
+      console.info('Settings modal - current values:', {
         currentColorScheme,
         currentFont,
         currentSplitView,

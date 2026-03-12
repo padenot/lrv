@@ -33,9 +33,14 @@ Useful flags:
 --tailscale        Also bind detected Tailscale IPv4 addresses
 ```
 
+Network exposure:
+
+- By default, `lrv` binds to `127.0.0.1`, so only your machine can reach it.
+- `--public`, `--bind 0.0.0.0`, and `--tailscale` expose the review UI and diff contents over plain HTTP with no auth.
+- Only use those flags on trusted private networks or Tailscale peers you trust.
+
 Notes:
 
-- `--public` is for trusted networks only.
 - Submitted comments are written to stdout, so you can pipe or capture them.
 - `lrv --version` prints the current version and can warn if a newer release exists.
 

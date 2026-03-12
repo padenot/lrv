@@ -10,7 +10,7 @@ window.__APP_READY = false;
 
 if (window.DEBUG) {
   window.addEventListener('error', function (e: ErrorEvent) {
-    console.log('[onerror]', e.message, e.filename, e.lineno, e.colno);
+    console.info('[onerror]', e.message, e.filename, e.lineno, e.colno);
   });
 }
 
@@ -34,6 +34,6 @@ const app = new MonacoApp();
 window.__APP = app as Partial<Pick<AppContext, 'eagerPrefetchAllFiles'>>;
 app.init().then(() => {
   if (window.DEBUG) {
-    console.log('Monaco Editor initialized');
+    console.info('Monaco Editor initialized');
   }
 });

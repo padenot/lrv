@@ -539,7 +539,7 @@ function setAppReady(debugMessage) {
 	window.__APP_READY = true;
 	window.Perf.mark("init:app-ready");
 	if (performance.getEntriesByName("appInit").length > 0) window.Perf.measure("init:app-ready-after-appInit", "appInitEnd", "init:app-ready");
-	if (window.DEBUG) console.log(debugMessage);
+	if (window.DEBUG) console.info(debugMessage);
 }
 function showNavIndicator(text) {
 	const indicatorEl = document.getElementById("nav-indicator");
@@ -560,7 +560,7 @@ function markAppReady() {
 	}
 	const container = document.querySelector(".monaco-editor .view-lines");
 	if (container) {
-		if (window.DEBUG) console.log("[app] Waiting for first view-line via MutationObserver");
+		if (window.DEBUG) console.info("[app] Waiting for first view-line via MutationObserver");
 		const obs = new MutationObserver(() => {
 			if (document.querySelectorAll(FIRST_LINE_SELECTOR).length > 0) {
 				recordFirstLineVisible();
@@ -688,7 +688,7 @@ var FileDataMethods = class {
 		this._eagerPrefetchStarted = true;
 		const toFetch = this.files.map((f) => f.path).filter((p) => !this.fileCache[p]);
 		if (toFetch.length === 0) return;
-		if (window.DEBUG) console.log("[prefetch] warming", toFetch.length, "files");
+		if (window.DEBUG) console.info("[prefetch] warming", toFetch.length, "files");
 		const concurrency = 8;
 		let i = 0;
 		const nextBatch = () => {
@@ -705,7 +705,7 @@ var FileDataMethods = class {
 			return Promise.all(batch);
 		};
 		while (i < toFetch.length) await nextBatch();
-		if (window.DEBUG) console.log("[prefetch] done");
+		if (window.DEBUG) console.info("[prefetch] done");
 	}
 	initFileHunks(file) {
 		if (!this.fileHunks[file.path]) {
@@ -938,14 +938,14 @@ var FileLoadingMethods = class {
 	}
 	async loadFile(index) {
 		this.currentFileIsCommit = false;
-		if (window.DEBUG) console.log("[app] loadFile: index", index);
+		if (window.DEBUG) console.info("[app] loadFile: index", index);
 		window.Perf.mark("loadFile:start");
 		window.Perf.recordFileSwitchStart();
 		this.currentFileIndex = index;
 		const file = this.getCurrentFile(index);
 		const isAddedFile = this.isAddedFile(file);
 		const renderSideBySide = !this.isInline && !isAddedFile;
-		if (window.DEBUG) console.log("[app] loadFile: path", file.path, "status", file.status);
+		if (window.DEBUG) console.info("[app] loadFile: path", file.path, "status", file.status);
 		this.initFileHunks(file);
 		this.renderFileList();
 		if (this.originalModel) {
@@ -1009,7 +1009,7 @@ var FileLoadingMethods = class {
 		this.modifiedModel = monaco.editor.createModel(newContent, language);
 		window.Perf.mark("loadFile:models:end");
 		window.Perf.measure("loadFile:models", "loadFile:models:start", "loadFile:models:end");
-		if (window.DEBUG) console.log("[app] models created for", file.path, "lang", language, "old/new lines", oldContent.split("\n").length, newContent.split("\n").length);
+		if (window.DEBUG) console.info("[app] models created for", file.path, "lang", language, "old/new lines", oldContent.split("\n").length, newContent.split("\n").length);
 		window.Perf.mark("loadFile:setModel:start");
 		const diffEditor = this.editor;
 		diffEditor.setModel({
@@ -1053,7 +1053,7 @@ var FileLoadingMethods = class {
 			if (window.DEBUG) {
 				const e = performance.getEntriesByName("fileSwitch");
 				const d = e.length > 0 ? e[e.length - 1].duration : null;
-				if (d != null) console.log("[perf] fileSwitch ms:", Math.round(d));
+				if (d != null) console.info("[perf] fileSwitch ms:", Math.round(d));
 			}
 			const prefs = [
 				"function",
@@ -2019,7 +2019,7 @@ var DialogMethods = class {
 		const currentFont = this.config.font;
 		const currentSplitView = this.config.split_view;
 		const currentAutoCloseTab = this.config.auto_close_tab;
-		if (window.DEBUG) console.log("Settings modal - current values:", {
+		if (window.DEBUG) console.info("Settings modal - current values:", {
 			currentColorScheme,
 			currentFont,
 			currentSplitView,
@@ -2317,7 +2317,7 @@ var MonacoApp = class {
 		this.commentManager.onChange(() => this.updateUI());
 	}
 	async init() {
-		if (window.DEBUG) console.log("[app] init: start");
+		if (window.DEBUG) console.info("[app] init: start");
 		window.Perf.recordAppInitStart();
 		window.Perf.mark("init:start");
 		if (performance.getEntriesByName("page:script-start").length > 0) window.Perf.measure("page:script-to-init-start", "page:script-start", "init:start");
@@ -2331,7 +2331,7 @@ var MonacoApp = class {
 		]);
 		window.Perf.mark("init:fetch:end");
 		window.Perf.measure("init:fetch", "init:fetch:start", "init:fetch:end");
-		if (window.DEBUG) console.log("[app] init: responses received in", Math.round(performance.now() - t0), "ms");
+		if (window.DEBUG) console.info("[app] init: responses received in", Math.round(performance.now() - t0), "ms");
 		this.config = resolveAppConfig(configData);
 		this.context = contextData;
 		if (this.context.title) document.title = this.context.title;
@@ -2339,7 +2339,7 @@ var MonacoApp = class {
 			const dirName = (this.context.working_directory ?? "").split("/").pop() ?? "";
 			document.title = dirName || "lrv";
 		}
-		if (window.DEBUG) console.log("[app] init: parsed config/context/diff");
+		if (window.DEBUG) console.info("[app] init: parsed config/context/diff");
 		this.diff = diffData;
 		this.files = diffData.files;
 		this.stats = diffData.stats;
@@ -2369,7 +2369,7 @@ var MonacoApp = class {
 			amdRequire(["vs/editor/editor.main"], () => {
 				window.Perf.mark("init:monaco:load:end");
 				window.Perf.measure("init:monaco:load", "init:monaco:load:start", "init:monaco:load:end");
-				if (window.DEBUG) console.log("[app] monaco loaded");
+				if (window.DEBUG) console.info("[app] monaco loaded");
 				this.defineCustomThemes();
 				this.applyThemeToUI(this.config.color_scheme);
 				document.documentElement.setAttribute("data-ui-ready", "1");
@@ -2394,7 +2394,7 @@ var MonacoApp = class {
 				this.renderFileList();
 				window.Perf.mark("init:file-list:render:end");
 				window.Perf.measure("init:file-list:render", "init:file-list:render:start", "init:file-list:render:end");
-				if (window.DEBUG) console.log("[app] calling loadFile(0)");
+				if (window.DEBUG) console.info("[app] calling loadFile(0)");
 				window.Perf.mark("init:first-file:load:start");
 				Promise.resolve(this.loadFile(0)).then(() => {
 					window.Perf.mark("init:first-file:load:end");
@@ -2412,7 +2412,7 @@ var MonacoApp = class {
 						if (window.DEBUG) {
 							const e = performance.getEntriesByName("appInit");
 							const d = e.length > 0 ? e[e.length - 1].duration : null;
-							if (d != null) console.log("[perf] appInit ms:", Math.round(d));
+							if (d != null) console.info("[perf] appInit ms:", Math.round(d));
 						}
 						markAppReady();
 					}));
@@ -2553,7 +2553,7 @@ document.title = "lrv — Loading…";
 window.DEBUG = false;
 window.__APP_READY = false;
 if (window.DEBUG) window.addEventListener("error", function(e) {
-	console.log("[onerror]", e.message, e.filename, e.lineno, e.colno);
+	console.info("[onerror]", e.message, e.filename, e.lineno, e.colno);
 });
 performance.mark("page:script-start");
 window.addEventListener("DOMContentLoaded", () => {
@@ -2565,7 +2565,7 @@ window.addEventListener("load", () => {
 const app = new MonacoApp();
 window.__APP = app;
 app.init().then(() => {
-	if (window.DEBUG) console.log("Monaco Editor initialized");
+	if (window.DEBUG) console.info("Monaco Editor initialized");
 });
 
 //#endregion

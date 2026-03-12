@@ -115,7 +115,7 @@ export class MonacoApp {
 
   async init() {
     if (window.DEBUG) {
-      console.log('[app] init: start');
+      console.info('[app] init: start');
     }
     window.Perf.recordAppInitStart();
     window.Perf.mark('init:start');
@@ -139,7 +139,7 @@ export class MonacoApp {
     window.Perf.mark('init:fetch:end');
     window.Perf.measure('init:fetch', 'init:fetch:start', 'init:fetch:end');
     if (window.DEBUG) {
-      console.log('[app] init: responses received in', Math.round(performance.now() - t0), 'ms');
+      console.info('[app] init: responses received in', Math.round(performance.now() - t0), 'ms');
     }
     this.config = resolveAppConfig(configData);
     this.context = contextData;
@@ -150,7 +150,7 @@ export class MonacoApp {
       document.title = dirName || 'lrv';
     }
     if (window.DEBUG) {
-      console.log('[app] init: parsed config/context/diff');
+      console.info('[app] init: parsed config/context/diff');
     }
     this.diff = diffData;
     this.files = diffData.files;
@@ -191,7 +191,7 @@ export class MonacoApp {
         window.Perf.mark('init:monaco:load:end');
         window.Perf.measure('init:monaco:load', 'init:monaco:load:start', 'init:monaco:load:end');
         if (window.DEBUG) {
-          console.log('[app] monaco loaded');
+          console.info('[app] monaco loaded');
         }
         this.defineCustomThemes();
         this.applyThemeToUI(this.config.color_scheme);
@@ -227,7 +227,7 @@ export class MonacoApp {
           'init:file-list:render:end',
         );
         if (window.DEBUG) {
-          console.log('[app] calling loadFile(0)');
+          console.info('[app] calling loadFile(0)');
         }
         window.Perf.mark('init:first-file:load:start');
         Promise.resolve(this.loadFile(0)).then(() => {
@@ -262,7 +262,7 @@ export class MonacoApp {
                 const e = performance.getEntriesByName('appInit');
                 const d = e.length > 0 ? e[e.length - 1]!.duration : null;
                 if (d != null) {
-                  console.log('[perf] appInit ms:', Math.round(d));
+                  console.info('[perf] appInit ms:', Math.round(d));
                 }
               }
               markAppReady();

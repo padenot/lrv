@@ -163,7 +163,7 @@ async function stopServer(): Promise<string> {
 test.describe('Review Workflow E2E', () => {
   // Build is handled by Justfile before invoking Playwright
   test.beforeAll(async () => {
-    console.log('[e2e] Starting tests');
+    console.info('[e2e] Starting tests');
   });
 
   test.beforeEach(async () => {
@@ -175,7 +175,7 @@ test.describe('Review Workflow E2E', () => {
 
     await startServer(0);
     if (serverLogPath) {
-      console.log(`[e2e] Server log at: ${serverLogPath}`);
+      console.info(`[e2e] Server log at: ${serverLogPath}`);
     }
   });
 

@@ -46,7 +46,7 @@ export class FileLoadingMethods {
   async loadFile(index: number) {
     this.currentFileIsCommit = false;
     if (window.DEBUG) {
-      console.log('[app] loadFile: index', index);
+      console.info('[app] loadFile: index', index);
     }
     window.Perf.mark('loadFile:start');
     window.Perf.recordFileSwitchStart();
@@ -55,7 +55,7 @@ export class FileLoadingMethods {
     const isAddedFile = this.isAddedFile(file);
     const renderSideBySide = !this.isInline && !isAddedFile;
     if (window.DEBUG) {
-      console.log('[app] loadFile: path', file.path, 'status', file.status);
+      console.info('[app] loadFile: path', file.path, 'status', file.status);
     }
 
     this.initFileHunks(file);
@@ -138,7 +138,7 @@ export class FileLoadingMethods {
     window.Perf.mark('loadFile:models:end');
     window.Perf.measure('loadFile:models', 'loadFile:models:start', 'loadFile:models:end');
     if (window.DEBUG) {
-      console.log(
+      console.info(
         '[app] models created for',
         file.path,
         'lang',
@@ -208,7 +208,7 @@ export class FileLoadingMethods {
           const e = performance.getEntriesByName('fileSwitch');
           const d = e.length > 0 ? e[e.length - 1]!.duration : null;
           if (d != null) {
-            console.log('[perf] fileSwitch ms:', Math.round(d));
+            console.info('[perf] fileSwitch ms:', Math.round(d));
           }
         }
         // Derive accent color from a visible keyword token if present (prefer 'function'/'const'/'import')

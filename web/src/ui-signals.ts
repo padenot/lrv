@@ -25,7 +25,7 @@ function setAppReady(debugMessage: string) {
     window.Perf.measure('init:app-ready-after-appInit', 'appInitEnd', 'init:app-ready');
   }
   if (window.DEBUG) {
-    console.log(debugMessage);
+    console.info(debugMessage);
   }
 }
 
@@ -57,7 +57,7 @@ export function markAppReady() {
   const container = document.querySelector('.monaco-editor .view-lines');
   if (container) {
     if (window.DEBUG) {
-      console.log('[app] Waiting for first view-line via MutationObserver');
+      console.info('[app] Waiting for first view-line via MutationObserver');
     }
     const obs = new MutationObserver(() => {
       if (document.querySelectorAll(FIRST_LINE_SELECTOR).length > 0) {

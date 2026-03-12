@@ -54,7 +54,7 @@ export class FileDataMethods {
       return;
     }
     if (window.DEBUG) {
-      console.log('[prefetch] warming', toFetch.length, 'files');
+      console.info('[prefetch] warming', toFetch.length, 'files');
     }
     const concurrency = 8;
     let i = 0;
@@ -79,7 +79,7 @@ export class FileDataMethods {
       await nextBatch();
     }
     if (window.DEBUG) {
-      console.log('[prefetch] done');
+      console.info('[prefetch] done');
     }
   }
 
