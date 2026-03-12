@@ -1,5 +1,6 @@
 import { clearEl, el } from './dom';
 import { commentLineLabel, commentStartLine } from './comments';
+import { appendLinkifiedText } from './linkify';
 import { openModal } from './modal';
 import { MOD_KEY_LABEL } from './platform';
 import { showNavIndicator } from './ui-signals';
@@ -26,7 +27,8 @@ export class CommitMethods {
       className: 'commit-popover-title',
       text: rev ? `${rev}: ${first}` : first,
     });
-    const body = el('div', { className: 'commit-popover-body', text: message });
+    const body = el('div', { className: 'commit-popover-body' });
+    appendLinkifiedText(body, message);
     pop.appendChild(title);
     pop.appendChild(body);
 
@@ -186,7 +188,13 @@ export class CommitMethods {
       lineContent.style.paddingRight = '12px';
       lineContent.style.whiteSpace = 'pre-wrap';
       lineContent.style.wordBreak = 'break-word';
-      lineContent.textContent = lineText || ' ';
+      appendLinkifiedText(lineContent, lineText || ' ');
+      lineContent.addEventListener('click', (event) => {
+        const target = event.target as Element | null;
+        if (target?.closest('a')) {
+          event.stopPropagation();
+        }
+      });
 
       lineDiv.appendChild(lineNumSpan);
       lineDiv.appendChild(lineContent);

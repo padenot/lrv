@@ -4,6 +4,7 @@ import { fetchJSON } from './api';
 import { DEFAULT_APP_CONFIG, resolveAppConfig } from './config';
 import { CUSTOM_THEMES } from './themes';
 import { markAppReady } from './ui-signals';
+import { appendLinkifiedText } from './linkify';
 
 import { FileDataMethods } from './file-data-methods';
 import { FileListMethods } from './file-list-methods';
@@ -350,11 +351,16 @@ export class MonacoApp {
       const mm = el('span', { className: 'commit-message' });
       const rev = this.diff.commit_hash ? `${this.diff.commit_hash.substring(0, 7)}: ` : '';
       const firstLine = (this.diff.commit_message ?? '').split('\n')[0];
-      mm.textContent = rev + firstLine;
+      appendLinkifiedText(mm, rev + firstLine);
       if (this.diff.commit_message) {
         mm.title = this.diff.commit_message;
       }
       mm.addEventListener('click', (ev) => {
+        const target = ev.target as Element | null;
+        if (target?.closest('a')) {
+          ev.stopPropagation();
+          return;
+        }
         this.showCommitMessagePopover(
           ev.currentTarget as HTMLElement,
           this.diff?.commit_message ?? '',

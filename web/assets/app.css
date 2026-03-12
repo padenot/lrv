@@ -159,6 +159,11 @@ body {
   text-decoration: underline;
 }
 
+.auto-link {
+  color: var(--accent-color);
+  text-decoration: underline;
+}
+
 /* Popover for full commit message */
 .commit-popover {
   position: fixed;
@@ -168,7 +173,7 @@ body {
   border-radius: 6px;
   box-shadow: var(--shadow-md);
   padding: 10px 12px;
-  z-index: 100000;
+  z-index: 2147483647;
   max-width: 60vw;
   max-height: 50vh;
   overflow: auto;
@@ -559,7 +564,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 30000; /* ensure over everything */
+  z-index: 2147483647; /* keep modal above Monaco inline widgets (e.g. "N hidden lines") */
 }
 
 /* Ensure Monaco scrollbars/widgets never overdraw overlays */
@@ -568,6 +573,11 @@ body {
 .monaco-editor .minimap-shadow-visible,
 .monaco-editor .decorationsOverviewRuler {
   z-index: 1 !important;
+}
+
+/* Content widgets (e.g. inline comment box) must appear above overlay widgets */
+.monaco-editor .contentWidgets {
+  z-index: 2 !important;
 }
 
 .submit-modal {

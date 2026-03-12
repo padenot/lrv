@@ -576,6 +576,69 @@ function markAppReady() {
 }
 
 //#endregion
+//#region web/src/linkify.ts
+const BUG_RE = /\b([bB]ug)\s+(\d{6,})\b/g;
+const PHAB_RE = /\b(D\d{6,})\b/g;
+function appendLinkifiedText(target, text) {
+	target.textContent = "";
+	target.appendChild(linkifyText(text));
+}
+function linkifyText(text) {
+	const fragment = document.createDocumentFragment();
+	const matches = [];
+	for (const match of text.matchAll(BUG_RE)) {
+		const full = match[0];
+		const id = match[2];
+		if (!full || !id || match.index === void 0) continue;
+		matches.push({
+			start: match.index,
+			end: match.index + full.length,
+			text: full,
+			href: `https://bugzilla.mozilla.org/show_bug.cgi?id=${id}`
+		});
+	}
+	for (const match of text.matchAll(PHAB_RE)) {
+		const full = match[1];
+		if (!full || match.index === void 0) continue;
+		matches.push({
+			start: match.index,
+			end: match.index + full.length,
+			text: full,
+			href: `https://phabricator.services.mozilla.com/${full}`
+		});
+	}
+	if (matches.length === 0) {
+		fragment.appendChild(document.createTextNode(text));
+		return fragment;
+	}
+	matches.sort((a, b) => a.start - b.start || b.end - a.end);
+	const filtered = [];
+	let cursor = -1;
+	matches.forEach((match) => {
+		if (match.start < cursor) return;
+		filtered.push(match);
+		cursor = match.end;
+	});
+	let pos = 0;
+	filtered.forEach((match) => {
+		if (match.start > pos) fragment.appendChild(document.createTextNode(text.slice(pos, match.start)));
+		const anchor = el("a", {
+			className: "auto-link",
+			text: match.text,
+			attrs: {
+				href: match.href,
+				target: "_blank",
+				rel: "noopener noreferrer"
+			}
+		});
+		fragment.appendChild(anchor);
+		pos = match.end;
+	});
+	if (pos < text.length) fragment.appendChild(document.createTextNode(text.slice(pos)));
+	return fragment;
+}
+
+//#endregion
 //#region web/src/diff-utils.ts
 const MONACO_HIDE_UNCHANGED = {
 	enabled: true,
@@ -1478,10 +1541,8 @@ var CommitMethods = class {
 			className: "commit-popover-title",
 			text: rev ? `${rev}: ${first}` : first
 		});
-		const body = el("div", {
-			className: "commit-popover-body",
-			text: message
-		});
+		const body = el("div", { className: "commit-popover-body" });
+		appendLinkifiedText(body, message);
 		pop.appendChild(title);
 		pop.appendChild(body);
 		const form = el("div");
@@ -1618,7 +1679,10 @@ var CommitMethods = class {
 			lineContent.style.paddingRight = "12px";
 			lineContent.style.whiteSpace = "pre-wrap";
 			lineContent.style.wordBreak = "break-word";
-			lineContent.textContent = lineText || " ";
+			appendLinkifiedText(lineContent, lineText || " ");
+			lineContent.addEventListener("click", (event) => {
+				if (event.target?.closest("a")) event.stopPropagation();
+			});
 			lineDiv.appendChild(lineNumSpan);
 			lineDiv.appendChild(lineContent);
 			lineDiv.onclick = () => {
@@ -2431,9 +2495,15 @@ var MonacoApp = class {
 				text: "·"
 			}));
 			const mm = el("span", { className: "commit-message" });
-			mm.textContent = (this.diff.commit_hash ? `${this.diff.commit_hash.substring(0, 7)}: ` : "") + (this.diff.commit_message ?? "").split("\n")[0];
+			const rev = this.diff.commit_hash ? `${this.diff.commit_hash.substring(0, 7)}: ` : "";
+			const firstLine = (this.diff.commit_message ?? "").split("\n")[0];
+			appendLinkifiedText(mm, rev + firstLine);
 			if (this.diff.commit_message) mm.title = this.diff.commit_message;
 			mm.addEventListener("click", (ev) => {
+				if (ev.target?.closest("a")) {
+					ev.stopPropagation();
+					return;
+				}
 				this.showCommitMessagePopover(ev.currentTarget, this.diff?.commit_message ?? "", this.diff?.commit_hash ?? "");
 			});
 			container.appendChild(mm);

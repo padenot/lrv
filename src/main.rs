@@ -379,11 +379,14 @@ async fn main() -> Result<()> {
     // Prefer loopback when opening browser
     let url = format!("http://127.0.0.1:{}", actual_port);
 
-    // Open browser
+    // Open browser (spawned so the server starts before xdg-open can block)
     if !disable_open {
-        if let Err(e) = open::that(&url) {
-            eprintln!("Failed to open browser: {}", e);
-        }
+        let url_for_open = url.clone();
+        tokio::spawn(async move {
+            if let Err(e) = open::that(&url_for_open) {
+                eprintln!("Failed to open browser: {}", e);
+            }
+        });
     }
 
     // Run servers with graceful shutdown
