@@ -36,6 +36,8 @@ Useful flags:
 Network exposure:
 
 - By default, `lrv` binds to `127.0.0.1`, so only your machine can reach it.
+- In practice, `lrv --tailscale` usually listens on both `127.0.0.1:<port>` and your local Tailscale `100.x.y.z:<port>`.
+- `lrv --public --tailscale` usually listens on `0.0.0.0:<port>` plus any detected Tailscale `100.x.y.z:<port>`.
 - `--public`, `--bind 0.0.0.0`, and `--tailscale` expose the review UI and diff contents over plain HTTP with no auth.
 - Only use those flags on trusted private networks or Tailscale peers you trust.
 
