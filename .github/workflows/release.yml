@@ -110,5 +110,5 @@ jobs:
       - name: Upload release asset
         uses: softprops/action-gh-release@v2
         with:
+          prerelease: ${{ contains(github.ref_name, '-') }}
           files: ${{ steps.package_unix.outputs.asset || steps.package_windows.outputs.asset }}
-
