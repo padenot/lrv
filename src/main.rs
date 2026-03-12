@@ -5,8 +5,9 @@ mod server;
 mod types;
 
 use anyhow::{Context, Result};
-use clap::Parser;
+use clap::{ArgAction, Parser};
 use lrv::netutil;
+use moz_cli_version_check::VersionChecker;
 use std::env;
 use std::io::Read;
 use std::process::Command;
@@ -156,7 +157,12 @@ fn is_ssh_session() -> bool {
 #[derive(Parser, Debug)]
 #[command(name = "lrv")]
 #[command(about = "Local code review tool for LLM agents", long_about = None)]
+#[command(disable_version_flag = true)]
 struct Args {
+    /// Print version information
+    #[arg(long = "version", short = 'V', action = ArgAction::SetTrue)]
+    version: bool,
+
     /// Command to run to get diff (e.g., "git diff", "jj diff")
     #[arg(long)]
     cmd: Option<String>,
@@ -202,7 +208,15 @@ struct Args {
 async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
+    let version_checker = VersionChecker::new("lrv", env!("CARGO_PKG_VERSION"));
+    version_checker.check_async();
+
     let args = Args::parse();
+    if args.version {
+        println!("lrv {}", env!("CARGO_PKG_VERSION"));
+        version_checker.print_warning_sync();
+        return Ok(());
+    }
 
     // Derive dynamic behavior based on environment.
     // If we're over SSH and a Tailscale IP is present in env, auto-enable tailscale
@@ -210,18 +224,16 @@ async fn main() -> Result<()> {
     let mut enable_tailscale = args.tailscale;
     let mut disable_open = args.no_open;
     let mut detected_ts_ips: Option<Vec<String>> = None;
-    if !enable_tailscale || !disable_open {
-        if is_ssh_session() {
-            let ts = get_tailscale_ipv4s_from_env();
-            if !ts.is_empty() {
-                if !enable_tailscale {
-                    enable_tailscale = true;
-                }
-                if !disable_open {
-                    disable_open = true;
-                }
-                detected_ts_ips = Some(ts);
+    if (!enable_tailscale || !disable_open) && is_ssh_session() {
+        let ts = get_tailscale_ipv4s_from_env();
+        if !ts.is_empty() {
+            if !enable_tailscale {
+                enable_tailscale = true;
             }
+            if !disable_open {
+                disable_open = true;
+            }
+            detected_ts_ips = Some(ts);
         }
     }
 

@@ -36,7 +36,9 @@ function computeStats(values: number[]): {
     const idx = (n - 1) * p;
     const lo = Math.floor(idx);
     const hi = Math.ceil(idx);
-    if (lo === hi) return sorted[lo];
+    if (lo === hi) {
+      return sorted[lo];
+    }
     const t = idx - lo;
     return sorted[lo] * (1 - t) + sorted[hi] * t;
   };
@@ -77,7 +79,9 @@ function findMeasure(entries: PerfTimelineEntry[], name: string): PerfTimelineEn
 }
 
 async function startServer(port: number = 0): Promise<void> {
-  if (!testRepoPath) throw new Error('Test repo not initialized');
+  if (!testRepoPath) {
+    throw new Error('Test repo not initialized');
+  }
   return new Promise((resolve, reject) => {
     const cargoPath = (() => {
       const envBin = process.env.LRV_BIN;
@@ -100,14 +104,20 @@ async function startServer(port: number = 0): Promise<void> {
       const t = d.toString();
       output += t;
       for (const line of t.split(/\r?\n/)) {
-        if (line.trim()) console.log(`[server] ${line}`);
+        if (line.trim()) {
+          console.log(`[server] ${line}`);
+        }
       }
       try {
         fs.appendFileSync(serverLog, t);
       } catch {}
       const m = t.match(/http:\/\/[^\s]+:\d+/);
-      if (m && !serverUrl) serverUrl = m[0];
-      if (output.includes('Available at:')) setTimeout(resolve, 300);
+      if (m && !serverUrl) {
+        serverUrl = m[0];
+      }
+      if (output.includes('Available at:')) {
+        setTimeout(resolve, 300);
+      }
     };
     serverProcess.stdout?.on('data', check);
     serverProcess.stderr?.on('data', check);
@@ -124,16 +134,22 @@ async function startServer(port: number = 0): Promise<void> {
 
 async function stopServer(): Promise<void> {
   return new Promise((resolve) => {
-    if (!serverProcess) return resolve();
+    if (!serverProcess) {
+      return resolve();
+    }
     const p = serverProcess;
     serverProcess = null;
     p.on('close', () => resolve());
     try {
-      if (p.pid) process.kill(-p.pid, 'SIGTERM');
+      if (p.pid) {
+        process.kill(-p.pid, 'SIGTERM');
+      }
     } catch {}
     setTimeout(() => {
       try {
-        if (p.pid) process.kill(-p.pid, 'SIGKILL');
+        if (p.pid) {
+          process.kill(-p.pid, 'SIGKILL');
+        }
       } catch {}
       resolve();
     }, 2000);
@@ -261,7 +277,9 @@ test.describe('Perf Bench', () => {
       if (typeof timelineResult.firstLineMs === 'number') {
         navToDiffVisible.push(timelineResult.firstLineMs);
       }
-      if (typeof ms === 'number') samples.push(ms);
+      if (typeof ms === 'number') {
+        samples.push(ms);
+      }
       const navMs = navToDiffVisible.length ? navToDiffVisible[navToDiffVisible.length - 1] : null;
       const navHarnessMs = navToDiffVisibleHarness.length
         ? navToDiffVisibleHarness[navToDiffVisibleHarness.length - 1]
@@ -295,7 +313,9 @@ test.describe('Perf Bench', () => {
     // Persist
     try {
       const outDir = path.resolve(__dirname, '../test-results');
-      if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
+      if (!fs.existsSync(outDir)) {
+        fs.mkdirSync(outDir, { recursive: true });
+      }
       const outPath = path.join(outDir, 'perf-init.json');
       const coldNavToDiffVisible = navToDiffVisible.length > 0 ? navToDiffVisible[0] : null;
       const warmNavToDiffVisible = navToDiffVisible.slice(1);
@@ -405,7 +425,9 @@ test.describe('Perf Bench', () => {
     try {
       const metrics = await page.evaluate(() => (window as any).Perf?.getMetrics?.());
       const outDir = path.resolve(__dirname, '../test-results');
-      if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
+      if (!fs.existsSync(outDir)) {
+        fs.mkdirSync(outDir, { recursive: true });
+      }
       const outPath = path.join(outDir, 'perf-switch.json');
       fs.writeFileSync(outPath, JSON.stringify({ fileSwitch: metrics?.fileSwitch || [] }, null, 2));
       console.log(`[perf] wrote metrics to ${outPath}`);

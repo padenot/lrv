@@ -83,7 +83,7 @@ fn get_file_new(cwd: Option<&PathBuf>, rel: &str) -> Result<String> {
         std::env::current_dir()?
     };
     let path = root.join(rel);
-    Ok(fs::read_to_string(path).with_context(|| format!("read new file {}", rel))?)
+    fs::read_to_string(path).with_context(|| format!("read new file {}", rel))
 }
 
 fn get_file_old(cwd: Option<&PathBuf>, rel: &str) -> Result<String> {

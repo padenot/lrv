@@ -3,15 +3,18 @@
   "private": true,
   "version": "0.0.0",
   "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^8.57.0",
+    "@typescript-eslint/parser": "^8.57.0",
     "eslint": "^10.0.0",
     "eslint-plugin-html": "^8.1.1",
     "monaco-editor": "^0.55.1",
+    "prettier": "^3.8.1",
     "rolldown": "^1.0.0-rc.6",
     "typescript": "^5.9.3"
   },
   "scripts": {
     "build:web": "rolldown -c rolldown.config.mjs",
     "typecheck:web": "tsc -p tsconfig.web.json",
-    "lint:web": "eslint web e2e scripts"
+    "lint:web": "eslint web/src e2e"
   }
 }

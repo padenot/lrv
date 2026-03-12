@@ -35,11 +35,7 @@ function applyMixin(TargetClass: Constructor, MethodsClass: Constructor) {
     if (!descriptor) {
       continue;
     }
-    Object.defineProperty(
-      TargetClass.prototype,
-      name,
-      descriptor,
-    );
+    Object.defineProperty(TargetClass.prototype, name, descriptor);
   }
 }
 
@@ -57,7 +53,12 @@ export class MonacoApp {
   currentFocusedLine: { side: 'old' | 'new'; line: number } | null;
   currentWidget: editor.IContentWidget | null;
   currentWidgetEditor?: editor.ICodeEditor | null;
-  diff: { files: DiffFile[]; stats: DiffStats; commit_message?: string; commit_hash?: string } | null;
+  diff: {
+    files: DiffFile[];
+    stats: DiffStats;
+    commit_message?: string;
+    commit_hash?: string;
+  } | null;
   files: DiffFile[];
   stats: DiffStats;
   fileCache: Record<string, FilePair>;
@@ -127,7 +128,12 @@ export class MonacoApp {
     const [configData, contextData, diffData] = await Promise.all([
       fetchJSON<AppConfigInput>('/api/config'),
       fetchJSON<AppContextData>('/api/context'),
-      fetchJSON<{ files: DiffFile[]; stats: DiffStats; commit_message?: string; commit_hash?: string }>('/api/diff'),
+      fetchJSON<{
+        files: DiffFile[];
+        stats: DiffStats;
+        commit_message?: string;
+        commit_hash?: string;
+      }>('/api/diff'),
       document.fonts.ready,
     ]);
     window.Perf.mark('init:fetch:end');
@@ -409,8 +415,7 @@ export class MonacoApp {
     // Stats
     const statsEl = $('#stats');
     if (statsEl) {
-      statsEl.textContent =
-        `${this.stats.files_changed} files, +${this.stats.additions} -${this.stats.deletions}`;
+      statsEl.textContent = `${this.stats.files_changed} files, +${this.stats.additions} -${this.stats.deletions}`;
     }
 
     // Show banner for public mode

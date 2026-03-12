@@ -12,7 +12,9 @@ let serverUrl: string | null = null;
 let testRepoPath: string | null = null;
 
 async function startServer(port: number = 0): Promise<void> {
-  if (!testRepoPath) throw new Error('Test repo not initialized');
+  if (!testRepoPath) {
+    throw new Error('Test repo not initialized');
+  }
   return new Promise((resolve, reject) => {
     const cargoPath = (() => {
       const envBin = process.env.LRV_BIN;
@@ -43,16 +45,22 @@ async function startServer(port: number = 0): Promise<void> {
 
 async function stopServer(): Promise<void> {
   return new Promise((resolve) => {
-    if (!serverProcess) return resolve();
+    if (!serverProcess) {
+      return resolve();
+    }
     const p = serverProcess;
     serverProcess = null;
     p.on('close', () => resolve());
     try {
-      if (p.pid) process.kill(-p.pid, 'SIGTERM');
+      if (p.pid) {
+        process.kill(-p.pid, 'SIGTERM');
+      }
     } catch {}
     setTimeout(() => {
       try {
-        if (p.pid) process.kill(-p.pid, 'SIGKILL');
+        if (p.pid) {
+          process.kill(-p.pid, 'SIGKILL');
+        }
       } catch {}
       resolve();
     }, 1500);

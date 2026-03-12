@@ -4,10 +4,7 @@ function globPatternToRegExp(pattern: string): RegExp {
   return new RegExp(`^${regexBody}$`, 'i');
 }
 
-export function detectLanguageFromPathAndContent(
-  path = '',
-  content = '',
-): string {
+export function detectLanguageFromPathAndContent(path = '', content = ''): string {
   const normalizedPath = path.replace(/\\/g, '/').replace(/[?#].*$/, '');
   const baseName = normalizedPath.split('/').pop() || normalizedPath;
   const lowerPath = normalizedPath.toLowerCase();

@@ -21,7 +21,8 @@ fn main() {
 
     let bundle_mtime = mtime(bundle).unwrap_or(SystemTime::UNIX_EPOCH);
     let src_mtime = newest_mtime(Path::new("web/src")).unwrap_or(SystemTime::UNIX_EPOCH);
-    let config_mtime = newest_mtime(Path::new("rolldown.config.mjs")).unwrap_or(SystemTime::UNIX_EPOCH);
+    let config_mtime =
+        newest_mtime(Path::new("rolldown.config.mjs")).unwrap_or(SystemTime::UNIX_EPOCH);
 
     let newest_input = src_mtime.max(config_mtime);
     if bundle_mtime < newest_input {

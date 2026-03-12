@@ -376,7 +376,9 @@ export class DialogMethods {
         }
 
         submitBtn.textContent = 'Submitted!';
-        const submitReviewBtn = document.getElementById('submit-review') as HTMLButtonElement | null;
+        const submitReviewBtn = document.getElementById(
+          'submit-review',
+        ) as HTMLButtonElement | null;
         if (submitReviewBtn) {
           submitReviewBtn.disabled = true;
           submitReviewBtn.textContent = 'Review Submitted';

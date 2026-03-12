@@ -76,7 +76,12 @@ export interface AppContext {
   currentFocusedLine: { side: Side; line: number } | null;
   currentWidget: editor.IContentWidget | null;
   currentWidgetEditor?: editor.ICodeEditor | null;
-  diff: { files: DiffFile[]; stats: DiffStats; commit_message?: string; commit_hash?: string } | null;
+  diff: {
+    files: DiffFile[];
+    stats: DiffStats;
+    commit_message?: string;
+    commit_hash?: string;
+  } | null;
   files: DiffFile[];
   stats: DiffStats;
   fileCache: Record<string, FilePair>;

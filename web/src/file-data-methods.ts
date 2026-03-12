@@ -17,13 +17,17 @@ export class FileDataMethods {
     }
 
     const [oldData, newData] = await Promise.all([
-      fetchJSON<FileContentResponse>(`/api/file?path=${encodeURIComponent(filePath)}&side=old`).catch((err) => {
+      fetchJSON<FileContentResponse>(
+        `/api/file?path=${encodeURIComponent(filePath)}&side=old`,
+      ).catch((err) => {
         if (window.DEBUG) {
           console.error('[app] old fetch failed', err);
         }
         return { content: '' };
       }),
-      fetchJSON<FileContentResponse>(`/api/file?path=${encodeURIComponent(filePath)}&side=new`).catch((err) => {
+      fetchJSON<FileContentResponse>(
+        `/api/file?path=${encodeURIComponent(filePath)}&side=new`,
+      ).catch((err) => {
         if (window.DEBUG) {
           console.error('[app] new fetch failed', err);
         }

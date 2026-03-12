@@ -43,7 +43,7 @@ pub fn parse_diff(diff_text: &str) -> Result<DiffResponse> {
                         .unwrap_or("");
                     commit_author = Some(author.trim().to_string());
                 } else if is_author_jj {
-                    if let Some(val) = line.splitn(2, ':').nth(1) {
+                    if let Some((_, val)) = line.split_once(':') {
                         commit_author = Some(val.trim().to_string());
                     }
                 } else if let Some(date) = line

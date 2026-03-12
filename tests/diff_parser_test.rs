@@ -163,8 +163,14 @@ index a1b2c3d..e4f5a6b 100644
         diff.commit_hash.as_deref(),
         Some("453ef69a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e")
     );
-    assert_eq!(diff.commit_author.as_deref(), Some("Paul Adenot <paul@paul.cx>"));
-    assert_eq!(diff.commit_date.as_deref(), Some("Wed Feb 18 12:00:00 2026 +0100"));
+    assert_eq!(
+        diff.commit_author.as_deref(),
+        Some("Paul Adenot <paul@paul.cx>")
+    );
+    assert_eq!(
+        diff.commit_date.as_deref(),
+        Some("Wed Feb 18 12:00:00 2026 +0100")
+    );
     let msg = diff.commit_message.as_deref().unwrap();
     assert!(msg.starts_with("Remove dead expand/range system"));
     assert!(msg.contains("\n\nMonaco's hideUnchangedRegions"));

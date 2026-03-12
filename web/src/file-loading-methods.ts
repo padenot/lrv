@@ -129,10 +129,7 @@ export class FileLoadingMethods {
     // Show/hide banner when old content is unavailable but new content exists
     const oldBanner = $<HTMLElement>('#old-missing-banner');
     if (oldBanner) {
-      const show =
-        !isAddedFile &&
-        filePair.old.length === 0 &&
-        filePair.new.length > 0;
+      const show = !isAddedFile && filePair.old.length === 0 && filePair.new.length > 0;
       oldBanner.style.display = show ? '' : 'none';
     }
     window.Perf.mark('loadFile:models:start');

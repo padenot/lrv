@@ -8,7 +8,6 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use mime_guess;
 use rust_embed::RustEmbed;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
@@ -362,7 +361,7 @@ fn batch_cat_file_blobs(working_dir: &str, oids: &[String]) -> Option<HashMap<St
                 let size_str = it.next().unwrap_or("0");
                 let size: usize = size_str.parse().unwrap_or(0);
                 let mut buf = vec![0u8; size];
-                if let Err(_) = reader.read_exact(&mut buf) {
+                if reader.read_exact(&mut buf).is_err() {
                     return None;
                 }
                 // Consume the trailing newline after the object content

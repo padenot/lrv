@@ -3,12 +3,13 @@
 default:
     @just --list
 
-build:
+build-web:
     npm run build:web
+
+build: build-web
     cargo build
 
-build-release:
-    npm run build:web
+build-release: build-web
     cargo build --release
 
 install:
@@ -41,24 +42,38 @@ setup-e2e:
 fmt:
     cargo fmt
 
+fmt-check:
+    cargo fmt --check
+
 fmt-web:
-    npx --yes prettier --config .prettierrc.json --ignore-path .prettierignore --ignore-unknown --write "web/**/*.{html,js,ts,css}" "e2e/**/*.{ts,js,json}" "scripts/**/*.sh"
+    npx prettier --config .prettierrc.json --ignore-path .prettierignore --ignore-unknown --write "web/src/**/*.{js,ts}" "web/assets/app.css" "web/dist/index.html" "e2e/**/*.{ts,js,json}" "scripts/**/*.sh"
+
+fmt-web-check:
+    npx prettier --config .prettierrc.json --ignore-path .prettierignore --ignore-unknown --check "web/src/**/*.{js,ts}" "web/assets/app.css" "web/dist/index.html" "e2e/**/*.{ts,js,json}" "scripts/**/*.sh"
 
 fmt-all: fmt fmt-web
 
 lint:
-    cargo clippy
+    cargo clippy --all-targets --all-features -- -D warnings
 
 lint-web:
-    npx --yes eslint web e2e
+    npx --yes eslint web/src e2e
 
 lint-web-fix:
-    npx --yes eslint --fix web e2e
+    npx --yes eslint --fix web/src e2e
 
 check:
     cargo check
 
-ci: fmt lint build test
+typecheck-web:
+    npm run typecheck:web
+
+check-web: typecheck-web lint-web
+
+ci: fmt-check fmt-web-check check-web build-web lint test-unit
+
+ci-e2e:
+    just test-e2e
 
 dev: build test-unit
 

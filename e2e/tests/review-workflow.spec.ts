@@ -48,7 +48,9 @@ async function startServer(port: number = 0, options?: { title?: string }): Prom
 
     const appendLog = (chunk: string) => {
       try {
-        if (serverLogPath) fs.appendFileSync(serverLogPath, chunk);
+        if (serverLogPath) {
+          fs.appendFileSync(serverLogPath, chunk);
+        }
       } catch {}
     };
 
@@ -119,7 +121,9 @@ async function stopServer(): Promise<string> {
       const text = data.toString();
       output += text;
       try {
-        if (serverLogPath) fs.appendFileSync(serverLogPath, text);
+        if (serverLogPath) {
+          fs.appendFileSync(serverLogPath, text);
+        }
       } catch {}
     });
 
@@ -272,7 +276,10 @@ test.describe('Review Workflow E2E', () => {
     });
     expect(hasRangeDecorations).toBeTruthy();
 
-    await page.locator('.modified .line-numbers').nth(2).click({ position: { x: 10, y: 10 } }); // line 3
+    await page
+      .locator('.modified .line-numbers')
+      .nth(2)
+      .click({ position: { x: 10, y: 10 } }); // line 3
     await expect(page.locator('.inline-comment-box h3')).toContainText('Line 2-4 - Edit');
 
     await page.locator('.delete-btn').click();
@@ -414,7 +421,9 @@ test.describe('Review Workflow E2E', () => {
 
   test('should display renamed files correctly', async ({ page }) => {
     // Create a renamed file diff
-    if (!testRepoPath) throw new Error('Test repo not initialized');
+    if (!testRepoPath) {
+      throw new Error('Test repo not initialized');
+    }
 
     // Stage current changes first, then rename a file
     await execAsync(
@@ -437,7 +446,9 @@ test.describe('Review Workflow E2E', () => {
 
   test('should display deleted files correctly', async ({ page }) => {
     // Create a deleted file diff
-    if (!testRepoPath) throw new Error('Test repo not initialized');
+    if (!testRepoPath) {
+      throw new Error('Test repo not initialized');
+    }
 
     // Stage current changes first, then delete a file
     await execAsync(
@@ -465,7 +476,9 @@ test.describe('Review Workflow E2E', () => {
 
   test('should display added files and content', async ({ page }) => {
     // Create a new file
-    if (!testRepoPath) throw new Error('Test repo not initialized');
+    if (!testRepoPath) {
+      throw new Error('Test repo not initialized');
+    }
 
     await execAsync(
       `cd "${testRepoPath}" && echo "new content" > new-file.txt && git add new-file.txt`,
@@ -513,7 +526,9 @@ test.describe('Review Workflow E2E', () => {
     const errors: string[] = [];
     page.on('pageerror', (err) => errors.push(String(err)));
     page.on('console', (msg) => {
-      if (msg.type() === 'error') errors.push(msg.text());
+      if (msg.type() === 'error') {
+        errors.push(msg.text());
+      }
     });
 
     // Prepare locators for files
