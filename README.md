@@ -1,94 +1,75 @@
 # lrv
 
-Local code review tool for LLM agents.
+`lrv` is a local review UI for unified diffs. It reads a diff from stdin, `--cmd`, or `--file`, opens a browser UI backed by Monaco, and prints submitted comments to stdout as JSON or text.
 
-`lrv` reads a unified diff (from stdin, `--cmd`, or `--file`), serves a local Monaco-based review UI, and prints submitted comments to stdout as JSON or text.
+## Users
 
-## Quick Start
+Install:
 
-Use the installed binary:
+```bash
+cargo binstall lrv
+# or
+cargo install lrv
+```
+
+Common usage:
 
 ```bash
 git diff | lrv
-```
-
-Use the dev binary from this repo:
-
-```bash
-git diff | cargo run --bin lrv --
-```
-
-Review a specific commit (recommended over `git diff HEAD^`):
-
-```bash
-git show HEAD^ | cargo run --bin lrv --
-```
-
-## Diff Input Modes
-
-```bash
-# Read stdin
 git diff --staged | lrv
-
-# Run a command
-lrv --cmd "git diff --staged"
+git show HEAD | lrv
 lrv --cmd "jj diff --git"
-
-# Read a patch file
 lrv --file changes.patch
 ```
 
-## CLI Options
+Useful flags:
 
 ```text
---cmd <CMD>        Command to run to get diff (e.g., "git diff", "jj diff")
---file <FILE>      Read diff from file instead of stdin
---port <PORT>      Port to bind server to (default: random available port)
---bind <BIND>      Bind address(es), can be passed multiple times (default: 127.0.0.1)
---public           Bind on all interfaces (equivalent to --bind 0.0.0.0)
---tailscale        Also bind to local Tailscale IPv4 if detected
---no-open          Don't auto-open browser
---format <FORMAT>  Output format: json or text (default: json)
---title <TITLE>    Optional title shown in the UI header
---dev-log          Enable development HTTP tracing
+--no-open          Don't auto-open a browser
+--format text      Print comments as text instead of JSON
+--title "..."      Show a custom title in the header
+--bind <ADDR>      Bind a specific address (default: 127.0.0.1)
+--public           Bind on all interfaces
+--tailscale        Also bind detected Tailscale IPv4 addresses
 ```
+
+Notes:
+
+- `--public` is for trusted networks only.
+- Submitted comments are written to stdout, so you can pipe or capture them.
+- `lrv --version` prints the current version and can warn if a newer release exists.
 
 ## Development
 
-`just` is used for common workflows:
+Prerequisites:
+
+- Rust toolchain
+- Node.js + npm
+- `just`
+- Playwright Firefox for e2e: `just setup-e2e`
+
+Main workflows:
 
 ```bash
 just build
 just test-unit
 just test-e2e
-just test
-just fmt
-just fmt-web
-just lint
+just ci
 ```
 
-First-time e2e setup:
+Frontend changes must rebuild the embedded bundle:
 
 ```bash
-just setup-e2e
+npm run build:web
 ```
 
-## Architecture
-
-```text
-stdin/--cmd/--file -> Rust server (axum) -> Browser UI (Monaco)
-                                         -> stdout (review comments)
-```
-
-Key source files:
-
-- `src/main.rs`: CLI, input handling, server lifecycle
-- `src/server.rs`: HTTP routes, file content resolution, static assets
-- `src/diff.rs`: unified diff parser (git/jj/hg)
-- `src/output.rs`: review output formatting
-- `web/dist/index.html`: embedded app shell
-- `web/assets/app/*.js`: frontend modules
+The binary embeds the web assets, so stale frontend output will fail the Rust build on purpose.
 
 ## License
 
-MIT
+Licensed under either of:
+
+- Apache License, Version 2.0
+- MIT license
+
+See [LICENSE-APACHE](/home/padenot/src/repositories/lrv/LICENSE-APACHE) and [LICENSE-MIT](/home/padenot/src/repositories/lrv/LICENSE-MIT).
