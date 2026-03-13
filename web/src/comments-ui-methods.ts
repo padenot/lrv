@@ -83,6 +83,8 @@ export class CommentsUIMethods {
 
     // Create the widget
     const domNode = el('div', { className: 'inline-comment-box' });
+    domNode.style.position = 'relative';
+    domNode.style.zIndex = '3';
     const modKey = MOD_KEY_LABEL;
     const title = el('h3', {
       text: `Line ${existingComment ? commentLineLabel(existingComment) : fileLineNumber}${existingComment ? ' - Edit' : ''}`,
@@ -103,6 +105,8 @@ export class CommentsUIMethods {
 
     const widget = {
       getId: () => 'inline.comment.widget',
+      allowEditorOverflow: true,
+      suppressMouseDown: false,
       getDomNode: () => domNode,
       getPosition: () => ({
         position: {
@@ -117,6 +121,7 @@ export class CommentsUIMethods {
     };
 
     targetEditor.addContentWidget(widget);
+    targetEditor.layoutContentWidget(widget);
     this.currentWidget = widget;
     this.currentWidgetEditor = targetEditor;
 

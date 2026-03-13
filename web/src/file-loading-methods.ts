@@ -28,6 +28,7 @@ export class FileLoadingMethods {
   declare currentHunkIndex: AppContext['currentHunkIndex'];
   declare jumpToHunk: AppContext['jumpToHunk'];
   declare setFocusedLine: AppContext['setFocusedLine'];
+  declare expandCurrentFileAncestors: AppContext['expandCurrentFileAncestors'];
 
   private getCurrentFile(index: number) {
     return this.files[index]!;
@@ -59,6 +60,7 @@ export class FileLoadingMethods {
     }
 
     this.initFileHunks(file);
+    this.expandCurrentFileAncestors();
     this.renderFileList();
 
     // Dispose old models and widget; keep editor instance

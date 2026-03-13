@@ -6,7 +6,7 @@ use std::time::SystemTime;
 fn main() {
     // Re-run when frontend sources/assets/config/deps change so embedded web assets are refreshed.
     println!("cargo:rerun-if-changed=web/src");
-    println!("cargo:rerun-if-changed=web/assets/app.css");
+    println!("cargo:rerun-if-changed=web/assets");
     println!("cargo:rerun-if-changed=web/dist/index.html");
     println!("cargo:rerun-if-changed=rolldown.config.mjs");
     println!("cargo:rerun-if-changed=tsconfig.web.json");
@@ -34,7 +34,7 @@ fn newest_frontend_input_mtime() -> Option<SystemTime> {
     let mut newest: Option<SystemTime> = None;
     for path in [
         Path::new("web/src"),
-        Path::new("web/assets/app.css"),
+        Path::new("web/assets"),
         Path::new("web/dist/index.html"),
         Path::new("rolldown.config.mjs"),
         Path::new("tsconfig.web.json"),

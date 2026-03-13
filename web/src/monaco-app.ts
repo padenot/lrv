@@ -72,6 +72,8 @@ export class MonacoApp {
   _commitPopoverEl: HTMLElement | null;
   currentFileIsCommit: boolean;
   _commitViewEl: HTMLElement | null;
+  collapsedDirs: Set<string>;
+  fileListFilter: string;
   declare updateUI: () => void;
   declare renderFileList: () => void;
   declare loadFile: (index: number) => Promise<void>;
@@ -81,6 +83,7 @@ export class MonacoApp {
   declare showKeyboardHelp: () => void;
   declare showSubmitConfirmation: () => Promise<void>;
   declare setupSidebarResizer: () => void;
+  declare setupFileListControls: () => void;
   declare setupKeyboardShortcuts: () => void;
 
   constructor() {
@@ -109,6 +112,8 @@ export class MonacoApp {
     this._commitPopoverEl = null;
     this.currentFileIsCommit = false;
     this._commitViewEl = null;
+    this.collapsedDirs = new Set();
+    this.fileListFilter = '';
 
     this.commentManager.onChange(() => this.updateUI());
   }
@@ -382,6 +387,16 @@ export class MonacoApp {
     $('#file-list')?.addEventListener('click', (e) => {
       const li = (e.target as Element | null)?.closest('li');
       if (li) {
+        const dirKey = li.getAttribute('data-dir-key');
+        if (dirKey) {
+          if (this.collapsedDirs.has(dirKey)) {
+            this.collapsedDirs.delete(dirKey);
+          } else {
+            this.collapsedDirs.add(dirKey);
+          }
+          this.renderFileList();
+          return;
+        }
         if (li.dataset.commit === '1') {
           this.loadCommitView();
         } else {
@@ -428,6 +443,7 @@ export class MonacoApp {
 
     // Sidebar resizer
     this.setupSidebarResizer();
+    this.setupFileListControls();
 
     // Keyboard shortcuts
     this.setupKeyboardShortcuts();

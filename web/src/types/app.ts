@@ -95,10 +95,14 @@ export interface AppContext {
   _commitPopoverEl: HTMLElement | null;
   currentFileIsCommit: boolean;
   _commitViewEl: HTMLElement | null;
+  collapsedDirs: Set<string>;
+  fileListFilter: string;
 
   updateUI(): void;
   renderFileList(): void;
   setupSidebarResizer(): void;
+  setupFileListControls(): void;
+  expandCurrentFileAncestors(): void;
   setupKeyboardShortcuts(): void;
   setupUI(): void;
   loadFile(index: number): Promise<void>;

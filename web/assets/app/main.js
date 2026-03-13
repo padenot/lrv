@@ -745,66 +745,266 @@ var FileListMethods = class {
 			}
 		});
 	}
+	setupFileListControls() {
+		const filter = document.getElementById("file-list-filter");
+		const collapseAll = document.getElementById("collapse-all-dirs");
+		const expandAll = document.getElementById("expand-all-dirs");
+		if (filter) filter.value = this.fileListFilter;
+		filter?.addEventListener("input", () => {
+			this.fileListFilter = filter.value.trim().toLowerCase();
+			this.renderFileList();
+		});
+		collapseAll?.addEventListener("click", () => {
+			this.collapsedDirs = this.collectDirectoryKeys();
+			this.renderFileList();
+		});
+		expandAll?.addEventListener("click", () => {
+			this.collapsedDirs.clear();
+			this.renderFileList();
+		});
+	}
+	computeFileDelta(file) {
+		return {
+			added: file.hunks.reduce((acc, h) => acc + h.lines.filter((line) => line.type === "add").length, 0),
+			deleted: file.hunks.reduce((acc, h) => acc + h.lines.filter((line) => line.type === "delete").length, 0)
+		};
+	}
+	basename(path) {
+		const parts = path.split("/");
+		return parts[parts.length - 1] || path;
+	}
+	fileLabel(file) {
+		if (file.status === "renamed" && file.old_path) {
+			const oldBase = this.basename(file.old_path);
+			const newBase = this.basename(file.path);
+			return oldBase === newBase ? newBase : `${oldBase} → ${newBase}`;
+		}
+		return this.basename(file.path);
+	}
+	matchesFilter(file, filter) {
+		if (!filter) return true;
+		return file.path.toLowerCase().includes(filter) || Boolean(file.old_path?.toLowerCase().includes(filter));
+	}
+	makeDir(name, key) {
+		return {
+			kind: "dir",
+			name,
+			key,
+			dirs: /* @__PURE__ */ new Map(),
+			files: [],
+			added: 0,
+			deleted: 0,
+			commentCount: 0,
+			fileCount: 0
+		};
+	}
+	buildFileTree() {
+		const root = this.makeDir("", "");
+		for (const [index, file] of this.files.entries()) {
+			const { added, deleted } = this.computeFileDelta(file);
+			const commentCount = this.commentManager.getCommentsForFile(file.path).length;
+			const fileNode = {
+				kind: "file",
+				index,
+				file,
+				label: this.fileLabel(file),
+				added,
+				deleted,
+				commentCount
+			};
+			const dirParts = file.path.split("/").slice(0, -1);
+			let cursor = root;
+			cursor.added += added;
+			cursor.deleted += deleted;
+			cursor.commentCount += commentCount;
+			cursor.fileCount += 1;
+			let key = "";
+			for (const part of dirParts) {
+				key = key ? `${key}/${part}` : part;
+				let child = cursor.dirs.get(part);
+				if (!child) {
+					child = this.makeDir(part, key);
+					cursor.dirs.set(part, child);
+				}
+				child.added += added;
+				child.deleted += deleted;
+				child.commentCount += commentCount;
+				child.fileCount += 1;
+				cursor = child;
+			}
+			cursor.files.push(fileNode);
+		}
+		return root;
+	}
+	collectDirectoryKeys() {
+		const out = /* @__PURE__ */ new Set();
+		for (const file of this.files) {
+			let key = "";
+			for (const part of file.path.split("/").slice(0, -1)) {
+				key = key ? `${key}/${part}` : part;
+				out.add(key);
+			}
+		}
+		return out;
+	}
+	expandCurrentFileAncestors() {
+		if (this.currentFileIsCommit) return;
+		const file = this.files[this.currentFileIndex];
+		if (!file) return;
+		let key = "";
+		for (const part of file.path.split("/").slice(0, -1)) {
+			key = key ? `${key}/${part}` : part;
+			this.collapsedDirs.delete(key);
+		}
+	}
+	renderCommitRow(list) {
+		if (!(this.diff !== null && (this.diff.commit_message || this.diff.commit_hash))) return;
+		const li = el("li", {
+			className: `tree-row ${this.currentFileIsCommit ? "active" : ""}`,
+			attrs: { "data-commit": "1" }
+		});
+		const left = el("span", { className: "file-left" }, [el("span", { className: "tree-toggle-spacer" }), el("span", {
+			className: "file-name",
+			text: "Commit"
+		})]);
+		const commentCount = this.commentManager.getCommentsForFile("(commit)").length;
+		if (commentCount > 0) left.appendChild(el("span", {
+			className: "file-comment-badge",
+			text: String(commentCount)
+		}));
+		const right = el("span", { className: "file-right" }, [el("span", {
+			className: "file-status",
+			text: "C"
+		})]);
+		li.appendChild(el("span", { className: "tree-row-content" }, [left, right]));
+		list.appendChild(li);
+	}
+	renderSummary(visibleFiles) {
+		const summary = document.getElementById("file-list-summary");
+		if (!summary) return;
+		const totalFiles = this.files.length;
+		const filterLabel = this.fileListFilter ? ` matching "${this.fileListFilter}"` : "";
+		summary.textContent = visibleFiles === totalFiles && !this.fileListFilter ? `${totalFiles} files` : `${visibleFiles} of ${totalFiles} files${filterLabel}`;
+	}
+	makeDirectoryRow(dir, isCollapsed) {
+		return el("li", {
+			className: "tree-row directory-row",
+			attrs: {
+				"data-dir-key": dir.key,
+				"aria-expanded": String(!isCollapsed)
+			}
+		}, [el("span", { className: "tree-row-content" }, [el("span", { className: "file-left" }, [
+			el("button", {
+				className: "tree-toggle",
+				text: isCollapsed ? "▸" : "▾",
+				attrs: {
+					type: "button",
+					"aria-label": `${isCollapsed ? "Expand" : "Collapse"} ${dir.key}`
+				}
+			}),
+			el("span", {
+				className: "file-name",
+				text: dir.name
+			}),
+			dir.commentCount > 0 ? el("span", {
+				className: "file-comment-badge",
+				text: String(dir.commentCount)
+			}) : null
+		]), el("span", { className: "file-right" }, [el("span", { className: "file-delta" }, [
+			el("span", {
+				className: "delta-add",
+				text: `+${dir.added}`
+			}),
+			" ",
+			el("span", {
+				className: "delta-del",
+				text: `-${dir.deleted}`
+			})
+		]), el("span", {
+			className: "file-status",
+			text: String(dir.fileCount)
+		})])])]);
+	}
+	makeFileRow(node) {
+		const li = el("li", {
+			className: `tree-row ${!this.currentFileIsCommit && node.index === this.currentFileIndex ? "active" : ""}`,
+			attrs: {
+				"data-index": node.index,
+				title: node.file.status === "renamed" && node.file.old_path ? `${node.file.old_path} → ${node.file.path}` : node.file.path
+			}
+		});
+		const left = el("span", { className: "file-left" }, [
+			el("span", { className: "tree-toggle-spacer" }),
+			el("span", {
+				className: "file-name",
+				text: node.label
+			}),
+			node.commentCount > 0 ? el("span", {
+				className: "file-comment-badge",
+				text: String(node.commentCount)
+			}) : null
+		]);
+		const right = el("span", { className: "file-right" }, [el("span", { className: "file-delta" }, [
+			el("span", {
+				className: "delta-add",
+				text: `+${node.added}`
+			}),
+			" ",
+			el("span", {
+				className: "delta-del",
+				text: `-${node.deleted}`
+			})
+		]), el("span", {
+			className: `file-status ${node.file.status}`,
+			text: node.file.status.charAt(0).toUpperCase()
+		})]);
+		li.appendChild(el("span", { className: "tree-row-content" }, [left, right]));
+		return li;
+	}
+	appendDirectory(list, dir, filter, forcedVisible) {
+		const dirMatches = Boolean(filter) && dir.key.toLowerCase().includes(filter);
+		const revealSubtree = forcedVisible || dirMatches;
+		const children = el("ul", { className: "file-tree-children" });
+		let visibleFiles = 0;
+		const childDirs = Array.from(dir.dirs.values()).sort((a, b) => a.key.localeCompare(b.key));
+		for (const childDir of childDirs) visibleFiles += this.appendDirectory(children, childDir, filter, revealSubtree);
+		const childFiles = [...dir.files].sort((a, b) => a.file.path.localeCompare(b.file.path));
+		for (const fileNode of childFiles) {
+			if (!revealSubtree && !this.matchesFilter(fileNode.file, filter)) continue;
+			children.appendChild(this.makeFileRow(fileNode));
+			visibleFiles += 1;
+		}
+		if (visibleFiles === 0) return 0;
+		const isCollapsed = !filter && this.collapsedDirs.has(dir.key);
+		const dirRow = this.makeDirectoryRow(dir, isCollapsed);
+		if ((!isCollapsed || filter) && children.childElementCount > 0) dirRow.appendChild(children);
+		list.appendChild(dirRow);
+		return visibleFiles;
+	}
 	renderFileList() {
 		const list = document.getElementById("file-list");
 		if (!list) return;
 		clearEl(list);
-		if (this.diff !== null && (this.diff.commit_message || this.diff.commit_hash)) {
-			const li = el("li", {
-				className: this.currentFileIsCommit ? "active" : "",
-				attrs: { "data-commit": "1" }
-			});
-			const left = el("span", { className: "file-left" }, [el("span", { text: "Commit" })]);
-			const right = el("span", { className: "file-right" });
-			const commentCount = this.commentManager.getCommentsForFile("(commit)").length;
-			if (commentCount > 0) left.appendChild(el("span", {
-				className: "file-comment-badge",
-				text: String(commentCount)
-			}));
-			right.appendChild(el("span", {
-				className: "file-status",
-				text: "C"
-			}));
-			li.appendChild(left);
-			li.appendChild(right);
-			list.appendChild(li);
+		const treeRoot = this.buildFileTree();
+		list.classList.add("file-tree", "file-tree-root");
+		this.renderCommitRow(list);
+		const filter = this.fileListFilter.trim().toLowerCase();
+		let visibleFiles = 0;
+		const topDirs = Array.from(treeRoot.dirs.values()).sort((a, b) => a.key.localeCompare(b.key));
+		for (const dir of topDirs) visibleFiles += this.appendDirectory(list, dir, filter, false);
+		const rootFiles = [...treeRoot.files].sort((a, b) => a.file.path.localeCompare(b.file.path));
+		for (const fileNode of rootFiles) {
+			if (!this.matchesFilter(fileNode.file, filter)) continue;
+			list.appendChild(this.makeFileRow(fileNode));
+			visibleFiles += 1;
 		}
-		this.files.forEach((file, index) => {
-			const li = el("li", {
-				className: !this.currentFileIsCommit && index === this.currentFileIndex ? "active" : "",
-				attrs: { "data-index": index }
-			});
-			const left = el("span", { className: "file-left" });
-			const name = el("span");
-			if (file.status === "renamed" && file.old_path) name.textContent = `${file.old_path} → ${file.path}`;
-			else name.textContent = file.path;
-			left.appendChild(name);
-			const commentCount = this.commentManager.getCommentsForFile(file.path).length;
-			if (commentCount > 0) left.appendChild(el("span", {
-				className: "file-comment-badge",
-				text: String(commentCount)
-			}));
-			const right = el("span", { className: "file-right" });
-			const added = file.hunks.reduce((acc, h) => acc + h.lines.filter((line) => line.type === "add").length, 0);
-			const deleted = file.hunks.reduce((acc, h) => acc + h.lines.filter((line) => line.type === "delete").length, 0);
-			right.appendChild(el("span", { className: "file-delta" }, [
-				el("span", {
-					className: "delta-add",
-					text: `+${added}`
-				}),
-				" ",
-				el("span", {
-					className: "delta-del",
-					text: `-${deleted}`
-				})
-			]));
-			right.appendChild(el("span", {
-				className: `file-status ${file.status}`,
-				text: file.status.charAt(0).toUpperCase()
-			}));
-			li.appendChild(left);
-			li.appendChild(right);
-			list.appendChild(li);
+		if (visibleFiles === 0) list.appendChild(el("li", {
+			className: "file-list-empty",
+			text: "No files match the current filter."
+		}));
+		this.renderSummary(visibleFiles);
+		requestAnimationFrame(() => {
+			list.querySelector(".active")?.scrollIntoView({ block: "nearest" });
 		});
 	}
 };
@@ -947,6 +1147,7 @@ var FileLoadingMethods = class {
 		const renderSideBySide = !this.isInline && !isAddedFile;
 		if (window.DEBUG) console.info("[app] loadFile: path", file.path, "status", file.status);
 		this.initFileHunks(file);
+		this.expandCurrentFileAncestors();
 		this.renderFileList();
 		if (this.originalModel) {
 			this.originalModel.dispose();
@@ -1852,6 +2053,8 @@ var CommentsUIMethods = class {
 		const existingIndex = this.commentManager.findComment(file, fileLineNumber, side);
 		const existingComment = existingIndex >= 0 ? this.commentManager.comments[existingIndex] : null;
 		const domNode = el("div", { className: "inline-comment-box" });
+		domNode.style.position = "relative";
+		domNode.style.zIndex = "3";
 		const modKey = MOD_KEY_LABEL;
 		const title = el("h3", { text: `Line ${existingComment ? commentLineLabel(existingComment) : fileLineNumber}${existingComment ? " - Edit" : ""}` });
 		const textarea = el("textarea", {
@@ -1884,6 +2087,8 @@ var CommentsUIMethods = class {
 		domNode.appendChild(actions);
 		const widget = {
 			getId: () => "inline.comment.widget",
+			allowEditorOverflow: true,
+			suppressMouseDown: false,
 			getDomNode: () => domNode,
 			getPosition: () => ({
 				position: {
@@ -1894,6 +2099,7 @@ var CommentsUIMethods = class {
 			})
 		};
 		targetEditor.addContentWidget(widget);
+		targetEditor.layoutContentWidget(widget);
 		this.currentWidget = widget;
 		this.currentWidgetEditor = targetEditor;
 		const saveBtn = domNode.querySelector(".save-btn");
@@ -2284,6 +2490,8 @@ var MonacoApp = class {
 	_commitPopoverEl;
 	currentFileIsCommit;
 	_commitViewEl;
+	collapsedDirs;
+	fileListFilter;
 	constructor() {
 		this.commentManager = new CommentManager();
 		this.currentFileIndex = 0;
@@ -2314,6 +2522,8 @@ var MonacoApp = class {
 		this._commitPopoverEl = null;
 		this.currentFileIsCommit = false;
 		this._commitViewEl = null;
+		this.collapsedDirs = /* @__PURE__ */ new Set();
+		this.fileListFilter = "";
 		this.commentManager.onChange(() => this.updateUI());
 	}
 	async init() {
@@ -2512,10 +2722,19 @@ var MonacoApp = class {
 	setupUI() {
 		$("#file-list")?.addEventListener("click", (e) => {
 			const li = e.target?.closest("li");
-			if (li) if (li.dataset.commit === "1") this.loadCommitView();
-			else {
-				const index = Number(li.dataset.index ?? -1);
-				if (index >= 0) this.loadFile(index);
+			if (li) {
+				const dirKey = li.getAttribute("data-dir-key");
+				if (dirKey) {
+					if (this.collapsedDirs.has(dirKey)) this.collapsedDirs.delete(dirKey);
+					else this.collapsedDirs.add(dirKey);
+					this.renderFileList();
+					return;
+				}
+				if (li.dataset.commit === "1") this.loadCommitView();
+				else {
+					const index = Number(li.dataset.index ?? -1);
+					if (index >= 0) this.loadFile(index);
+				}
 			}
 		});
 		$("#settings-btn")?.addEventListener("click", () => {
@@ -2536,6 +2755,7 @@ var MonacoApp = class {
 			if (b) b.style.display = "";
 		}
 		this.setupSidebarResizer();
+		this.setupFileListControls();
 		this.setupKeyboardShortcuts();
 	}
 };

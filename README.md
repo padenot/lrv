@@ -1,6 +1,11 @@
 # lrv
 
-`lrv` is a local review UI for unified diffs. It reads a diff from stdin, `--cmd`, or `--file`, opens a browser UI backed by Monaco, and prints submitted comments to stdout as JSON or text.
+`lrv` is a local review UI for unified diffs. It reads a diff from stdin,
+`--cmd`, or `--file`, opens a browser UI backed by Monaco, and prints submitted
+comments to stdout as JSON or text.
+
+Its purpose is to easily show the diff created by an AI agent to a human, that
+can comment on it. The comments are fed back to the agent.
 
 ## Users
 
@@ -74,4 +79,4 @@ Licensed under either of:
 - Apache License, Version 2.0
 - MIT license
 
-See [LICENSE-APACHE](/home/padenot/src/repositories/lrv/LICENSE-APACHE) and [LICENSE-MIT](/home/padenot/src/repositories/lrv/LICENSE-MIT).
+See [LICENSE-APACHE](LICENSE-APACHE) and [LICENSE-MIT](LICENSE-MIT).

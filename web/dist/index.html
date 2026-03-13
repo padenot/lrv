@@ -4,6 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>lrv - local review</title>
+    <link rel="icon" type="image/png" sizes="16x16" href="/assets/lrv-favicon-16.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/assets/lrv-favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="48x48" href="/assets/lrv-favicon-48.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/assets/lrv-favicon-180.png" />
     <!-- External app styles -->
     <link rel="stylesheet" href="/assets/app.css" />
   </head>
@@ -239,7 +243,23 @@
         <div class="sidebar-section">
           <h2>Files</h2>
           <div class="stats" id="stats"></div>
-          <ul class="file-list" id="file-list"></ul>
+          <div class="file-list-toolbar">
+            <input
+              id="file-list-filter"
+              class="file-list-filter"
+              type="text"
+              placeholder="Filter paths..."
+              aria-label="Filter files"
+            />
+            <div class="file-list-toolbar-actions">
+              <button id="collapse-all-dirs" class="btn-secondary" type="button">Collapse All</button>
+              <button id="expand-all-dirs" class="btn-secondary" type="button">Expand All</button>
+            </div>
+          </div>
+          <div class="file-list-summary" id="file-list-summary"></div>
+          <div class="file-list-scroll" id="file-list-scroll">
+            <ul class="file-list" id="file-list"></ul>
+          </div>
         </div>
         <div class="sidebar-resizer" id="sidebar-resizer"></div>
       </div>

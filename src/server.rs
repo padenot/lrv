@@ -395,7 +395,7 @@ fn batch_cat_file_blobs(working_dir: &str, oids: &[String]) -> Option<HashMap<St
 pub fn create_router(state: AppState, enable_trace: bool) -> Router {
     let router = Router::new()
         .route("/", get(serve_index))
-        .route("/assets/*path", get(serve_asset))
+        .route("/assets/{*path}", get(serve_asset))
         .route("/api/diff", get(get_diff))
         .route("/api/context", get(get_context))
         .route("/api/config", get(get_config).put(update_config))
