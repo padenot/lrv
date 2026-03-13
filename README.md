@@ -64,13 +64,8 @@ just test-e2e
 just ci
 ```
 
-Frontend changes must rebuild the embedded bundle:
-
-```bash
-npm run build:web
-```
-
-The binary embeds the web assets, so stale frontend output will fail the Rust build on purpose.
+`cargo build` / `cargo run` will rebuild the embedded web bundle automatically when frontend inputs change.
+You can still run `npm run build:web` directly if you only want to rebuild the frontend bundle.
 
 ## License
 

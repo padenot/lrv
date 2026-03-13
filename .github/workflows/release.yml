@@ -69,9 +69,6 @@ jobs:
       - name: Install root web dependencies
         run: npm ci
 
-      - name: Build web bundle
-        run: npm run build:web
-
       - name: Install musl tools
         if: matrix.target == 'x86_64-unknown-linux-musl'
         run: |

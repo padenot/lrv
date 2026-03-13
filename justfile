@@ -6,10 +6,10 @@ default:
 build-web:
     npm run build:web
 
-build: build-web
+build:
     cargo build
 
-build-release: build-web
+build-release:
     cargo build --release
 
 install:
@@ -70,7 +70,7 @@ typecheck-web:
 
 check-web: typecheck-web lint-web
 
-ci: fmt-check fmt-web-check check-web build-web lint test-unit
+ci: fmt-check fmt-web-check check-web lint test-unit
 
 ci-e2e:
     just test-e2e

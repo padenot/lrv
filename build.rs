@@ -1,9 +1,10 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::SystemTime;
 
 fn main() {
-    // Re-run when frontend sources/assets/config change so embedded web assets are refreshed.
+    // Re-run when frontend sources/assets/config/deps change so embedded web assets are refreshed.
     println!("cargo:rerun-if-changed=web/src");
     println!("cargo:rerun-if-changed=web/assets/app.css");
     println!("cargo:rerun-if-changed=web/dist/index.html");
@@ -13,23 +14,60 @@ fn main() {
     println!("cargo:rerun-if-changed=package-lock.json");
 
     let bundle = Path::new("web/assets/app/main.js");
+    if frontend_needs_rebuild(bundle) {
+        run_web_build();
+    }
+}
+
+fn frontend_needs_rebuild(bundle: &Path) -> bool {
     if !bundle.exists() {
-        panic!(
-            "Missing web/assets/app/main.js. Run `npm run build:web` before `cargo build`/`cargo run`."
-        );
+        return true;
     }
 
     let bundle_mtime = mtime(bundle).unwrap_or(SystemTime::UNIX_EPOCH);
-    let src_mtime = newest_mtime(Path::new("web/src")).unwrap_or(SystemTime::UNIX_EPOCH);
-    let config_mtime =
-        newest_mtime(Path::new("rolldown.config.mjs")).unwrap_or(SystemTime::UNIX_EPOCH);
+    newest_frontend_input_mtime()
+        .map(|input_mtime| bundle_mtime < input_mtime)
+        .unwrap_or(false)
+}
 
-    let newest_input = src_mtime.max(config_mtime);
-    if bundle_mtime < newest_input {
-        panic!(
-            "Stale web bundle: web/assets/app/main.js is older than web/src or build config. \
-Run `npm run build:web` and retry."
-        );
+fn newest_frontend_input_mtime() -> Option<SystemTime> {
+    let mut newest: Option<SystemTime> = None;
+    for path in [
+        Path::new("web/src"),
+        Path::new("web/assets/app.css"),
+        Path::new("web/dist/index.html"),
+        Path::new("rolldown.config.mjs"),
+        Path::new("tsconfig.web.json"),
+        Path::new("package.json"),
+        Path::new("package-lock.json"),
+    ] {
+        if let Some(t) = newest_mtime(path) {
+            newest = Some(match newest {
+                Some(cur) => cur.max(t),
+                None => t,
+            });
+        }
+    }
+    newest
+}
+
+fn run_web_build() {
+    println!("cargo:warning=web bundle missing or stale; running `npm run build:web`");
+    let npm = if cfg!(windows) { "npm.cmd" } else { "npm" };
+    let output = Command::new(npm).args(["run", "build:web"]).output();
+    match output {
+        Ok(output) if output.status.success() => {}
+        Ok(output) => {
+            panic!(
+                "Failed to rebuild web bundle with `npm run build:web` (status: {}).\nstdout:\n{}\nstderr:\n{}",
+                output.status,
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr),
+            );
+        }
+        Err(err) => {
+            panic!("Failed to run `npm run build:web`: {err}. Install Node.js + npm, then retry.");
+        }
     }
 }
 
