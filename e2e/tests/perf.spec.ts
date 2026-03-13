@@ -78,6 +78,10 @@ function findMeasure(entries: PerfTimelineEntry[], name: string): PerfTimelineEn
   return entries.find((e) => e.entryType === 'measure' && e.name === name) || null;
 }
 
+function finiteValues(values: Array<number | null | undefined>): number[] {
+  return values.filter((value): value is number => Number.isFinite(value));
+}
+
 async function startServer(port: number = 0): Promise<void> {
   if (!testRepoPath) {
     throw new Error('Test repo not initialized');
@@ -100,6 +104,28 @@ async function startServer(port: number = 0): Promise<void> {
     fs.writeFileSync(serverLog, `[start] ${new Date().toISOString()}\nCMD: ${cmd}\n`);
     serverProcess = spawn('bash', ['-c', cmd], { stdio: ['inherit', 'pipe', 'pipe'] });
     let output = '';
+    let settled = false;
+    const startupTimeout = setTimeout(() => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      console.error('[server] startup timeout. Partial output:\n' + output);
+      try {
+        fs.appendFileSync(serverLog, `\n[timeout]\n${output}\n`);
+      } catch {}
+      reject(new Error('Server startup timeout'));
+    }, 15000);
+
+    const resolveReady = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(startupTimeout);
+      setTimeout(resolve, 300);
+    };
+
     const check = (d: Buffer) => {
       const t = d.toString();
       output += t;
@@ -114,21 +140,19 @@ async function startServer(port: number = 0): Promise<void> {
       const m = t.match(/http:\/\/[^\s]+:\d+/);
       if (m && !serverUrl) {
         serverUrl = m[0];
-      }
-      if (output.includes('Available at:')) {
-        setTimeout(resolve, 300);
+        resolveReady();
       }
     };
     serverProcess.stdout?.on('data', check);
     serverProcess.stderr?.on('data', check);
-    serverProcess.on('error', reject);
-    setTimeout(() => {
-      console.error('[server] startup timeout. Partial output:\n' + output);
-      try {
-        fs.appendFileSync(serverLog, `\n[timeout]\n${output}\n`);
-      } catch {}
-      reject(new Error('Server startup timeout'));
-    }, 15000);
+    serverProcess.on('error', (error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(startupTimeout);
+      reject(error);
+    });
   });
 }
 
@@ -175,7 +199,7 @@ test.describe('Perf Bench', () => {
     }
   });
 
-  test('app init performance (10x)', async ({ page }) => {
+  test('app init performance', async ({ page }) => {
     const pageLog = path.join(outDir, `page-${Date.now()}.log`);
     const w = (s: string) => {
       try {
@@ -352,6 +376,9 @@ test.describe('Perf Bench', () => {
     expect(samples.length).toBe(iterations);
     expect(navToDiffVisible.length).toBe(iterations);
     expect(navToDiffVisibleHarness.length).toBe(iterations);
+    expect(finiteValues(samples)).toHaveLength(iterations);
+    expect(finiteValues(navToDiffVisible)).toHaveLength(iterations);
+    expect(finiteValues(navToDiffVisibleHarness)).toHaveLength(iterations);
   });
 
   test('rapid file switching perf', async ({ page }) => {
@@ -421,16 +448,23 @@ test.describe('Perf Bench', () => {
         .click();
       await page.locator('.monaco-editor').first().waitFor({ timeout: 30000 });
     }
+    const fileSwitchValues = await page.evaluate(() => {
+      const metrics = (window as any).Perf?.getMetrics?.();
+      return Array.isArray(metrics?.fileSwitch) ? metrics.fileSwitch : [];
+    });
+
     // Persist
     try {
-      const metrics = await page.evaluate(() => (window as any).Perf?.getMetrics?.());
       const outDir = path.resolve(__dirname, '../test-results');
       if (!fs.existsSync(outDir)) {
         fs.mkdirSync(outDir, { recursive: true });
       }
       const outPath = path.join(outDir, 'perf-switch.json');
-      fs.writeFileSync(outPath, JSON.stringify({ fileSwitch: metrics?.fileSwitch || [] }, null, 2));
+      fs.writeFileSync(outPath, JSON.stringify({ fileSwitch: fileSwitchValues }, null, 2));
       console.info(`[perf] wrote metrics to ${outPath}`);
     } catch {}
+
+    expect(fileSwitchValues.length).toBeGreaterThanOrEqual(6);
+    expect(finiteValues(fileSwitchValues)).toHaveLength(fileSwitchValues.length);
   });
 });
