@@ -1301,13 +1301,17 @@ var FileLoadingMethods = class {
 		});
 		window.Perf.mark("loadFile:setModel:end");
 		window.Perf.measure("loadFile:setModel", "loadFile:setModel:start", "loadFile:setModel:end");
+		let revealed = false;
 		const reveal = () => {
+			if (revealed) return;
+			revealed = true;
 			editorContainer.style.opacity = "";
 		};
-		const fallback = setTimeout(reveal, 300);
-		const scrollReset = diffEditor.onDidUpdateDiff(() => {
+		const fallback = setTimeout(reveal, 500);
+		let scrollReset;
+		scrollReset = diffEditor.onDidUpdateDiff(() => {
 			clearTimeout(fallback);
-			scrollReset.dispose();
+			scrollReset?.dispose();
 			diffEditor.getModifiedEditor().setScrollTop(0);
 			diffEditor.getOriginalEditor().setScrollTop(0);
 			reveal();

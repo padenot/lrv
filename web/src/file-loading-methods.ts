@@ -164,11 +164,20 @@ export class FileLoadingMethods {
     });
     window.Perf.mark('loadFile:setModel:end');
     window.Perf.measure('loadFile:setModel', 'loadFile:setModel:start', 'loadFile:setModel:end');
-    const reveal = () => { editorContainer.style.opacity = ''; };
-    const fallback = setTimeout(reveal, 300);
-    const scrollReset = diffEditor.onDidUpdateDiff(() => {
+    let revealed = false;
+    const reveal = () => {
+      if (revealed) return;
+      revealed = true;
+      editorContainer.style.opacity = '';
+    };
+    const fallback = setTimeout(reveal, 500);
+    // Use `let` so the callback can reference scrollReset safely even if
+    // onDidUpdateDiff fires synchronously during listener registration
+    // (const would be in TDZ, causing a ReferenceError that silences reveal).
+    let scrollReset: ReturnType<typeof diffEditor.onDidUpdateDiff>;
+    scrollReset = diffEditor.onDidUpdateDiff(() => {
       clearTimeout(fallback);
-      scrollReset.dispose();
+      scrollReset?.dispose();
       diffEditor.getModifiedEditor().setScrollTop(0);
       diffEditor.getOriginalEditor().setScrollTop(0);
       reveal();
