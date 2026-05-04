@@ -27,12 +27,24 @@ lrv --cmd "jj diff --git"
 lrv --file changes.patch
 ```
 
+To review a commit series (all commits in a branch at once):
+
+```bash
+lrv --series "trunk()..@"          # jj revset
+lrv --series "main..HEAD"          # git range
+lrv --series "HEAD~5..HEAD"        # last 5 commits
+```
+
+The UI shows a commit strip for navigating between commits. Comments track
+which commit they belong to and are grouped per commit in the output.
+
 Useful flags:
 
 ```text
 --no-open          Don't auto-open a browser
 --format text      Print comments as text instead of JSON
 --title "..."      Show a custom title in the header
+--series <RANGE>   Review a jj revset or git range as a commit series
 --bind <ADDR>      Bind a specific address (default: 127.0.0.1)
 --public           Bind on all interfaces
 --tailscale        Also bind detected Tailscale IPv4 addresses
