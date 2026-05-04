@@ -93,7 +93,11 @@ const CUSTOM_THEMES = {
 			"editor.lineHighlightBackground": "#073642",
 			"editorCursor.foreground": "#839496",
 			"editor.selectionBackground": "#073642",
-			"editor.inactiveSelectionBackground": "#073642"
+			"editor.inactiveSelectionBackground": "#073642",
+			"diffEditor.insertedLineBackground": "#22863a18",
+			"diffEditor.insertedTextBackground": "#22863a33",
+			"diffEditor.removedLineBackground": "#cf222e18",
+			"diffEditor.removedTextBackground": "#cf222e33"
 		}
 	},
 	"solarized-light": {
@@ -144,7 +148,11 @@ const CUSTOM_THEMES = {
 			"editor.lineHighlightBackground": "#eee8d5",
 			"editorCursor.foreground": "#657b83",
 			"editor.selectionBackground": "#eee8d5",
-			"editor.inactiveSelectionBackground": "#eee8d5"
+			"editor.inactiveSelectionBackground": "#eee8d5",
+			"diffEditor.insertedLineBackground": "#22863a14",
+			"diffEditor.insertedTextBackground": "#22863a2a",
+			"diffEditor.removedLineBackground": "#cf222e14",
+			"diffEditor.removedTextBackground": "#cf222e2a"
 		}
 	},
 	"firefox-devtools-dark": {
@@ -195,7 +203,11 @@ const CUSTOM_THEMES = {
 			"editor.lineHighlightBackground": "#1c1b22",
 			"editorCursor.foreground": "#b1b1b3",
 			"editor.selectionBackground": "#2b2a33",
-			"editor.inactiveSelectionBackground": "#1c1b22"
+			"editor.inactiveSelectionBackground": "#1c1b22",
+			"diffEditor.insertedLineBackground": "#22863a18",
+			"diffEditor.insertedTextBackground": "#22863a33",
+			"diffEditor.removedLineBackground": "#cf222e18",
+			"diffEditor.removedTextBackground": "#cf222e33"
 		}
 	},
 	"firefox-devtools-light": {
@@ -246,7 +258,11 @@ const CUSTOM_THEMES = {
 			"editor.lineHighlightBackground": "#f5f5f5",
 			"editorCursor.foreground": "#222222",
 			"editor.selectionBackground": "#e6e6e6",
-			"editor.inactiveSelectionBackground": "#f0f0f0"
+			"editor.inactiveSelectionBackground": "#f0f0f0",
+			"diffEditor.insertedLineBackground": "#22863a14",
+			"diffEditor.insertedTextBackground": "#22863a2a",
+			"diffEditor.removedLineBackground": "#cf222e14",
+			"diffEditor.removedTextBackground": "#cf222e2a"
 		}
 	},
 	"github-dark": {
@@ -297,7 +313,11 @@ const CUSTOM_THEMES = {
 			"editor.lineHighlightBackground": "#161b22",
 			"editorCursor.foreground": "#c9d1d9",
 			"editor.selectionBackground": "#1f6feb",
-			"editor.inactiveSelectionBackground": "#1f6feb40"
+			"editor.inactiveSelectionBackground": "#1f6feb40",
+			"diffEditor.insertedLineBackground": "#22863a18",
+			"diffEditor.insertedTextBackground": "#22863a33",
+			"diffEditor.removedLineBackground": "#cf222e18",
+			"diffEditor.removedTextBackground": "#cf222e33"
 		}
 	},
 	"github-light": {
@@ -348,7 +368,11 @@ const CUSTOM_THEMES = {
 			"editor.lineHighlightBackground": "#f6f8fa",
 			"editorCursor.foreground": "#24292f",
 			"editor.selectionBackground": "#0969da30",
-			"editor.inactiveSelectionBackground": "#0969da20"
+			"editor.inactiveSelectionBackground": "#0969da20",
+			"diffEditor.insertedLineBackground": "#22863a14",
+			"diffEditor.insertedTextBackground": "#22863a2a",
+			"diffEditor.removedLineBackground": "#cf222e14",
+			"diffEditor.removedTextBackground": "#cf222e2a"
 		}
 	}
 };
