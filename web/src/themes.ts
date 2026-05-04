@@ -169,6 +169,35 @@ export const CUSTOM_THEMES: ThemeMap = {
       'diffEditor.removedTextBackground': '#cf222e2a',
     },
   },
+  'phabricator': {
+    base: 'vs',
+    inherit: true,
+    rules: [
+      { token: 'comment', foreground: '74777D', fontStyle: 'italic' },
+      { token: 'keyword', foreground: '136CB2' },
+      { token: 'number', foreground: 'b33225' },
+      { token: 'string', foreground: '139543' },
+      { token: 'type', foreground: '19558D' },
+      { token: 'class', foreground: '19558D' },
+      { token: 'function', foreground: '136CB2' },
+      { token: 'variable', foreground: '4B4D51' },
+      { token: 'constant', foreground: 'b33225' },
+    ],
+    colors: {
+      'editor.background': '#ffffff',
+      'editor.foreground': '#4B4D51',
+      'editor.lineHighlightBackground': '#f3f5f7',
+      'editorCursor.foreground': '#4B4D51',
+      'editor.selectionBackground': '#136CB230',
+      'editor.inactiveSelectionBackground': '#136CB218',
+      // rgba(151,234,151,0.30) and rgba(151,234,151,0.60)
+      'diffEditor.insertedLineBackground': '#97ea974d',
+      'diffEditor.insertedTextBackground': '#97ea9799',
+      // rgba(251,175,175,0.30) and rgba(251,175,175,0.70)
+      'diffEditor.removedLineBackground': '#fbafaf4d',
+      'diffEditor.removedTextBackground': '#fbafafb3',
+    },
+  },
 };
 
 export const UI_THEME_ACCENTS_HEX = {
@@ -182,5 +211,6 @@ export const UI_THEME_ACCENTS_HEX = {
   'hc-black': '#007acc',
   vs: '#007acc',
   'hc-light': '#007acc',
+  'phabricator': '#136CB2',
 } as const;
 window.UIThemeAccentsHex = UI_THEME_ACCENTS_HEX;

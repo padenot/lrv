@@ -374,6 +374,61 @@ const CUSTOM_THEMES = {
 			"diffEditor.removedLineBackground": "#cf222e14",
 			"diffEditor.removedTextBackground": "#cf222e2a"
 		}
+	},
+	"phabricator": {
+		base: "vs",
+		inherit: true,
+		rules: [
+			{
+				token: "comment",
+				foreground: "74777D",
+				fontStyle: "italic"
+			},
+			{
+				token: "keyword",
+				foreground: "136CB2"
+			},
+			{
+				token: "number",
+				foreground: "b33225"
+			},
+			{
+				token: "string",
+				foreground: "139543"
+			},
+			{
+				token: "type",
+				foreground: "19558D"
+			},
+			{
+				token: "class",
+				foreground: "19558D"
+			},
+			{
+				token: "function",
+				foreground: "136CB2"
+			},
+			{
+				token: "variable",
+				foreground: "4B4D51"
+			},
+			{
+				token: "constant",
+				foreground: "b33225"
+			}
+		],
+		colors: {
+			"editor.background": "#ffffff",
+			"editor.foreground": "#4B4D51",
+			"editor.lineHighlightBackground": "#f3f5f7",
+			"editorCursor.foreground": "#4B4D51",
+			"editor.selectionBackground": "#136CB230",
+			"editor.inactiveSelectionBackground": "#136CB218",
+			"diffEditor.insertedLineBackground": "#97ea974d",
+			"diffEditor.insertedTextBackground": "#97ea9799",
+			"diffEditor.removedLineBackground": "#fbafaf4d",
+			"diffEditor.removedTextBackground": "#fbafafb3"
+		}
 	}
 };
 const UI_THEME_ACCENTS_HEX = {
@@ -386,7 +441,8 @@ const UI_THEME_ACCENTS_HEX = {
 	"vs-dark": "#007acc",
 	"hc-black": "#007acc",
 	vs: "#007acc",
-	"hc-light": "#007acc"
+	"hc-light": "#007acc",
+	"phabricator": "#136CB2"
 };
 window.UIThemeAccentsHex = UI_THEME_ACCENTS_HEX;
 
@@ -2358,6 +2414,7 @@ var DialogMethods = class {
 			optGroup("GitHub", [["github-dark", "GitHub Dark"], ["github-light", "GitHub Light"]]),
 			optGroup("Firefox DevTools", [["firefox-devtools-dark", "Firefox DevTools Dark"], ["firefox-devtools-light", "Firefox DevTools Light"]]),
 			optGroup("Solarized", [["solarized-dark", "Solarized Dark"], ["solarized-light", "Solarized Light"]]),
+			optGroup("Phabricator", [["phabricator", "Phabricator"]]),
 			...userThemeGroup
 		]);
 		const themeHint = el("div", { className: "settings-hint" });

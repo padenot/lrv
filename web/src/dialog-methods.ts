@@ -150,6 +150,9 @@ export class DialogMethods {
         ['solarized-dark', 'Solarized Dark'],
         ['solarized-light', 'Solarized Light'],
       ]),
+      optGroup('Phabricator', [
+        ['phabricator', 'Phabricator'],
+      ]),
       ...userThemeGroup,
     ]);
 
