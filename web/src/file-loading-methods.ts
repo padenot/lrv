@@ -154,33 +154,24 @@ export class FileLoadingMethods {
 
     window.Perf.mark('loadFile:setModel:start');
     const diffEditor = this.editor!;
-    // Hide before setModel so the fold reflow from hideUnchangedRegions is
-    // invisible. Revealed inside onDidUpdateDiff after folds are applied.
-    const editorContainer = diffEditor.getContainerDomNode();
-    editorContainer.style.opacity = '0';
     diffEditor.setModel({
       original: this.originalModel!,
       modified: this.modifiedModel!,
     });
     window.Perf.mark('loadFile:setModel:end');
     window.Perf.measure('loadFile:setModel', 'loadFile:setModel:start', 'loadFile:setModel:end');
-    let revealed = false;
-    const reveal = () => {
-      if (revealed) return;
-      revealed = true;
-      editorContainer.style.opacity = '';
-    };
-    const fallback = setTimeout(reveal, 500);
-    // Use `let` so the callback can reference scrollReset safely even if
-    // onDidUpdateDiff fires synchronously during listener registration
-    // (const would be in TDZ, causing a ReferenceError that silences reveal).
+    // onDidUpdateDiff fires for both "model changed → undefined" and
+    // "undefined → diff ready". Skip the first (null result) so the scroll
+    // reset only runs once the real diff computation is available.
+    // Use `let` (not `const`) so that if onDidUpdateDiff fires synchronously
+    // during registration, scrollReset is still undefined and ?.dispose()
+    // is a safe no-op. The listener then stays alive to catch the real
+    // async diff-ready fire, at which point scrollReset is assigned.
     let scrollReset: ReturnType<typeof diffEditor.onDidUpdateDiff>;
     scrollReset = diffEditor.onDidUpdateDiff(() => {
-      clearTimeout(fallback);
       scrollReset?.dispose();
       diffEditor.getModifiedEditor().setScrollTop(0);
       diffEditor.getOriginalEditor().setScrollTop(0);
-      reveal();
     });
     diffEditor.updateOptions({
       renderSideBySide,

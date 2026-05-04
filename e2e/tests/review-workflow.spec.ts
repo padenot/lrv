@@ -205,6 +205,36 @@ test.describe('Review Workflow E2E', () => {
     await expect(page.locator('#file-list li')).toHaveCount(3);
   });
 
+  test('editor container stays visible and shows content after file switch', async ({ page }) => {
+    await openApp(page);
+
+    const editorReady = () =>
+      page.waitForFunction(
+        () => {
+          const el = document.getElementById('editor-container');
+          if (!el) return false;
+          if (parseFloat(getComputedStyle(el).opacity) < 0.99) return false;
+          return document.querySelectorAll('.monaco-editor .view-line').length > 0;
+        },
+        { timeout: 7000 },
+      );
+
+    // Load first file and wait for content
+    const files = page.locator('#file-list li[data-index]');
+    await files.first().click();
+    await editorReady();
+
+    // Switch to second file and verify content appears again
+    await files.nth(1).click();
+    await editorReady();
+
+    // Opacity must be fully restored
+    const opacity = await page
+      .locator('#editor-container')
+      .evaluate((el) => getComputedStyle(el).opacity);
+    expect(parseFloat(opacity)).toBeGreaterThan(0.99);
+  });
+
   test('should display diff content in both panels', async ({ page }) => {
     await openApp(page);
 

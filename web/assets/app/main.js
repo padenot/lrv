@@ -1293,28 +1293,17 @@ var FileLoadingMethods = class {
 		if (window.DEBUG) console.info("[app] models created for", file.path, "lang", language, "old/new lines", oldContent.split("\n").length, newContent.split("\n").length);
 		window.Perf.mark("loadFile:setModel:start");
 		const diffEditor = this.editor;
-		const editorContainer = diffEditor.getContainerDomNode();
-		editorContainer.style.opacity = "0";
 		diffEditor.setModel({
 			original: this.originalModel,
 			modified: this.modifiedModel
 		});
 		window.Perf.mark("loadFile:setModel:end");
 		window.Perf.measure("loadFile:setModel", "loadFile:setModel:start", "loadFile:setModel:end");
-		let revealed = false;
-		const reveal = () => {
-			if (revealed) return;
-			revealed = true;
-			editorContainer.style.opacity = "";
-		};
-		const fallback = setTimeout(reveal, 500);
 		let scrollReset;
 		scrollReset = diffEditor.onDidUpdateDiff(() => {
-			clearTimeout(fallback);
 			scrollReset?.dispose();
 			diffEditor.getModifiedEditor().setScrollTop(0);
 			diffEditor.getOriginalEditor().setScrollTop(0);
-			reveal();
 		});
 		diffEditor.updateOptions({
 			renderSideBySide,
