@@ -28,5 +28,27 @@ dirs = "6"
 mime_guess = "2.0"
 moz-cli-version-check = "0.2.3"
 
+[[bin]]
+name = "lrv"
+path = "src/main.rs"
+
+[[bin]]
+name = "parse_diff"
+path = "src/bin/parse_diff.rs"
+required-features = ["dev-tools"]
+
+[[bin]]
+name = "simulate_api"
+path = "src/bin/simulate_api.rs"
+required-features = ["dev-tools"]
+
+[[bin]]
+name = "lrv_show"
+path = "src/bin/lrv_show.rs"
+required-features = ["dev-tools"]
+
+[features]
+dev-tools = []
+
 [dev-dependencies]
 tower = "0.5"
