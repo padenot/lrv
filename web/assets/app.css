@@ -901,11 +901,23 @@ body {
 
 /* Series navigation */
 #commit-strip {
-  border-bottom: 1px solid var(--border-color);
   background: var(--bg-secondary);
-  max-height: 180px;
   overflow-y: auto;
   flex-shrink: 0;
+}
+
+.commit-strip-resizer {
+  height: 4px;
+  background: var(--border-color);
+  cursor: ns-resize;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border-color);
+  transition: background 0.1s;
+}
+
+.commit-strip-resizer:hover,
+.commit-strip-resizer.dragging {
+  background: var(--accent-color, #007acc);
 }
 
 .series-nav {

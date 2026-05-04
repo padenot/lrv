@@ -68,6 +68,56 @@ export class FileListMethods {
     });
   }
 
+  setupCommitStripResizer() {
+    const strip = document.getElementById('commit-strip') as HTMLDivElement | null;
+    const resizer = document.getElementById('commit-strip-resizer') as HTMLDivElement | null;
+    const sidebar = document.getElementById('sidebar') as HTMLDivElement | null;
+    if (!strip || !resizer || !sidebar) return;
+
+    const STORAGE_KEY = 'lrv-commit-strip-height-pct';
+    const DEFAULT_PCT = 0.5;
+
+    const sidebarHeight = () => sidebar.getBoundingClientRect().height;
+
+    const applyPct = (pct: number) => {
+      strip.style.height = Math.round(sidebarHeight() * pct) + 'px';
+    };
+
+    const saved = localStorage.getItem(STORAGE_KEY);
+    applyPct(saved !== null ? parseFloat(saved) : DEFAULT_PCT);
+
+    let isResizing = false;
+    let startY = 0;
+    let startHeight = 0;
+
+    resizer.addEventListener('mousedown', (e) => {
+      isResizing = true;
+      startY = e.clientY;
+      startHeight = strip.getBoundingClientRect().height;
+      resizer.classList.add('dragging');
+      document.body.style.cursor = 'ns-resize';
+      document.body.style.userSelect = 'none';
+      e.preventDefault();
+    });
+
+    document.addEventListener('mousemove', (e) => {
+      if (!isResizing) return;
+      const newHeight = startHeight + (e.clientY - startY);
+      const total = sidebarHeight();
+      strip.style.height = Math.max(60, Math.min(newHeight, total - 60)) + 'px';
+    });
+
+    document.addEventListener('mouseup', () => {
+      if (!isResizing) return;
+      isResizing = false;
+      resizer.classList.remove('dragging');
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      const total = sidebarHeight();
+      localStorage.setItem(STORAGE_KEY, String(strip.getBoundingClientRect().height / total));
+    });
+  }
+
   setupFileListControls() {
     const filter = document.getElementById('file-list-filter') as HTMLInputElement | null;
     const collapseAll = document.getElementById('collapse-all-dirs');

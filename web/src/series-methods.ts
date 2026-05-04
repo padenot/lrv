@@ -23,12 +23,15 @@ export class SeriesMethods {
 
   renderSeriesNav() {
     const container = document.getElementById('commit-strip');
+    const resizer = document.getElementById('commit-strip-resizer');
     if (!container) return;
     if (!this.seriesInfo?.is_series) {
       container.style.display = 'none';
+      if (resizer) resizer.style.display = 'none';
       return;
     }
     container.style.display = '';
+    if (resizer) resizer.style.display = '';
     clearEl(container);
 
     const { commits } = this.seriesInfo;

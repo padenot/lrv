@@ -123,6 +123,7 @@ export interface AppContext {
   nextCommit(): void;
   previousCommit(): void;
   setupSidebarResizer(): void;
+  setupCommitStripResizer(): void;
   setupFileListControls(): void;
   expandCurrentFileAncestors(): void;
   setupKeyboardShortcuts(): void;

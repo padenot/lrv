@@ -91,6 +91,7 @@ export class MonacoApp {
   declare showKeyboardHelp: () => void;
   declare showSubmitConfirmation: () => Promise<void>;
   declare setupSidebarResizer: () => void;
+  declare setupCommitStripResizer: () => void;
   declare setupFileListControls: () => void;
   declare setupKeyboardShortcuts: () => void;
 
@@ -458,6 +459,7 @@ export class MonacoApp {
 
     // Sidebar resizer
     this.setupSidebarResizer();
+    this.setupCommitStripResizer();
     this.setupFileListControls();
 
     // Keyboard shortcuts
