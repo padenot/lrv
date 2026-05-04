@@ -2918,7 +2918,11 @@ var MonacoApp = class {
 			setVar("--bg-secondary", cs2.backgroundColor || cs.backgroundColor);
 			setVar("--bg-elevated", cs2.backgroundColor || cs.backgroundColor);
 			setVar("--text-primary", getComputedStyle(document.body).color);
-			setVar("--text-secondary", "");
+			const rgbNums = cs.backgroundColor.match(/\d+/g);
+			if (rgbNums && rgbNums.length >= 3) {
+				const lum = (.2126 * +rgbNums[0] + .7152 * +rgbNums[1] + .0722 * +rgbNums[2]) / 255;
+				document.documentElement.style.setProperty("--text-secondary", lum > .5 ? "#595c60" : "#858585");
+			}
 		}
 	}
 	defineCustomThemes() {

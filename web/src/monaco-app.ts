@@ -340,7 +340,13 @@ export class MonacoApp {
       // Text colors: use editor foreground if available else fallback to body
       const bodyCs = getComputedStyle(document.body);
       setVar('--text-primary', bodyCs.color);
-      setVar('--text-secondary', ''); // allow CSS to fall back; optional refinement
+      // Derive secondary text from background luminance: light themes need a
+      // darker secondary (the :root default #858585 is too light on white).
+      const rgbNums = cs.backgroundColor.match(/\d+/g);
+      if (rgbNums && rgbNums.length >= 3) {
+        const lum = (0.2126 * +rgbNums[0]! + 0.7152 * +rgbNums[1]! + 0.0722 * +rgbNums[2]!) / 255;
+        document.documentElement.style.setProperty('--text-secondary', lum > 0.5 ? '#595c60' : '#858585');
+      }
     }
   }
 
