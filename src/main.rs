@@ -657,7 +657,7 @@ async fn main() -> Result<()> {
 
     // Output comments
     let comments = state.comments.lock().await;
-    let output = output::format_output(comments.clone(), &output_format);
+    let output = output::format_output(comments.clone(), &output_format, &state.diffs, is_series);
     println!("{}", output);
 
     Ok(())

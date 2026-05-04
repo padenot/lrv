@@ -1,57 +1,93 @@
-use crate::types::{Comment, ReviewOutput};
+use crate::types::{Comment, CommitReview, DiffResponse, ReviewOutput, SeriesReviewOutput};
 use anyhow::Result;
 use std::fmt;
 
-pub fn format_output(comments: Vec<Comment>, format: &OutputFormat) -> String {
+pub fn format_output(
+    comments: Vec<Comment>,
+    format: &OutputFormat,
+    diffs: &[DiffResponse],
+    is_series: bool,
+) -> String {
     match format {
-        OutputFormat::Json => format_json(&comments),
-        OutputFormat::Text => format_text(&comments),
+        OutputFormat::Json => format_json(&comments, diffs, is_series),
+        OutputFormat::Text => format_text(&comments, diffs, is_series),
     }
 }
 
-fn format_json(comments: &[Comment]) -> String {
+fn format_json(comments: &[Comment], diffs: &[DiffResponse], is_series: bool) -> String {
+    if is_series {
+        format_json_series(comments, diffs)
+    } else {
+        format_json_single(comments)
+    }
+}
+
+fn format_json_single(comments: &[Comment]) -> String {
+    let n = comments.len();
+    let f = count_unique_files(comments);
     let summary = format!(
         "{} comment{} on {} file{}",
-        comments.len(),
-        if comments.len() == 1 { "" } else { "s" },
-        count_unique_files(comments),
-        if count_unique_files(comments) == 1 {
-            ""
-        } else {
-            "s"
-        }
+        n,
+        if n == 1 { "" } else { "s" },
+        f,
+        if f == 1 { "" } else { "s" },
     );
-
-    let output = ReviewOutput {
-        status: "completed".to_string(),
-        comments: comments.to_vec(),
-        summary,
-    };
-
+    let output = ReviewOutput { status: "completed".to_string(), comments: comments.to_vec(), summary };
     serde_json::to_string_pretty(&output).unwrap_or_else(|_| "{}".to_string())
 }
 
-fn format_text(comments: &[Comment]) -> String {
-    let mut output = String::new();
-    output.push_str(&format!(
-        "Review completed with {} comments:\n\n",
-        comments.len()
-    ));
+fn format_json_series(comments: &[Comment], diffs: &[DiffResponse]) -> String {
+    let mut by_commit: std::collections::BTreeMap<usize, Vec<Comment>> =
+        std::collections::BTreeMap::new();
+    for comment in comments {
+        let mut c = comment.clone();
+        c.commit_idx = None; // redundant in nested form
+        by_commit.entry(comment.commit_idx.unwrap_or(0)).or_default().push(c);
+    }
 
-    // Group by commit_idx if present
-    let has_commits = comments.iter().any(|c| c.commit_idx.is_some());
-    if has_commits {
+    let commits: Vec<CommitReview> = diffs
+        .iter()
+        .enumerate()
+        .map(|(idx, diff)| CommitReview {
+            idx,
+            commit_hash: diff.commit_hash.clone(),
+            commit_message: diff.commit_message.clone(),
+            comments: by_commit.remove(&idx).unwrap_or_default(),
+        })
+        .collect();
+
+    let total = comments.len();
+    let with_comments = commits.iter().filter(|c| !c.comments.is_empty()).count();
+    let summary = format!(
+        "{} comment{} across {} commit{}",
+        total,
+        if total == 1 { "" } else { "s" },
+        with_comments,
+        if with_comments == 1 { "" } else { "s" },
+    );
+
+    let output = SeriesReviewOutput { status: "completed".to_string(), summary, commits };
+    serde_json::to_string_pretty(&output).unwrap_or_else(|_| "{}".to_string())
+}
+
+fn format_text(comments: &[Comment], diffs: &[DiffResponse], is_series: bool) -> String {
+    let mut output = String::new();
+    output.push_str(&format!("Review completed with {} comments:\n\n", comments.len()));
+
+    if is_series && !diffs.is_empty() {
         let mut by_commit: std::collections::BTreeMap<usize, Vec<&Comment>> =
             std::collections::BTreeMap::new();
         for comment in comments {
-            by_commit
-                .entry(comment.commit_idx.unwrap_or(0))
-                .or_default()
-                .push(comment);
+            by_commit.entry(comment.commit_idx.unwrap_or(0)).or_default().push(comment);
         }
-        for (idx, group) in &by_commit {
-            output.push_str(&format!("=== Commit {} ===\n\n", idx + 1));
-            for comment in group {
+        for (idx, diff) in diffs.iter().enumerate() {
+            let group = by_commit.get(&idx);
+            if group.map(|g| g.is_empty()).unwrap_or(true) {
+                continue;
+            }
+            let msg = diff.commit_message.as_deref().and_then(|m| m.lines().next()).unwrap_or("(no message)");
+            output.push_str(&format!("=== Commit {} — {} ===\n\n", idx + 1, msg));
+            for comment in group.unwrap() {
                 format_text_comment(&mut output, comment);
             }
         }
@@ -69,10 +105,7 @@ fn format_text_comment(output: &mut String, comment: &Comment) {
         crate::types::CommentLine::Single(line) => line.to_string(),
         crate::types::CommentLine::Range((start, end)) => format!("{}-{}", start, end),
     };
-    output.push_str(&format!(
-        "{}:{} [{}]\n",
-        comment.file, line_display, comment.side
-    ));
+    output.push_str(&format!("{}:{} [{}]\n", comment.file, line_display, comment.side));
     output.push_str(&format!("  {}\n\n", comment.body));
 }
 

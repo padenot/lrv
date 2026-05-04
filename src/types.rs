@@ -116,6 +116,23 @@ pub struct ReviewOutput {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommitReview {
+    pub idx: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub commit_hash: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub commit_message: Option<String>,
+    pub comments: Vec<Comment>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SeriesReviewOutput {
+    pub status: String,
+    pub summary: String,
+    pub commits: Vec<CommitReview>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectContext {
     pub working_directory: String,
     pub git_branch: Option<String>,
