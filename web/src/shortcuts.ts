@@ -31,6 +31,6 @@ export const KEYBOARD_SHORTCUTS: KeyboardShortcut[] = [
   { keys: ['Escape'], action: 'clearFocus', description: 'Clear focus' },
   { keys: ['Mod+Shift+Enter'], action: 'submitReview', description: 'Submit review' },
   { keys: ['?'], action: 'showHelp', description: 'Show keyboard shortcuts' },
-  { keys: ['Mod+Shift+ArrowRight', 'Mod+Shift+L'], action: 'nextCommit', description: 'Next commit (series mode)' },
-  { keys: ['Mod+Shift+ArrowLeft', 'Mod+Shift+H'], action: 'previousCommit', description: 'Previous commit (series mode)' },
+  { keys: ['Alt+ArrowDown', 'Mod+Shift+ArrowRight', 'Mod+Shift+L'], action: 'nextCommit', description: 'Next commit (series mode)' },
+  { keys: ['Alt+ArrowUp', 'Mod+Shift+ArrowLeft', 'Mod+Shift+H'], action: 'previousCommit', description: 'Previous commit (series mode)' },
 ];

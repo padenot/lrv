@@ -760,6 +760,47 @@ var FileListMethods = class {
 			}
 		});
 	}
+	setupCommitStripResizer() {
+		const strip = document.getElementById("commit-strip");
+		const resizer = document.getElementById("commit-strip-resizer");
+		const sidebar = document.getElementById("sidebar");
+		if (!strip || !resizer || !sidebar) return;
+		const STORAGE_KEY = "lrv-commit-strip-height-pct";
+		const DEFAULT_PCT = .5;
+		const sidebarHeight = () => sidebar.getBoundingClientRect().height;
+		const applyPct = (pct) => {
+			strip.style.height = Math.round(sidebarHeight() * pct) + "px";
+		};
+		const saved = localStorage.getItem(STORAGE_KEY);
+		applyPct(saved !== null ? parseFloat(saved) : DEFAULT_PCT);
+		let isResizing = false;
+		let startY = 0;
+		let startHeight = 0;
+		resizer.addEventListener("mousedown", (e) => {
+			isResizing = true;
+			startY = e.clientY;
+			startHeight = strip.getBoundingClientRect().height;
+			resizer.classList.add("dragging");
+			document.body.style.cursor = "ns-resize";
+			document.body.style.userSelect = "none";
+			e.preventDefault();
+		});
+		document.addEventListener("mousemove", (e) => {
+			if (!isResizing) return;
+			const newHeight = startHeight + (e.clientY - startY);
+			const total = sidebarHeight();
+			strip.style.height = Math.max(60, Math.min(newHeight, total - 60)) + "px";
+		});
+		document.addEventListener("mouseup", () => {
+			if (!isResizing) return;
+			isResizing = false;
+			resizer.classList.remove("dragging");
+			document.body.style.cursor = "";
+			document.body.style.userSelect = "";
+			const total = sidebarHeight();
+			localStorage.setItem(STORAGE_KEY, String(strip.getBoundingClientRect().height / total));
+		});
+	}
 	setupFileListControls() {
 		const filter = document.getElementById("file-list-filter");
 		const collapseAll = document.getElementById("collapse-all-dirs");
@@ -1398,12 +1439,20 @@ const KEYBOARD_SHORTCUTS = [
 		description: "Show keyboard shortcuts"
 	},
 	{
-		keys: ["Mod+Shift+ArrowRight", "Mod+Shift+L"],
+		keys: [
+			"Alt+ArrowDown",
+			"Mod+Shift+ArrowRight",
+			"Mod+Shift+L"
+		],
 		action: "nextCommit",
 		description: "Next commit (series mode)"
 	},
 	{
-		keys: ["Mod+Shift+ArrowLeft", "Mod+Shift+H"],
+		keys: [
+			"Alt+ArrowUp",
+			"Mod+Shift+ArrowLeft",
+			"Mod+Shift+H"
+		],
 		action: "previousCommit",
 		description: "Previous commit (series mode)"
 	}
@@ -1486,11 +1535,14 @@ var NavigationMethods = class {
 		const parts = combo.split("+");
 		let needsMod = false;
 		let needsShift = false;
+		let needsAlt = false;
 		let key = "";
 		for (const part of parts) if (part === "Mod") needsMod = true;
 		else if (part === "Shift") needsShift = true;
+		else if (part === "Alt") needsAlt = true;
 		else key = part;
 		if (needsMod !== modKey) return false;
+		if (needsAlt !== e.altKey) return false;
 		if (![
 			"?",
 			"!",
@@ -2489,12 +2541,15 @@ var DialogMethods = class {
 var SeriesMethods = class {
 	renderSeriesNav() {
 		const container = document.getElementById("commit-strip");
+		const resizer = document.getElementById("commit-strip-resizer");
 		if (!container) return;
 		if (!this.seriesInfo?.is_series) {
 			container.style.display = "none";
+			if (resizer) resizer.style.display = "none";
 			return;
 		}
 		container.style.display = "";
+		if (resizer) resizer.style.display = "";
 		clearEl(container);
 		const { commits } = this.seriesInfo;
 		const nav = el("div", { className: "series-nav" });
@@ -2865,6 +2920,7 @@ var MonacoApp = class {
 			if (b) b.style.display = "";
 		}
 		this.setupSidebarResizer();
+		this.setupCommitStripResizer();
 		this.setupFileListControls();
 		this.setupKeyboardShortcuts();
 	}

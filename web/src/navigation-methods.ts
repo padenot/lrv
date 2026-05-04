@@ -135,6 +135,7 @@ export class NavigationMethods {
     const parts = combo.split('+');
     let needsMod = false;
     let needsShift = false;
+    let needsAlt = false;
     let key = '';
 
     for (const part of parts) {
@@ -142,6 +143,8 @@ export class NavigationMethods {
         needsMod = true;
       } else if (part === 'Shift') {
         needsShift = true;
+      } else if (part === 'Alt') {
+        needsAlt = true;
       } else {
         key = part;
       }
@@ -149,6 +152,11 @@ export class NavigationMethods {
 
     // Check Mod key
     if (needsMod !== modKey) {
+      return false;
+    }
+
+    // Check Alt key
+    if (needsAlt !== e.altKey) {
       return false;
     }
 
