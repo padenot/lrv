@@ -599,14 +599,21 @@ body {
   z-index: 10;
 }
 
-/* Cover while diff reloads so hideUnchangedRegions fold reflow is invisible */
-#editor-container.diff-loading::after {
+/* Cover while diff reloads so hideUnchangedRegions fold reflow is invisible.
+   Always present at opacity 0; snaps to 1 on load start, fades out on reveal. */
+#editor-container::after {
   content: '';
   position: absolute;
   inset: 0;
   background: var(--bg-primary);
   z-index: 100;
   pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.08s ease;
+}
+#editor-container.diff-loading::after {
+  opacity: 1;
+  transition: none;
 }
 
 /* Remove custom hover backgrounds to avoid masking Monaco diff overlays */
