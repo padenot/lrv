@@ -29,12 +29,14 @@ fn test_app_state_construction() {
 
     // This would fail to compile if AppState fields change
     let _state = lrv::server::AppState {
-        diff: Arc::new(diff_data),
+        diffs: Arc::new(vec![diff_data]),
         comments: Arc::new(Mutex::new(vec![])),
         shutdown_tx: Arc::new(Mutex::new(Some(shutdown_tx))),
         config: Arc::new(Mutex::new(config)),
         context: Arc::new(context),
-        old_cache: std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+        old_caches: std::sync::Arc::new(vec![tokio::sync::Mutex::new(std::collections::HashMap::new())]),
+        new_caches: std::sync::Arc::new(vec![tokio::sync::Mutex::new(std::collections::HashMap::new())]),
+        is_series: false,
     };
 }
 
@@ -68,12 +70,14 @@ fn test_create_router() {
     let (shutdown_tx, _rx) = tokio::sync::mpsc::channel::<()>(1);
 
     let state = lrv::server::AppState {
-        diff: Arc::new(diff_data),
+        diffs: Arc::new(vec![diff_data]),
         comments: Arc::new(Mutex::new(vec![])),
         shutdown_tx: Arc::new(Mutex::new(Some(shutdown_tx))),
         config: Arc::new(Mutex::new(config)),
         context: Arc::new(context),
-        old_cache: std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+        old_caches: std::sync::Arc::new(vec![tokio::sync::Mutex::new(std::collections::HashMap::new())]),
+        new_caches: std::sync::Arc::new(vec![tokio::sync::Mutex::new(std::collections::HashMap::new())]),
+        is_series: false,
     };
 
     // Should not panic
@@ -95,6 +99,7 @@ async fn test_comment_storage() {
             line: lrv::types::CommentLine::Single(1),
             side: lrv::types::Side::New,
             body: "test comment".to_string(),
+            commit_idx: None,
         });
     }
 

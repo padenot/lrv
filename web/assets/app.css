@@ -858,3 +858,115 @@ body {
 .checkbox-wrapper span {
   color: var(--text-secondary);
 }
+
+/* Make the Monaco diff hidden-lines expand strips visible as clickable buttons */
+.monaco-editor .diff-hidden-lines .top,
+.monaco-editor .diff-hidden-lines .bottom {
+  height: 18px !important;
+  border: none !important;
+  background-color: transparent !important;
+  cursor: pointer !important;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.4;
+  transition: opacity 0.15s ease;
+}
+
+.monaco-editor .diff-hidden-lines .top::after,
+.monaco-editor .diff-hidden-lines .bottom::after {
+  content: '';
+  width: 40px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--vscode-focusBorder, #007fd4);
+  display: block;
+}
+
+.monaco-editor .diff-hidden-lines .top::after {
+  box-shadow: 0 -3px 0 var(--vscode-focusBorder, #007fd4),
+              0 3px 0 var(--vscode-focusBorder, #007fd4);
+}
+
+.monaco-editor .diff-hidden-lines .bottom::after {
+  box-shadow: 0 -3px 0 var(--vscode-focusBorder, #007fd4),
+              0 3px 0 var(--vscode-focusBorder, #007fd4);
+}
+
+.monaco-editor .diff-hidden-lines .top:hover,
+.monaco-editor .diff-hidden-lines .bottom:hover {
+  opacity: 1;
+  background-color: transparent !important;
+}
+
+/* Series navigation */
+#commit-strip {
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  max-height: 180px;
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+
+.series-nav {
+  display: flex;
+  flex-direction: column;
+}
+
+.series-commit {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  border-left: 2px solid transparent;
+  transition: background 0.1s;
+}
+
+.series-commit:hover {
+  background: var(--bg-elevated);
+}
+
+.series-commit.active {
+  border-left-color: var(--accent-color, #f97316);
+  background: var(--bg-elevated);
+}
+
+.series-commit-num {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  min-width: 16px;
+  padding-top: 2px;
+}
+
+.series-commit-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.series-commit-msg {
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-primary);
+}
+
+.series-commit-meta {
+  font-size: 10px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+.series-hash {
+  font-family: var(--font-mono);
+}
+
+.delta-add {
+  color: #22c55e;
+}
+
+.delta-del {
+  color: #ef4444;
+}

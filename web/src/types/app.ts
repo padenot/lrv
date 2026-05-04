@@ -47,6 +47,20 @@ export type AppContextData = {
   is_public?: boolean;
 };
 
+export type CommitSummary = {
+  idx: number;
+  commit_hash?: string;
+  commit_author?: string;
+  commit_date?: string;
+  commit_message?: string;
+  stats: DiffStats;
+};
+
+export type SeriesInfo = {
+  is_series: boolean;
+  commits: CommitSummary[];
+};
+
 export type DiffStats = {
   files_changed: number;
   additions: number;
@@ -56,6 +70,7 @@ export type DiffStats = {
 export interface AppContext {
   commentManager: {
     comments: ReviewComment[];
+    currentCommitIdx: number | null;
     getComments(): ReviewComment[];
     getCommentsForFile(file: string): ReviewComment[];
     addComment(comment: ReviewComment): void;
@@ -85,6 +100,7 @@ export interface AppContext {
   files: DiffFile[];
   stats: DiffStats;
   fileCache: Record<string, FilePair>;
+  fileCacheKey(filePath: string): string;
   fileHunks: Record<string, HunkRange[]>;
   currentHunkIndex: Record<string, number>;
   config: AppConfig;
@@ -97,9 +113,15 @@ export interface AppContext {
   _commitViewEl: HTMLElement | null;
   collapsedDirs: Set<string>;
   fileListFilter: string;
+  seriesInfo: SeriesInfo | null;
+  currentCommitIdx: number;
 
   updateUI(): void;
   renderFileList(): void;
+  renderSeriesNav(): void;
+  loadCommit(idx: number): Promise<void>;
+  nextCommit(): void;
+  previousCommit(): void;
   setupSidebarResizer(): void;
   setupFileListControls(): void;
   expandCurrentFileAncestors(): void;

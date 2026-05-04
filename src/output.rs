@@ -38,19 +38,42 @@ fn format_text(comments: &[Comment]) -> String {
         comments.len()
     ));
 
-    for comment in comments {
-        let line_display = match &comment.line {
-            crate::types::CommentLine::Single(line) => line.to_string(),
-            crate::types::CommentLine::Range((start, end)) => format!("{}-{}", start, end),
-        };
-        output.push_str(&format!(
-            "{}:{} [{}]\n",
-            comment.file, line_display, comment.side
-        ));
-        output.push_str(&format!("  {}\n\n", comment.body));
+    // Group by commit_idx if present
+    let has_commits = comments.iter().any(|c| c.commit_idx.is_some());
+    if has_commits {
+        let mut by_commit: std::collections::BTreeMap<usize, Vec<&Comment>> =
+            std::collections::BTreeMap::new();
+        for comment in comments {
+            by_commit
+                .entry(comment.commit_idx.unwrap_or(0))
+                .or_default()
+                .push(comment);
+        }
+        for (idx, group) in &by_commit {
+            output.push_str(&format!("=== Commit {} ===\n\n", idx + 1));
+            for comment in group {
+                format_text_comment(&mut output, comment);
+            }
+        }
+    } else {
+        for comment in comments {
+            format_text_comment(&mut output, comment);
+        }
     }
 
     output
+}
+
+fn format_text_comment(output: &mut String, comment: &Comment) {
+    let line_display = match &comment.line {
+        crate::types::CommentLine::Single(line) => line.to_string(),
+        crate::types::CommentLine::Range((start, end)) => format!("{}-{}", start, end),
+    };
+    output.push_str(&format!(
+        "{}:{} [{}]\n",
+        comment.file, line_display, comment.side
+    ));
+    output.push_str(&format!("  {}\n\n", comment.body));
 }
 
 fn count_unique_files(comments: &[Comment]) -> usize {

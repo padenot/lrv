@@ -9,7 +9,7 @@ use clap::{ArgAction, Parser};
 use lrv::netutil;
 use moz_cli_version_check::VersionChecker;
 use std::env;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::process::Command;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex, Notify};
@@ -202,6 +202,151 @@ struct Args {
     /// Enable development HTTP tracing (tower_http::trace). Disabled by default.
     #[arg(long)]
     dev_log: bool,
+
+    /// Review a commit series (jj revset or git range, e.g. "trunk()..@" or "HEAD~5..HEAD")
+    #[arg(long)]
+    series: Option<String>,
+}
+
+fn is_jj_repo(root: &str) -> bool {
+    std::path::Path::new(root).join(".jj").exists()
+}
+
+fn enumerate_series_commits(revset: &str, working_dir: &str) -> Result<Vec<String>> {
+    if is_jj_repo(working_dir) {
+        let output = Command::new("jj")
+            .args(["log", "--no-graph", "--reversed", "-r", revset, "-T", "commit_id ++ \"\\n\""])
+            .current_dir(working_dir)
+            .output()
+            .context("Failed to run jj log")?;
+        if !output.status.success() {
+            anyhow::bail!("jj log failed: {}", String::from_utf8_lossy(&output.stderr));
+        }
+        let ids: Vec<String> = String::from_utf8(output.stdout)
+            .context("jj log output is not valid UTF-8")?
+            .lines()
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty())
+            .collect();
+        Ok(ids)
+    } else {
+        let output = Command::new("git")
+            .args(["log", "--format=%H", "--reverse", revset])
+            .current_dir(working_dir)
+            .output()
+            .context("Failed to run git log")?;
+        if !output.status.success() {
+            anyhow::bail!("git log failed: {}", String::from_utf8_lossy(&output.stderr));
+        }
+        let hashes: Vec<String> = String::from_utf8(output.stdout)
+            .context("git log output is not valid UTF-8")?
+            .lines()
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty())
+            .collect();
+        Ok(hashes)
+    }
+}
+
+struct Spinner {
+    stop: Arc<std::sync::atomic::AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Spinner {
+    fn start(label: &str) -> Self {
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stop_clone = stop.clone();
+        let label = label.to_string();
+        let thread = std::thread::spawn(move || {
+            let frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+            let mut i = 0usize;
+            let mut stderr = std::io::stderr();
+            while !stop_clone.load(std::sync::atomic::Ordering::Relaxed) {
+                let _ = write!(stderr, "\r{} {}  ", frames[i % frames.len()], label);
+                let _ = stderr.flush();
+                std::thread::sleep(std::time::Duration::from_millis(80));
+                i += 1;
+            }
+        });
+        Self { stop, thread: Some(thread) }
+    }
+
+    fn finish(mut self, message: &str) {
+        self.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        if let Some(t) = self.thread.take() {
+            let _ = t.join();
+        }
+        eprintln!("\r✓ {}  ", message);
+    }
+}
+
+impl Drop for Spinner {
+    fn drop(&mut self) {
+        self.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        if let Some(t) = self.thread.take() {
+            let _ = t.join();
+        }
+        // clear the spinner line
+        let _ = write!(std::io::stderr(), "\r");
+    }
+}
+
+// Fetch all diffs for a jj series in one subprocess call and parse them.
+// Returns diffs in revset order (oldest first, matching --reversed).
+fn get_series_diffs_jj(revset: &str, working_dir: &str) -> Result<Vec<crate::types::DiffResponse>> {
+    let template = concat!(
+        r#"concat("Commit ID: ", commit_id, "\nAuthor: ", author.name(), "#,
+        r#"" <", author.email(), "> (", author.timestamp().format("%Y-%m-%d %H:%M:%S"), ")\n\n    ", description, "\n\n")"#
+    );
+    let output = Command::new("jj")
+        .args(["log", "--no-graph", "--reversed", "-r", revset, "-T", template, "-p", "--git"])
+        .current_dir(working_dir)
+        .output()
+        .context("Failed to run jj log")?;
+    if !output.status.success() {
+        anyhow::bail!("jj log failed: {}", String::from_utf8_lossy(&output.stderr));
+    }
+    let text = String::from_utf8(output.stdout).context("jj log output is not valid UTF-8")?;
+
+    // Split on commit boundaries: each commit starts with "Commit ID: "
+    let parts: Vec<&str> = text.split("\nCommit ID: ").collect();
+    parts
+        .iter()
+        .enumerate()
+        .map(|(i, part)| {
+            let chunk = if i == 0 {
+                part.to_string()
+            } else {
+                format!("Commit ID: {}", part)
+            };
+            diff::parse_diff(&chunk).context("Failed to parse commit diff")
+        })
+        .collect()
+}
+
+fn get_commit_diff_text(commit_id: &str, working_dir: &str) -> Result<String> {
+    if is_jj_repo(working_dir) {
+        let output = Command::new("jj")
+            .args(["show", "--git", "-r", commit_id])
+            .current_dir(working_dir)
+            .output()
+            .context("Failed to run jj show")?;
+        if !output.status.success() {
+            anyhow::bail!("jj show failed: {}", String::from_utf8_lossy(&output.stderr));
+        }
+        String::from_utf8(output.stdout).context("jj show output is not valid UTF-8")
+    } else {
+        let output = Command::new("git")
+            .args(["show", commit_id])
+            .current_dir(working_dir)
+            .output()
+            .context("Failed to run git show")?;
+        if !output.status.success() {
+            anyhow::bail!("git show failed: {}", String::from_utf8_lossy(&output.stderr));
+        }
+        String::from_utf8(output.stdout).context("git show output is not valid UTF-8")
+    }
 }
 
 #[tokio::main]
@@ -237,46 +382,6 @@ async fn main() -> Result<()> {
         }
     }
 
-    // Get diff text from stdin, file, or command
-    let diff_text = if let Some(file_path) = args.file {
-        std::fs::read_to_string(&file_path)
-            .context(format!("Failed to read file: {}", file_path))?
-    } else if let Some(cmd) = args.cmd {
-        let output = if cfg!(target_os = "windows") {
-            Command::new("cmd").args(["/C", &cmd]).output()
-        } else {
-            Command::new("sh").args(["-c", &cmd]).output()
-        }
-        .context("Failed to execute command")?;
-
-        if !output.status.success() {
-            anyhow::bail!(
-                "Command failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-        }
-
-        String::from_utf8(output.stdout).context("Command output is not valid UTF-8")?
-    } else {
-        let mut buffer = String::new();
-        std::io::stdin()
-            .read_to_string(&mut buffer)
-            .context("Failed to read from stdin")?;
-        buffer
-    };
-
-    if diff_text.trim().is_empty() {
-        anyhow::bail!("No diff provided. Pipe diff to stdin, use --file, or --cmd");
-    }
-
-    // Parse diff
-    let diff = diff::parse_diff(&diff_text)?;
-
-    if diff.files.is_empty() {
-        eprintln!("No changes found in diff");
-        return Ok(());
-    }
-
     // Parse output format
     let output_format: OutputFormat = args.format.parse().context("Invalid output format")?;
 
@@ -293,29 +398,127 @@ async fn main() -> Result<()> {
     let is_public_flag = args.public || args.bind.iter().any(|a| a == "0.0.0.0");
     project_context.is_public = is_public_flag;
 
+    let working_dir = project_context.working_directory.clone();
+
+    // Parse diffs: series mode or single commit
+    let (diffs, pre_old, pre_new, is_series) = if let Some(ref revset) = args.series {
+        if args.cmd.is_some() || args.file.is_some() {
+            anyhow::bail!("--series cannot be combined with --cmd or --file");
+        }
+        let parsed = if is_jj_repo(&working_dir) {
+            let revset = revset.clone();
+            let wd = working_dir.clone();
+            let spinner = Spinner::start("Loading commits");
+            let diffs = tokio::task::spawn_blocking(move || get_series_diffs_jj(&revset, &wd))
+                .await
+                .context("task join")??;
+            spinner.finish(&format!("Loaded {} commits", diffs.len()));
+            diffs
+        } else {
+            let commits = enumerate_series_commits(revset, &working_dir)?;
+            if commits.is_empty() {
+                anyhow::bail!("No commits found for series: {}", revset);
+            }
+            eprintln!("Loading {} commits...", commits.len());
+            let mut handles = Vec::with_capacity(commits.len());
+            for (i, id) in commits.iter().enumerate() {
+                let id = id.clone();
+                let wd = working_dir.clone();
+                handles.push(tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
+                    let text = get_commit_diff_text(&id, &wd)?;
+                    let d = diff::parse_diff(&text)?;
+                    Ok((i, d))
+                }));
+            }
+            let mut parsed_indexed = Vec::with_capacity(commits.len());
+            for h in handles {
+                parsed_indexed.push(h.await.context("task join")??);
+            }
+            parsed_indexed.sort_by_key(|(i, _)| *i);
+            parsed_indexed.into_iter().map(|(_, d)| d).collect()
+        };
+        let spinner = Spinner::start("Precomputing file content");
+        let (pre_old, pre_new) = server::precompute_series_content(&parsed, &working_dir).await;
+        spinner.finish("Ready");
+        (parsed, pre_old, pre_new, true)
+    } else {
+        // Get diff text from stdin, file, or command
+        let diff_text = if let Some(file_path) = args.file {
+            std::fs::read_to_string(&file_path)
+                .context(format!("Failed to read file: {}", file_path))?
+        } else if let Some(cmd) = args.cmd {
+            let output = if cfg!(target_os = "windows") {
+                Command::new("cmd").args(["/C", &cmd]).output()
+            } else {
+                Command::new("sh").args(["-c", &cmd]).output()
+            }
+            .context("Failed to execute command")?;
+
+            if !output.status.success() {
+                anyhow::bail!(
+                    "Command failed: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            }
+
+            String::from_utf8(output.stdout).context("Command output is not valid UTF-8")?
+        } else {
+            let mut buffer = String::new();
+            std::io::stdin()
+                .read_to_string(&mut buffer)
+                .context("Failed to read from stdin")?;
+            buffer
+        };
+
+        if diff_text.trim().is_empty() {
+            anyhow::bail!("No diff provided. Pipe diff to stdin, use --file, or --cmd");
+        }
+
+        let diff = diff::parse_diff(&diff_text)?;
+
+        if diff.files.is_empty() {
+            eprintln!("No changes found in diff");
+            return Ok(());
+        }
+
+        (vec![diff], vec![], vec![], false)
+    };
+
     // Setup shutdown channel
     let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
 
-    // Lazy mode: don't preload or materialize; resolve content on demand in handlers
+    // Build per-commit old and new caches (pre-populated for series, empty for single diff)
+    let n = diffs.len();
+    let old_caches: Vec<tokio::sync::Mutex<std::collections::HashMap<String, String>>> = {
+        let mut maps: Vec<_> = pre_old.into_iter().map(tokio::sync::Mutex::new).collect();
+        maps.resize_with(n, || tokio::sync::Mutex::new(std::collections::HashMap::new()));
+        maps
+    };
+    let new_caches: Vec<tokio::sync::Mutex<std::collections::HashMap<String, String>>> = {
+        let mut maps: Vec<_> = pre_new.into_iter().map(tokio::sync::Mutex::new).collect();
+        maps.resize_with(n, || tokio::sync::Mutex::new(std::collections::HashMap::new()));
+        maps
+    };
 
     // Create app state
-    let old_cache_capacity = diff.files.len();
     let state = AppState {
-        diff: Arc::new(diff),
+        diffs: Arc::new(diffs),
         comments: Arc::new(Mutex::new(Vec::new())),
         shutdown_tx: Arc::new(Mutex::new(Some(shutdown_tx))),
         config: Arc::new(Mutex::new(user_config)),
         context: Arc::new(project_context),
-        old_cache: Arc::new(Mutex::new(std::collections::HashMap::with_capacity(
-            old_cache_capacity,
-        ))),
+        old_caches: Arc::new(old_caches),
+        new_caches: Arc::new(new_caches),
+        is_series,
     };
 
     // Create router (we'll clone per listener)
     let _app_for_clone = create_router(state.clone(), args.dev_log);
 
-    // Eagerly prefetch old-side contents in the background
-    tokio::spawn(crate::server::prefetch_old_files(state.clone()));
+    // Eagerly prefetch old-side contents for all commits in background
+    for i in 0..state.diffs.len() {
+        tokio::spawn(crate::server::prefetch_old_files(state.clone(), i));
+    }
 
     // Determine bind addresses
     let mut bind_addrs: Vec<String> = Vec::new();
@@ -391,16 +594,6 @@ async fn main() -> Result<()> {
     // Prefer loopback when opening browser
     let url = format!("http://127.0.0.1:{}", actual_port);
 
-    // Open browser (spawned so the server starts before xdg-open can block)
-    if !disable_open {
-        let url_for_open = url.clone();
-        tokio::spawn(async move {
-            if let Err(e) = open::that(&url_for_open) {
-                eprintln!("Failed to open browser: {}", e);
-            }
-        });
-    }
-
     // Run servers with graceful shutdown
     let shutdown_notify = Arc::new(Notify::new());
     let mut handles = Vec::new();
@@ -413,6 +606,19 @@ async fn main() -> Result<()> {
                 .await
         });
         handles.push(handle);
+    }
+
+    // Yield so server tasks begin accepting before browser opens
+    tokio::task::yield_now().await;
+
+    // Open browser after server is ready
+    if !disable_open {
+        let url_for_open = url.clone();
+        tokio::spawn(async move {
+            if let Err(e) = open::that(&url_for_open) {
+                eprintln!("Failed to open browser: {}", e);
+            }
+        });
     }
 
     // Wait for either shutdown signal or server error

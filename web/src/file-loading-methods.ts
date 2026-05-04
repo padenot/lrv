@@ -21,6 +21,7 @@ export class FileLoadingMethods {
   declare _commitViewEl: HTMLElement | null;
   declare editor: AppContext['editor'];
   declare fetchFilePair: AppContext['fetchFilePair'];
+  declare fileCacheKey: AppContext['fileCacheKey'];
   declare fileCache: AppContext['fileCache'];
   declare updateDecorations: () => void;
   declare showCommentDialog: AppContext['showCommentDialog'];
@@ -122,7 +123,7 @@ export class FileLoadingMethods {
     await this.fetchFilePair(file.path);
     window.Perf.mark('loadFile:fetch:end');
     window.Perf.measure('loadFile:fetch', 'loadFile:fetch:start', 'loadFile:fetch:end');
-    const filePair = this.fileCache[file.path]!;
+    const filePair = this.fileCache[this.fileCacheKey(file.path)]!;
     const oldContent = filePair.old;
     const newContent = filePair.new;
     const detectionPath = file.path || file.old_path || '';

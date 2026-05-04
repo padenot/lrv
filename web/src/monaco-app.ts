@@ -13,6 +13,7 @@ import { NavigationMethods } from './navigation-methods';
 import { CommitMethods } from './commit-methods';
 import { CommentsUIMethods } from './comments-ui-methods';
 import { DialogMethods } from './dialog-methods';
+import { SeriesMethods } from './series-methods';
 import type {
   AppConfig,
   AppConfigInput,
@@ -21,6 +22,7 @@ import type {
   DiffStats,
   FilePair,
   HunkRange,
+  SeriesInfo,
 } from './types/app';
 import type { editor } from 'monaco-editor';
 import type { UIThemeDefinitionMap } from './themes';
@@ -74,8 +76,14 @@ export class MonacoApp {
   _commitViewEl: HTMLElement | null;
   collapsedDirs: Set<string>;
   fileListFilter: string;
+  seriesInfo: SeriesInfo | null;
+  currentCommitIdx: number;
   declare updateUI: () => void;
   declare renderFileList: () => void;
+  declare renderSeriesNav: () => void;
+  declare loadCommit: (idx: number) => Promise<void>;
+  declare nextCommit: () => void;
+  declare previousCommit: () => void;
   declare loadFile: (index: number) => Promise<void>;
   declare showCommitMessagePopover: (anchorEl: HTMLElement, message: string, rev: string) => void;
   declare loadCommitView: () => void;
@@ -114,6 +122,8 @@ export class MonacoApp {
     this._commitViewEl = null;
     this.collapsedDirs = new Set();
     this.fileListFilter = '';
+    this.seriesInfo = null;
+    this.currentCommitIdx = 0;
 
     this.commentManager.onChange(() => this.updateUI());
   }
@@ -127,10 +137,10 @@ export class MonacoApp {
     if (performance.getEntriesByName('page:script-start').length > 0) {
       window.Perf.measure('page:script-to-init-start', 'page:script-start', 'init:start');
     }
-    // Load config, context, diff data, and ensure @font-face fonts are ready
+    // Load config, context, diff data, series info, and ensure @font-face fonts are ready
     window.Perf.mark('init:fetch:start');
     const t0 = performance.now();
-    const [configData, contextData, diffData] = await Promise.all([
+    const [configData, contextData, diffData, seriesData] = await Promise.all([
       fetchJSON<AppConfigInput>('/api/config'),
       fetchJSON<AppContextData>('/api/context'),
       fetchJSON<{
@@ -139,6 +149,7 @@ export class MonacoApp {
         commit_message?: string;
         commit_hash?: string;
       }>('/api/diff'),
+      fetchJSON<SeriesInfo>('/api/series'),
       document.fonts.ready,
     ]);
     window.Perf.mark('init:fetch:end');
@@ -157,6 +168,9 @@ export class MonacoApp {
     if (window.DEBUG) {
       console.info('[app] init: parsed config/context/diff');
     }
+    this.seriesInfo = seriesData;
+    this.currentCommitIdx = 0;
+    this.commentManager.currentCommitIdx = seriesData.is_series ? 0 : null;
     this.diff = diffData;
     this.files = diffData.files;
     this.stats = diffData.stats;
@@ -224,6 +238,7 @@ export class MonacoApp {
         window.Perf.mark('init:ui-setup:end');
         window.Perf.measure('init:ui-setup', 'init:ui-setup:start', 'init:ui-setup:end');
         window.Perf.mark('init:file-list:render:start');
+        this.renderSeriesNav();
         this.renderFileList();
         window.Perf.mark('init:file-list:render:end');
         window.Perf.measure(
@@ -457,3 +472,4 @@ applyMixin(MonacoApp, NavigationMethods);
 applyMixin(MonacoApp, CommitMethods);
 applyMixin(MonacoApp, CommentsUIMethods);
 applyMixin(MonacoApp, DialogMethods);
+applyMixin(MonacoApp, SeriesMethods);

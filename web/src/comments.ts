@@ -5,6 +5,7 @@ export type ReviewComment = {
   line: CommentLine;
   side: 'old' | 'new';
   body: string;
+  commit_idx?: number;
 };
 
 export function commentStartLine(comment: ReviewComment): number {
@@ -30,13 +31,18 @@ export function commentLineLabel(comment: ReviewComment): string {
 export class CommentManager {
   private comments: ReviewComment[];
   private listeners: Array<() => void>;
+  currentCommitIdx: number | null;
 
   constructor() {
     this.comments = [];
     this.listeners = [];
+    this.currentCommitIdx = null;
   }
 
   addComment(comment: ReviewComment): void {
+    if (this.currentCommitIdx !== null && comment.commit_idx === undefined) {
+      comment = { ...comment, commit_idx: this.currentCommitIdx };
+    }
     this.comments.push(comment);
     this.notifyListeners();
   }
@@ -48,7 +54,11 @@ export class CommentManager {
 
   findComment(file: string, line: number, side: 'old' | 'new'): number {
     return this.comments.findIndex(
-      (c) => c.file === file && c.side === side && commentContainsLine(c, line),
+      (c) =>
+        c.file === file &&
+        c.side === side &&
+        commentContainsLine(c, line) &&
+        (this.currentCommitIdx === null || c.commit_idx === this.currentCommitIdx),
     );
   }
 
@@ -66,7 +76,11 @@ export class CommentManager {
   }
 
   getCommentsForFile(file: string): ReviewComment[] {
-    return this.comments.filter((c) => c.file === file);
+    return this.comments.filter(
+      (c) =>
+        c.file === file &&
+        (this.currentCommitIdx === null || c.commit_idx === this.currentCommitIdx),
+    );
   }
 
   onChange(listener: () => void): void {

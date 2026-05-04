@@ -6,12 +6,14 @@ fn test_text_output_single_and_range_lines() {
             line: lrv::types::CommentLine::Single(3),
             side: lrv::types::Side::New,
             body: "single line".to_string(),
+            commit_idx: None,
         },
         lrv::types::Comment {
             file: "b.rs".to_string(),
             line: lrv::types::CommentLine::Range((10, 12)),
             side: lrv::types::Side::Old,
             body: "range line".to_string(),
+            commit_idx: None,
         },
     ];
 
@@ -28,12 +30,14 @@ fn test_json_output_line_shape() {
             line: lrv::types::CommentLine::Single(7),
             side: lrv::types::Side::New,
             body: "single".to_string(),
+            commit_idx: None,
         },
         lrv::types::Comment {
             file: "b.rs".to_string(),
             line: lrv::types::CommentLine::Range((2, 4)),
             side: lrv::types::Side::Old,
             body: "range".to_string(),
+            commit_idx: None,
         },
     ];
 

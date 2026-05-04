@@ -36,6 +36,7 @@ fn test_comment_structure() {
         line: lrv::types::CommentLine::Range((10, 15)),
         side: lrv::types::Side::New,
         body: "This needs improvement".to_string(),
+        commit_idx: None,
     };
 
     assert_eq!(comment.file, "test.rs");

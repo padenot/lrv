@@ -47,12 +47,14 @@ fn test_appstate_required_fields() {
 
     // This will fail to compile if AppState structure changes
     let state = lrv::server::AppState {
-        diff: std::sync::Arc::new(diff_data),
+        diffs: std::sync::Arc::new(vec![diff_data]),
         comments: std::sync::Arc::new(tokio::sync::Mutex::new(vec![])),
         shutdown_tx: std::sync::Arc::new(tokio::sync::Mutex::new(Some(shutdown_tx))),
         config: std::sync::Arc::new(tokio::sync::Mutex::new(config)),
         context: std::sync::Arc::new(context),
-        old_cache: std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+        old_caches: std::sync::Arc::new(vec![tokio::sync::Mutex::new(std::collections::HashMap::new())]),
+        new_caches: std::sync::Arc::new(vec![tokio::sync::Mutex::new(std::collections::HashMap::new())]),
+        is_series: false,
     };
 
     // Verify context is accessible

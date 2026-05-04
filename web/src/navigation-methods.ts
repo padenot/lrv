@@ -23,6 +23,8 @@ export class NavigationMethods {
   declare showSubmitConfirmation: () => Promise<void>;
   declare showKeyboardHelp: () => void;
   declare showCommentDialog: AppContext['showCommentDialog'];
+  declare nextCommit: () => void;
+  declare previousCommit: () => void;
 
   private getCurrentFile() {
     return this.files[this.currentFileIndex]!;
@@ -93,6 +95,12 @@ export class NavigationMethods {
           break;
         case 'clearFocus':
           this.clearFocusedHunk();
+          break;
+        case 'nextCommit':
+          this.nextCommit();
+          break;
+        case 'previousCommit':
+          this.previousCommit();
           break;
       }
     });

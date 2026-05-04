@@ -70,6 +70,8 @@ pub struct Comment {
     pub line: CommentLine,
     pub side: Side,
     pub body: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commit_idx: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -119,4 +121,20 @@ pub struct ProjectContext {
     pub git_branch: Option<String>,
     pub title: Option<String>,
     pub is_public: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommitSummary {
+    pub idx: usize,
+    pub commit_hash: Option<String>,
+    pub commit_author: Option<String>,
+    pub commit_date: Option<String>,
+    pub commit_message: Option<String>,
+    pub stats: DiffStats,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SeriesInfo {
+    pub is_series: bool,
+    pub commits: Vec<CommitSummary>,
 }

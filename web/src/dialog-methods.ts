@@ -311,9 +311,14 @@ export class DialogMethods {
 
         for (const side of sides) {
           const key = `${filePath}:${side}`;
+          // Use commit_idx from the first comment for this file to fetch correct content
+          const commitParam =
+            fileComments[0]?.commit_idx !== undefined
+              ? `&commit=${fileComments[0].commit_idx}`
+              : '';
           try {
             const data = await fetchJSON<{ content?: string }>(
-              `/api/file?path=${encodeURIComponent(filePath)}&side=${side}`,
+              `/api/file?path=${encodeURIComponent(filePath)}&side=${side}${commitParam}`,
             );
             fileContents[key] = String(data.content ?? '').split('\n');
           } catch (err) {

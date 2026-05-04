@@ -1,6 +1,6 @@
 export const MONACO_HIDE_UNCHANGED = {
   enabled: true,
-  contextLineCount: 3,
+  contextLineCount: 8,
   minimumLineCount: 3,
   revealLineCount: 20,
 };

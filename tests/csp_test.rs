@@ -28,12 +28,14 @@ async fn test_csp_header_present() {
     };
     let (shutdown_tx, _rx) = tokio::sync::mpsc::channel::<()>(1);
     let state = lrv::server::AppState {
-        diff: std::sync::Arc::new(diff_data),
+        diffs: std::sync::Arc::new(vec![diff_data]),
         comments: std::sync::Arc::new(tokio::sync::Mutex::new(vec![])),
         shutdown_tx: std::sync::Arc::new(tokio::sync::Mutex::new(Some(shutdown_tx))),
         config: std::sync::Arc::new(tokio::sync::Mutex::new(config)),
         context: std::sync::Arc::new(context),
-        old_cache: std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+        old_caches: std::sync::Arc::new(vec![tokio::sync::Mutex::new(std::collections::HashMap::new())]),
+        new_caches: std::sync::Arc::new(vec![tokio::sync::Mutex::new(std::collections::HashMap::new())]),
+        is_series: false,
     };
 
     let app = lrv::server::create_router(state, false);
@@ -75,12 +77,14 @@ async fn test_csp_on_assets_and_api() {
     };
     let (shutdown_tx, _rx) = tokio::sync::mpsc::channel::<()>(1);
     let state = lrv::server::AppState {
-        diff: std::sync::Arc::new(diff_data),
+        diffs: std::sync::Arc::new(vec![diff_data]),
         comments: std::sync::Arc::new(tokio::sync::Mutex::new(vec![])),
         shutdown_tx: std::sync::Arc::new(tokio::sync::Mutex::new(Some(shutdown_tx))),
         config: std::sync::Arc::new(tokio::sync::Mutex::new(config)),
         context: std::sync::Arc::new(context),
-        old_cache: std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+        old_caches: std::sync::Arc::new(vec![tokio::sync::Mutex::new(std::collections::HashMap::new())]),
+        new_caches: std::sync::Arc::new(vec![tokio::sync::Mutex::new(std::collections::HashMap::new())]),
+        is_series: false,
     };
 
     let app = lrv::server::create_router(state, false);

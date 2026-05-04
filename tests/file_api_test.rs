@@ -43,12 +43,14 @@ fn make_state_with_root(root: &str) -> lrv::server::AppState {
     };
     let (shutdown_tx, _rx) = mpsc::channel::<()>(1);
     lrv::server::AppState {
-        diff: Arc::new(diff_data),
+        diffs: Arc::new(vec![diff_data]),
         comments: Arc::new(Mutex::new(vec![])),
         shutdown_tx: Arc::new(Mutex::new(Some(shutdown_tx))),
         config: Arc::new(Mutex::new(config)),
         context: Arc::new(context),
-        old_cache: std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+        old_caches: std::sync::Arc::new(vec![tokio::sync::Mutex::new(std::collections::HashMap::new())]),
+        new_caches: std::sync::Arc::new(vec![tokio::sync::Mutex::new(std::collections::HashMap::new())]),
+        is_series: false,
     }
 }
 

@@ -10,15 +10,30 @@ export class FileDataMethods {
   declare files: AppContext['files'];
   declare fileHunks: AppContext['fileHunks'];
   declare currentHunkIndex: AppContext['currentHunkIndex'];
+  declare currentCommitIdx: AppContext['currentCommitIdx'];
+  declare seriesInfo: AppContext['seriesInfo'];
+
+  private commitParam(): string {
+    return this.seriesInfo?.is_series ? `&commit=${this.currentCommitIdx}` : '';
+  }
+
+  fileCacheKey(filePath: string): string {
+    return this.seriesInfo?.is_series ? `${this.currentCommitIdx}:${filePath}` : filePath;
+  }
 
   async fetchFilePair(filePath: string): Promise<FilePair> {
-    if (this.fileCache[filePath]) {
-      return this.fileCache[filePath];
+    // Capture both the cache key and commit param at call time so that if
+    // currentCommitIdx changes mid-await (commit switch), the in-flight
+    // response lands under the correct key and doesn't pollute another commit.
+    const cacheKey = this.fileCacheKey(filePath);
+    if (this.fileCache[cacheKey]) {
+      return this.fileCache[cacheKey];
     }
 
+    const cp = this.commitParam();
     const [oldData, newData] = await Promise.all([
       fetchJSON<FileContentResponse>(
-        `/api/file?path=${encodeURIComponent(filePath)}&side=old`,
+        `/api/file?path=${encodeURIComponent(filePath)}&side=old${cp}`,
       ).catch((err) => {
         if (window.DEBUG) {
           console.error('[app] old fetch failed', err);
@@ -26,7 +41,7 @@ export class FileDataMethods {
         return { content: '' };
       }),
       fetchJSON<FileContentResponse>(
-        `/api/file?path=${encodeURIComponent(filePath)}&side=new`,
+        `/api/file?path=${encodeURIComponent(filePath)}&side=new${cp}`,
       ).catch((err) => {
         if (window.DEBUG) {
           console.error('[app] new fetch failed', err);
@@ -35,11 +50,11 @@ export class FileDataMethods {
       }),
     ]);
 
-    this.fileCache[filePath] = {
+    this.fileCache[cacheKey] = {
       old: oldData.content ?? '',
       new: newData.content ?? '',
     };
-    return this.fileCache[filePath];
+    return this.fileCache[cacheKey];
   }
 
   // When we detect slow file fetches, eagerly prefetch the rest to warm caches
@@ -49,13 +64,14 @@ export class FileDataMethods {
     }
     this._eagerPrefetchStarted = true;
     const paths = this.files.map((f) => f.path);
-    const toFetch = paths.filter((p) => !this.fileCache[p]);
+    const toFetch = paths.filter((p) => !this.fileCache[this.fileCacheKey(p)]);
     if (toFetch.length === 0) {
       return;
     }
     if (window.DEBUG) {
       console.info('[prefetch] warming', toFetch.length, 'files');
     }
+    const cp = this.commitParam();
     const concurrency = 8;
     let i = 0;
     const nextBatch = () => {
@@ -64,11 +80,11 @@ export class FileDataMethods {
         const p = toFetch[i]!;
         batch.push(
           Promise.all([
-            fetchJSON<FileContentResponse>(`/api/file?path=${encodeURIComponent(p)}&side=old`),
-            fetchJSON<FileContentResponse>(`/api/file?path=${encodeURIComponent(p)}&side=new`),
+            fetchJSON<FileContentResponse>(`/api/file?path=${encodeURIComponent(p)}&side=old${cp}`),
+            fetchJSON<FileContentResponse>(`/api/file?path=${encodeURIComponent(p)}&side=new${cp}`),
           ])
             .then(([oldData, newData]) => {
-              this.fileCache[p] = { old: oldData.content ?? '', new: newData.content ?? '' };
+              this.fileCache[this.fileCacheKey(p)] = { old: oldData.content ?? '', new: newData.content ?? '' };
             })
             .catch(() => {}),
         );

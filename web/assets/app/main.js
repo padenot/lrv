@@ -413,11 +413,17 @@ function commentLineLabel(comment) {
 var CommentManager = class {
 	comments;
 	listeners;
+	currentCommitIdx;
 	constructor() {
 		this.comments = [];
 		this.listeners = [];
+		this.currentCommitIdx = null;
 	}
 	addComment(comment) {
+		if (this.currentCommitIdx !== null && comment.commit_idx === void 0) comment = {
+			...comment,
+			commit_idx: this.currentCommitIdx
+		};
 		this.comments.push(comment);
 		this.notifyListeners();
 	}
@@ -426,7 +432,7 @@ var CommentManager = class {
 		this.notifyListeners();
 	}
 	findComment(file, line, side) {
-		return this.comments.findIndex((c) => c.file === file && c.side === side && commentContainsLine(c, line));
+		return this.comments.findIndex((c) => c.file === file && c.side === side && commentContainsLine(c, line) && (this.currentCommitIdx === null || c.commit_idx === this.currentCommitIdx));
 	}
 	updateComment(index, newBody) {
 		const comment = this.comments[index];
@@ -438,7 +444,7 @@ var CommentManager = class {
 		return [...this.comments];
 	}
 	getCommentsForFile(file) {
-		return this.comments.filter((c) => c.file === file);
+		return this.comments.filter((c) => c.file === file && (this.currentCommitIdx === null || c.commit_idx === this.currentCommitIdx));
 	}
 	onChange(listener) {
 		this.listeners.push(listener);
@@ -642,7 +648,7 @@ function linkifyText(text) {
 //#region web/src/diff-utils.ts
 const MONACO_HIDE_UNCHANGED = {
 	enabled: true,
-	contextLineCount: 3,
+	contextLineCount: 8,
 	minimumLineCount: 3,
 	revealLineCount: 20
 };
@@ -668,35 +674,44 @@ function computeHunkRanges(hunks) {
 //#endregion
 //#region web/src/file-data-methods.ts
 var FileDataMethods = class {
+	commitParam() {
+		return this.seriesInfo?.is_series ? `&commit=${this.currentCommitIdx}` : "";
+	}
+	fileCacheKey(filePath) {
+		return this.seriesInfo?.is_series ? `${this.currentCommitIdx}:${filePath}` : filePath;
+	}
 	async fetchFilePair(filePath) {
-		if (this.fileCache[filePath]) return this.fileCache[filePath];
-		const [oldData, newData] = await Promise.all([fetchJSON(`/api/file?path=${encodeURIComponent(filePath)}&side=old`).catch((err) => {
+		const cacheKey = this.fileCacheKey(filePath);
+		if (this.fileCache[cacheKey]) return this.fileCache[cacheKey];
+		const cp = this.commitParam();
+		const [oldData, newData] = await Promise.all([fetchJSON(`/api/file?path=${encodeURIComponent(filePath)}&side=old${cp}`).catch((err) => {
 			if (window.DEBUG) console.error("[app] old fetch failed", err);
 			return { content: "" };
-		}), fetchJSON(`/api/file?path=${encodeURIComponent(filePath)}&side=new`).catch((err) => {
+		}), fetchJSON(`/api/file?path=${encodeURIComponent(filePath)}&side=new${cp}`).catch((err) => {
 			if (window.DEBUG) console.error("[app] new fetch failed", err);
 			return { content: "" };
 		})]);
-		this.fileCache[filePath] = {
+		this.fileCache[cacheKey] = {
 			old: oldData.content ?? "",
 			new: newData.content ?? ""
 		};
-		return this.fileCache[filePath];
+		return this.fileCache[cacheKey];
 	}
 	async eagerPrefetchAllFiles() {
 		if (this._eagerPrefetchStarted) return;
 		this._eagerPrefetchStarted = true;
-		const toFetch = this.files.map((f) => f.path).filter((p) => !this.fileCache[p]);
+		const toFetch = this.files.map((f) => f.path).filter((p) => !this.fileCache[this.fileCacheKey(p)]);
 		if (toFetch.length === 0) return;
 		if (window.DEBUG) console.info("[prefetch] warming", toFetch.length, "files");
+		const cp = this.commitParam();
 		const concurrency = 8;
 		let i = 0;
 		const nextBatch = () => {
 			const batch = [];
 			for (let k = 0; k < concurrency && i < toFetch.length; k++, i++) {
 				const p = toFetch[i];
-				batch.push(Promise.all([fetchJSON(`/api/file?path=${encodeURIComponent(p)}&side=old`), fetchJSON(`/api/file?path=${encodeURIComponent(p)}&side=new`)]).then(([oldData, newData]) => {
-					this.fileCache[p] = {
+				batch.push(Promise.all([fetchJSON(`/api/file?path=${encodeURIComponent(p)}&side=old${cp}`), fetchJSON(`/api/file?path=${encodeURIComponent(p)}&side=new${cp}`)]).then(([oldData, newData]) => {
+					this.fileCache[this.fileCacheKey(p)] = {
 						old: oldData.content ?? "",
 						new: newData.content ?? ""
 					};
@@ -1196,7 +1211,7 @@ var FileLoadingMethods = class {
 		await this.fetchFilePair(file.path);
 		window.Perf.mark("loadFile:fetch:end");
 		window.Perf.measure("loadFile:fetch", "loadFile:fetch:start", "loadFile:fetch:end");
-		const filePair = this.fileCache[file.path];
+		const filePair = this.fileCache[this.fileCacheKey(file.path)];
 		const oldContent = filePair.old;
 		const newContent = filePair.new;
 		const language = detectLanguageFromPathAndContent(file.path || file.old_path || "", newContent || oldContent);
@@ -1381,6 +1396,16 @@ const KEYBOARD_SHORTCUTS = [
 		keys: ["?"],
 		action: "showHelp",
 		description: "Show keyboard shortcuts"
+	},
+	{
+		keys: ["Mod+Shift+ArrowRight", "Mod+Shift+L"],
+		action: "nextCommit",
+		description: "Next commit (series mode)"
+	},
+	{
+		keys: ["Mod+Shift+ArrowLeft", "Mod+Shift+H"],
+		action: "previousCommit",
+		description: "Previous commit (series mode)"
 	}
 ];
 
@@ -1432,6 +1457,12 @@ var NavigationMethods = class {
 					break;
 				case "clearFocus":
 					this.clearFocusedHunk();
+					break;
+				case "nextCommit":
+					this.nextCommit();
+					break;
+				case "previousCommit":
+					this.previousCommit();
 					break;
 			}
 		});
@@ -2375,8 +2406,9 @@ var DialogMethods = class {
 			const sides = [...new Set(fileComments.map((c) => c.side))];
 			for (const side of sides) {
 				const key = `${filePath}:${side}`;
+				const commitParam = fileComments[0]?.commit_idx !== void 0 ? `&commit=${fileComments[0].commit_idx}` : "";
 				try {
-					const data = await fetchJSON(`/api/file?path=${encodeURIComponent(filePath)}&side=${side}`);
+					const data = await fetchJSON(`/api/file?path=${encodeURIComponent(filePath)}&side=${side}${commitParam}`);
 					fileContents[key] = String(data.content ?? "").split("\n");
 				} catch (err) {
 					console.error(`Failed to fetch ${key}:`, err);
@@ -2453,6 +2485,75 @@ var DialogMethods = class {
 };
 
 //#endregion
+//#region web/src/series-methods.ts
+var SeriesMethods = class {
+	renderSeriesNav() {
+		const container = document.getElementById("commit-strip");
+		if (!container) return;
+		if (!this.seriesInfo?.is_series) {
+			container.style.display = "none";
+			return;
+		}
+		container.style.display = "";
+		clearEl(container);
+		const { commits } = this.seriesInfo;
+		const nav = el("div", { className: "series-nav" });
+		commits.forEach((commit) => {
+			const row = el("div", { className: `series-commit${commit.idx === this.currentCommitIdx ? " active" : ""}` });
+			const num = el("span", {
+				className: "series-commit-num",
+				text: String(commit.idx + 1)
+			});
+			const info = el("div", { className: "series-commit-info" });
+			const title = el("div", {
+				className: "series-commit-msg",
+				text: commit.commit_message?.split("\n")[0] ?? "(no message)"
+			});
+			const meta = el("div", { className: "series-commit-meta" });
+			meta.innerHTML = `<span class="series-hash">${commit.commit_hash?.slice(0, 8) ?? ""}</span> <span class="delta-add">+${commit.stats.additions}</span> <span class="delta-del">-${commit.stats.deletions}</span>`;
+			info.appendChild(title);
+			info.appendChild(meta);
+			row.appendChild(num);
+			row.appendChild(info);
+			row.addEventListener("click", () => {
+				if (commit.idx !== this.currentCommitIdx) this.loadCommit(commit.idx);
+			});
+			nav.appendChild(row);
+		});
+		container.appendChild(nav);
+	}
+	async loadCommit(idx) {
+		const series = this.seriesInfo;
+		if (!series) return;
+		const clamped = Math.max(0, Math.min(idx, series.commits.length - 1));
+		this.currentCommitIdx = clamped;
+		this.commentManager.currentCommitIdx = clamped;
+		const diffData = await fetchJSON(`/api/diff?commit=${clamped}`);
+		this.diff = diffData;
+		this.files = diffData.files;
+		this.stats = diffData.stats;
+		this.fileHunks = {};
+		this.currentHunkIndex = {};
+		this.currentFileIndex = 0;
+		this.currentFileIsCommit = false;
+		this._eagerPrefetchStarted = false;
+		this.renderSeriesNav();
+		this.renderFileList();
+		if (this.files.length > 0) await this.loadFile(0);
+		else this.loadCommitView();
+		showNavIndicator(`Commit ${clamped + 1}/${series.commits.length}: ${series.commits[clamped]?.commit_message?.split("\n")[0] ?? ""}`);
+	}
+	nextCommit() {
+		if (!this.seriesInfo?.is_series) return;
+		this.loadCommit(this.currentCommitIdx + 1);
+	}
+	previousCommit() {
+		if (!this.seriesInfo?.is_series) return;
+		this.loadCommit(this.currentCommitIdx - 1);
+	}
+};
+
+//#endregion
 //#region web/src/monaco-app.ts
 function applyMixin(TargetClass, MethodsClass) {
 	for (const name of Object.getOwnPropertyNames(MethodsClass.prototype)) {
@@ -2492,6 +2593,8 @@ var MonacoApp = class {
 	_commitViewEl;
 	collapsedDirs;
 	fileListFilter;
+	seriesInfo;
+	currentCommitIdx;
 	constructor() {
 		this.commentManager = new CommentManager();
 		this.currentFileIndex = 0;
@@ -2524,6 +2627,8 @@ var MonacoApp = class {
 		this._commitViewEl = null;
 		this.collapsedDirs = /* @__PURE__ */ new Set();
 		this.fileListFilter = "";
+		this.seriesInfo = null;
+		this.currentCommitIdx = 0;
 		this.commentManager.onChange(() => this.updateUI());
 	}
 	async init() {
@@ -2533,10 +2638,11 @@ var MonacoApp = class {
 		if (performance.getEntriesByName("page:script-start").length > 0) window.Perf.measure("page:script-to-init-start", "page:script-start", "init:start");
 		window.Perf.mark("init:fetch:start");
 		const t0 = performance.now();
-		const [configData, contextData, diffData] = await Promise.all([
+		const [configData, contextData, diffData, seriesData] = await Promise.all([
 			fetchJSON("/api/config"),
 			fetchJSON("/api/context"),
 			fetchJSON("/api/diff"),
+			fetchJSON("/api/series"),
 			document.fonts.ready
 		]);
 		window.Perf.mark("init:fetch:end");
@@ -2550,6 +2656,9 @@ var MonacoApp = class {
 			document.title = dirName || "lrv";
 		}
 		if (window.DEBUG) console.info("[app] init: parsed config/context/diff");
+		this.seriesInfo = seriesData;
+		this.currentCommitIdx = 0;
+		this.commentManager.currentCommitIdx = seriesData.is_series ? 0 : null;
 		this.diff = diffData;
 		this.files = diffData.files;
 		this.stats = diffData.stats;
@@ -2601,6 +2710,7 @@ var MonacoApp = class {
 				window.Perf.mark("init:ui-setup:end");
 				window.Perf.measure("init:ui-setup", "init:ui-setup:start", "init:ui-setup:end");
 				window.Perf.mark("init:file-list:render:start");
+				this.renderSeriesNav();
 				this.renderFileList();
 				window.Perf.mark("init:file-list:render:end");
 				window.Perf.measure("init:file-list:render", "init:file-list:render:start", "init:file-list:render:end");
@@ -2766,6 +2876,7 @@ applyMixin(MonacoApp, NavigationMethods);
 applyMixin(MonacoApp, CommitMethods);
 applyMixin(MonacoApp, CommentsUIMethods);
 applyMixin(MonacoApp, DialogMethods);
+applyMixin(MonacoApp, SeriesMethods);
 
 //#endregion
 //#region web/src/main.ts
