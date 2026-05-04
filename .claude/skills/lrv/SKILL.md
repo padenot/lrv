@@ -19,8 +19,14 @@ git diff | lrv # if not commited
 git diff HEAD^ | lrv # if commited
 ```
 
-only ever show a single revision, because it can otherwise be confusing. The
-tool doesn't support multiple revisions, revsets, ranges, etc.
+For reviewing a full branch as a series of individual commits:
+
+```
+lrv --series "trunk()..@"      # jj revset
+lrv --series "main..HEAD"      # git range
+```
+
+The UI shows a commit strip; comments are grouped per commit in the output.
 
 ## Behavior
 
