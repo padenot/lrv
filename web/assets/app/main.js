@@ -2343,6 +2343,7 @@ var DialogMethods = class {
 			text
 		});
 		const optGroup = (label, options) => el("optgroup", { attrs: { label } }, options.map(([value, text]) => opt(value, text)));
+		const userThemeGroup = this.userThemes.length > 0 ? [optGroup("Custom", this.userThemes.map((t) => [t.id, t.name]))] : [];
 		const colorSelect = el("select", { attrs: {
 			id: "color-scheme",
 			name: "color_scheme"
@@ -2355,7 +2356,8 @@ var DialogMethods = class {
 			]),
 			optGroup("GitHub", [["github-dark", "GitHub Dark"], ["github-light", "GitHub Light"]]),
 			optGroup("Firefox DevTools", [["firefox-devtools-dark", "Firefox DevTools Dark"], ["firefox-devtools-light", "Firefox DevTools Light"]]),
-			optGroup("Solarized", [["solarized-dark", "Solarized Dark"], ["solarized-light", "Solarized Light"]])
+			optGroup("Solarized", [["solarized-dark", "Solarized Dark"], ["solarized-light", "Solarized Light"]]),
+			...userThemeGroup
 		]);
 		const themeField = el("div", { className: "settings-field" }, [el("label", {
 			attrs: { for: "color-scheme" },
@@ -2695,6 +2697,7 @@ var MonacoApp = class {
 			deletions: 0
 		};
 		this.fileCache = {};
+		this.userThemes = [];
 		this.fileHunks = {};
 		this.currentHunkIndex = {};
 		this.config = DEFAULT_APP_CONFIG;
@@ -2717,11 +2720,12 @@ var MonacoApp = class {
 		if (performance.getEntriesByName("page:script-start").length > 0) window.Perf.measure("page:script-to-init-start", "page:script-start", "init:start");
 		window.Perf.mark("init:fetch:start");
 		const t0 = performance.now();
-		const [configData, contextData, diffData, seriesData] = await Promise.all([
+		const [configData, contextData, diffData, seriesData, userThemesData] = await Promise.all([
 			fetchJSON("/api/config"),
 			fetchJSON("/api/context"),
 			fetchJSON("/api/diff"),
 			fetchJSON("/api/series"),
+			fetchJSON("/api/themes"),
 			document.fonts.ready
 		]);
 		window.Perf.mark("init:fetch:end");
@@ -2736,6 +2740,7 @@ var MonacoApp = class {
 		}
 		if (window.DEBUG) console.info("[app] init: parsed config/context/diff");
 		this.seriesInfo = seriesData;
+		this.userThemes = userThemesData ?? [];
 		this.currentCommitIdx = 0;
 		this.commentManager.currentCommitIdx = seriesData.is_series ? 0 : null;
 		this.diff = diffData;
@@ -2857,6 +2862,14 @@ var MonacoApp = class {
 		Object.entries(CUSTOM_THEMES).forEach(([name, theme]) => {
 			monaco.editor.defineTheme(name, theme);
 			defs[name] = theme;
+		});
+		this.userThemes.forEach((t) => {
+			monaco.editor.defineTheme(t.id, t.data);
+			defs[t.id] = t.data;
+			window.UIThemeAccentsHex = {
+				...window.UIThemeAccentsHex,
+				[t.id]: t.accent_hex
+			};
 		});
 	}
 	renderProjectInfo() {

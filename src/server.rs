@@ -1,4 +1,5 @@
 use crate::config::UserConfig;
+use crate::themes::{load_user_themes, UserTheme};
 use crate::types::*;
 use axum::{
     extract::{Path as AxumPath, Query, State},
@@ -612,6 +613,7 @@ pub fn create_router(state: AppState, enable_trace: bool) -> Router {
         .route("/api/series", get(get_series))
         .route("/api/context", get(get_context))
         .route("/api/config", get(get_config).put(update_config))
+        .route("/api/themes", get(get_user_themes))
         .route("/api/file", get(get_file_content))
         .route("/api/comment", post(add_comment))
         .route("/api/complete", post(complete_review))
@@ -761,6 +763,10 @@ async fn get_series(State(state): State<AppState>) -> Json<SeriesInfo> {
 
 async fn get_context(State(state): State<AppState>) -> Json<ProjectContext> {
     Json((*state.context).clone())
+}
+
+async fn get_user_themes() -> Json<Vec<UserTheme>> {
+    Json(load_user_themes())
 }
 
 async fn get_file_content(

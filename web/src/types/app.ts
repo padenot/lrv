@@ -47,6 +47,18 @@ export type AppContextData = {
   is_public?: boolean;
 };
 
+export type UserTheme = {
+  id: string;
+  name: string;
+  accent_hex: string;
+  data: {
+    base: string;
+    inherit: boolean;
+    rules: Array<{ token: string; foreground?: string; fontStyle?: string }>;
+    colors: Record<string, string>;
+  };
+};
+
 export type CommitSummary = {
   idx: number;
   commit_hash?: string;
@@ -100,6 +112,7 @@ export interface AppContext {
   files: DiffFile[];
   stats: DiffStats;
   fileCache: Record<string, FilePair>;
+  userThemes: UserTheme[];
   fileCacheKey(filePath: string): string;
   fileHunks: Record<string, HunkRange[]>;
   currentHunkIndex: Record<string, number>;

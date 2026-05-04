@@ -2,6 +2,7 @@ mod config;
 mod diff;
 mod output;
 mod server;
+mod themes;
 mod types;
 
 use anyhow::{Context, Result};

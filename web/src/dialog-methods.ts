@@ -15,6 +15,7 @@ export class DialogMethods {
   declare commentManager: AppContext['commentManager'];
   declare applyThemeToUI: (theme: string) => void;
   declare loadFile: (index: number) => Promise<void>;
+  declare userThemes: AppContext['userThemes'];
 
   showKeyboardHelp() {
     const { overlay, modal, body, close } = openModal({
@@ -125,6 +126,11 @@ export class DialogMethods {
         options.map(([value, text]) => opt(value, text)),
       );
 
+    const userThemeGroup =
+      this.userThemes.length > 0
+        ? [optGroup('Custom', this.userThemes.map((t) => [t.id, t.name] as [string, string]))]
+        : [];
+
     const colorSelect = el('select', { attrs: { id: 'color-scheme', name: 'color_scheme' } }, [
       optGroup('Standard', [
         ['vs-dark', 'VS Dark'],
@@ -144,6 +150,7 @@ export class DialogMethods {
         ['solarized-dark', 'Solarized Dark'],
         ['solarized-light', 'Solarized Light'],
       ]),
+      ...userThemeGroup,
     ]);
 
     const themeField = el('div', { className: 'settings-field' }, [

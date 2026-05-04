@@ -23,6 +23,7 @@ import type {
   FilePair,
   HunkRange,
   SeriesInfo,
+  UserTheme,
 } from './types/app';
 import type { editor } from 'monaco-editor';
 import type { UIThemeDefinitionMap } from './themes';
@@ -90,6 +91,7 @@ export class MonacoApp {
   declare showSettingsModal: () => void;
   declare showKeyboardHelp: () => void;
   declare showSubmitConfirmation: () => Promise<void>;
+  declare userThemes: UserTheme[];
   declare setupSidebarResizer: () => void;
   declare setupCommitStripResizer: () => void;
   declare setupFileListControls: () => void;
@@ -112,6 +114,7 @@ export class MonacoApp {
     this.files = [];
     this.stats = { files_changed: 0, additions: 0, deletions: 0 };
     this.fileCache = {};
+    this.userThemes = [];
     this.fileHunks = {}; // Track hunk start lines per file: { [path]: number[] }
     this.currentHunkIndex = {}; // Track current hunk index per file
     this.config = DEFAULT_APP_CONFIG;
@@ -141,7 +144,7 @@ export class MonacoApp {
     // Load config, context, diff data, series info, and ensure @font-face fonts are ready
     window.Perf.mark('init:fetch:start');
     const t0 = performance.now();
-    const [configData, contextData, diffData, seriesData] = await Promise.all([
+    const [configData, contextData, diffData, seriesData, userThemesData] = await Promise.all([
       fetchJSON<AppConfigInput>('/api/config'),
       fetchJSON<AppContextData>('/api/context'),
       fetchJSON<{
@@ -151,6 +154,7 @@ export class MonacoApp {
         commit_hash?: string;
       }>('/api/diff'),
       fetchJSON<SeriesInfo>('/api/series'),
+      fetchJSON<UserTheme[]>('/api/themes'),
       document.fonts.ready,
     ]);
     window.Perf.mark('init:fetch:end');
@@ -170,6 +174,7 @@ export class MonacoApp {
       console.info('[app] init: parsed config/context/diff');
     }
     this.seriesInfo = seriesData;
+    this.userThemes = userThemesData ?? [];
     this.currentCommitIdx = 0;
     this.commentManager.currentCommitIdx = seriesData.is_series ? 0 : null;
     this.diff = diffData;
@@ -344,6 +349,11 @@ export class MonacoApp {
     Object.entries(CUSTOM_THEMES).forEach(([name, theme]) => {
       monaco.editor.defineTheme(name, theme);
       defs[name] = theme;
+    });
+    this.userThemes.forEach((t) => {
+      monaco.editor.defineTheme(t.id, t.data as Parameters<typeof monaco.editor.defineTheme>[1]);
+      defs[t.id] = t.data;
+      window.UIThemeAccentsHex = { ...window.UIThemeAccentsHex, [t.id]: t.accent_hex };
     });
   }
 
