@@ -207,6 +207,10 @@ struct Args {
     /// Review a commit series (jj revset or git range, e.g. "trunk()..@" or "HEAD~5..HEAD")
     #[arg(long)]
     series: Option<String>,
+
+    /// Print the config directory path and exit
+    #[arg(long)]
+    config_dir: bool,
 }
 
 fn is_jj_repo(root: &str) -> bool {
@@ -361,6 +365,13 @@ async fn main() -> Result<()> {
     if args.version {
         println!("lrv {}", env!("CARGO_PKG_VERSION"));
         version_checker.print_warning_sync();
+        return Ok(());
+    }
+    if args.config_dir {
+        let dir = dirs::config_dir()
+            .context("Could not determine config directory")?
+            .join("lrv");
+        println!("{}", dir.display());
         return Ok(());
     }
 

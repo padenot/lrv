@@ -69,12 +69,14 @@ Settings (theme, font, view mode) are saved to `~/.config/lrv/config.toml`.
 
 ### Custom themes
 
-lrv ships with GitHub, Solarized, Firefox DevTools, and the built-in Monaco themes. To add your own, drop any VS Code theme JSON file into `~/.config/lrv/themes/`:
+lrv ships with GitHub, Solarized, Firefox DevTools, and the built-in Monaco themes. To add your own, drop any VS Code theme JSON file into the `themes/` subdirectory of your lrv config directory:
 
 ```bash
-mkdir -p ~/.config/lrv/themes
-cp my-theme.json ~/.config/lrv/themes/
+mkdir -p "$(lrv --config-dir)/themes"
+cp my-theme.json "$(lrv --config-dir)/themes/"
 ```
+
+`lrv --config-dir` prints the platform-correct path (`~/.config/lrv` on Linux, `~/Library/Application Support/lrv` on macOS, `%APPDATA%\lrv` on Windows).
 
 The theme appears in the Settings dialog under **Custom** on the next launch. VS Code themes are widely available:
 

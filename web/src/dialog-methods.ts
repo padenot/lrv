@@ -155,7 +155,7 @@ export class DialogMethods {
 
     const themeHint = el('div', { className: 'settings-hint' });
     themeHint.innerHTML =
-      'Custom themes: drop any VS Code theme <code>.json</code> into <code>~/.config/lrv/themes/</code>.';
+      'Custom themes: drop any VS Code theme <code>.json</code> into <code>&lt;config-dir&gt;/themes/</code>. Run <code>lrv --config-dir</code> for the path on your platform.';
 
     const themeField = el('div', { className: 'settings-field' }, [
       el('label', { attrs: { for: 'color-scheme' }, text: 'Theme' }),
