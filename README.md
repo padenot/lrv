@@ -63,6 +63,24 @@ Notes:
 - Submitted comments are written to stdout, so you can pipe or capture them.
 - `lrv --version` prints the current version and can warn if a newer release exists.
 
+## Customization
+
+Settings (theme, font, view mode) are saved to `~/.config/lrv/config.toml`.
+
+### Custom themes
+
+lrv ships with GitHub, Solarized, Firefox DevTools, and the built-in Monaco themes. To add your own, drop any VS Code theme JSON file into `~/.config/lrv/themes/`:
+
+```bash
+mkdir -p ~/.config/lrv/themes
+cp my-theme.json ~/.config/lrv/themes/
+```
+
+The theme appears in the Settings dialog under **Custom** on the next launch. VS Code themes are widely available:
+
+- [VS Code Marketplace](https://marketplace.visualstudio.com/search?target=VSCode&category=Themes) — themes ship as `.vsix` files (zip archives); the JSON is inside under `themes/`
+- [`monaco-themes`](https://www.npmjs.com/package/monaco-themes) npm package — 30+ themes already in Monaco format
+
 ## Development
 
 Prerequisites:

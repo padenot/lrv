@@ -790,6 +790,17 @@ body {
   font-size: 12px;
   margin-bottom: 6px;
 }
+.settings-hint {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.settings-hint code {
+  font-family: var(--font-mono);
+  background: var(--bg-primary);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
 .settings-form input[type='text'],
 .settings-form select {
   width: 100%;
