@@ -154,21 +154,24 @@ export class FileLoadingMethods {
 
     window.Perf.mark('loadFile:setModel:start');
     const diffEditor = this.editor!;
+    // Hide before setModel so the fold reflow from hideUnchangedRegions is
+    // invisible. Revealed inside onDidUpdateDiff after folds are applied.
+    const editorContainer = diffEditor.getContainerDomNode();
+    editorContainer.style.opacity = '0';
     diffEditor.setModel({
       original: this.originalModel!,
       modified: this.modifiedModel!,
     });
     window.Perf.mark('loadFile:setModel:end');
     window.Perf.measure('loadFile:setModel', 'loadFile:setModel:start', 'loadFile:setModel:end');
-    // Now that models are bound, update diff editor + sub-editors.
-    // Register a one-time onDidUpdateDiff listener to scroll to top after
-    // Monaco finishes its async diff/hideUnchangedRegions computation; a plain
-    // setScrollTop(0) here would be overridden by that async step. The
-    // listener fires well before the 100 ms jumpToHunk timer.
+    const reveal = () => { editorContainer.style.opacity = ''; };
+    const fallback = setTimeout(reveal, 300);
     const scrollReset = diffEditor.onDidUpdateDiff(() => {
+      clearTimeout(fallback);
       scrollReset.dispose();
       diffEditor.getModifiedEditor().setScrollTop(0);
       diffEditor.getOriginalEditor().setScrollTop(0);
+      reveal();
     });
     diffEditor.updateOptions({
       renderSideBySide,
