@@ -327,25 +327,37 @@ export class MonacoApp {
       }
     }
 
-    // If an editor exists, derive surface/text colors from its computed styles
+    // Apply surface/text colors from the theme definition's color tokens where
+    // available, then fall back to DOM-derived values.
+    const themeColors: Record<string, string> = (defs[themeName] as unknown as { colors?: Record<string, string> })?.colors ?? {};
+
+    const fromTheme = (token: string) => themeColors[token] ?? '';
+
+    setVar('--bg-primary',    fromTheme('editor.background'));
+    setVar('--bg-secondary',  fromTheme('editorGutter.background') || fromTheme('editor.lineHighlightBackground') || fromTheme('editor.background'));
+    setVar('--bg-elevated',   fromTheme('editorGutter.background') || fromTheme('editor.lineHighlightBackground') || fromTheme('editor.background'));
+    setVar('--text-primary',  fromTheme('editor.foreground'));
+    setVar('--text-secondary', fromTheme('editorLineNumber.foreground'));
+
+    // Fill any gaps with DOM-derived values (built-in themes have no colors map)
     const editorEl = document.querySelector('.monaco-editor');
     if (editorEl) {
       const cs = getComputedStyle(editorEl);
-      setVar('--bg-primary', cs.backgroundColor);
-      // Derive secondary/elevated as slight variants
-      const overlay = document.querySelector('.monaco-editor .margin') ?? editorEl;
-      const cs2 = getComputedStyle(overlay);
-      setVar('--bg-secondary', cs2.backgroundColor || cs.backgroundColor);
-      setVar('--bg-elevated', cs2.backgroundColor || cs.backgroundColor);
-      // Text colors: use editor foreground if available else fallback to body
-      const bodyCs = getComputedStyle(document.body);
-      setVar('--text-primary', bodyCs.color);
-      // Derive secondary text from background luminance: light themes need a
-      // darker secondary (the :root default #858585 is too light on white).
-      const rgbNums = cs.backgroundColor.match(/\d+/g);
-      if (rgbNums && rgbNums.length >= 3) {
-        const lum = (0.2126 * +rgbNums[0]! + 0.7152 * +rgbNums[1]! + 0.0722 * +rgbNums[2]!) / 255;
-        document.documentElement.style.setProperty('--text-secondary', lum > 0.5 ? '#595c60' : '#858585');
+      if (!fromTheme('editor.background'))   setVar('--bg-primary',   cs.backgroundColor);
+      if (!fromTheme('editorGutter.background') && !fromTheme('editor.lineHighlightBackground')) {
+        const margin = document.querySelector('.monaco-editor .margin') ?? editorEl;
+        setVar('--bg-secondary', getComputedStyle(margin).backgroundColor || cs.backgroundColor);
+        setVar('--bg-elevated',  getComputedStyle(margin).backgroundColor || cs.backgroundColor);
+      }
+      if (!fromTheme('editor.foreground')) {
+        setVar('--text-primary', getComputedStyle(document.body).color);
+      }
+      if (!fromTheme('editorLineNumber.foreground')) {
+        const rgbNums = cs.backgroundColor.match(/\d+/g);
+        if (rgbNums && rgbNums.length >= 3) {
+          const lum = (0.2126 * +rgbNums[0]! + 0.7152 * +rgbNums[1]! + 0.0722 * +rgbNums[2]!) / 255;
+          document.documentElement.style.setProperty('--text-secondary', lum > 0.5 ? '#595c60' : '#858585');
+        }
       }
     }
   }

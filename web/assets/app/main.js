@@ -94,6 +94,9 @@ const CUSTOM_THEMES = {
 			"editorCursor.foreground": "#839496",
 			"editor.selectionBackground": "#073642",
 			"editor.inactiveSelectionBackground": "#073642",
+			"editorGutter.background": "#073642",
+			"editorLineNumber.foreground": "#586e75",
+			"editorLineNumber.activeForeground": "#839496",
 			"diffEditor.insertedLineBackground": "#22863a18",
 			"diffEditor.insertedTextBackground": "#22863a33",
 			"diffEditor.removedLineBackground": "#cf222e18",
@@ -149,6 +152,9 @@ const CUSTOM_THEMES = {
 			"editorCursor.foreground": "#657b83",
 			"editor.selectionBackground": "#eee8d5",
 			"editor.inactiveSelectionBackground": "#eee8d5",
+			"editorGutter.background": "#eee8d5",
+			"editorLineNumber.foreground": "#93a1a1",
+			"editorLineNumber.activeForeground": "#657b83",
 			"diffEditor.insertedLineBackground": "#22863a14",
 			"diffEditor.insertedTextBackground": "#22863a2a",
 			"diffEditor.removedLineBackground": "#cf222e14",
@@ -419,11 +425,14 @@ const CUSTOM_THEMES = {
 		],
 		colors: {
 			"editor.background": "#ffffff",
-			"editor.foreground": "#4B4D51",
-			"editor.lineHighlightBackground": "#f3f5f7",
-			"editorCursor.foreground": "#4B4D51",
+			"editor.foreground": "#1c1f26",
+			"editor.lineHighlightBackground": "#f8f9fc",
+			"editorCursor.foreground": "#1c1f26",
 			"editor.selectionBackground": "#136CB230",
 			"editor.inactiveSelectionBackground": "#136CB218",
+			"editorGutter.background": "#f8f9fc",
+			"editorLineNumber.foreground": "#6b748c",
+			"editorLineNumber.activeForeground": "#464c5c",
 			"diffEditor.insertedLineBackground": "#97ea974d",
 			"diffEditor.insertedTextBackground": "#97ea9799",
 			"diffEditor.removedLineBackground": "#fbafaf4d",
@@ -2893,7 +2902,8 @@ var MonacoApp = class {
 		const setVar = (k, v) => {
 			if (v) document.documentElement.style.setProperty(k, v);
 		};
-		const def = (window.UI_THEME_DEFS ?? {})[themeName];
+		const defs = window.UI_THEME_DEFS ?? {};
+		const def = defs[themeName];
 		if (def && Array.isArray(def.rules)) {
 			const kw = def.rules.find((r) => r && r.token === "keyword" && r.foreground);
 			if (kw && kw.foreground) {
@@ -2909,19 +2919,29 @@ var MonacoApp = class {
 				}
 			}
 		}
+		const themeColors = defs[themeName]?.colors ?? {};
+		const fromTheme = (token) => themeColors[token] ?? "";
+		setVar("--bg-primary", fromTheme("editor.background"));
+		setVar("--bg-secondary", fromTheme("editorGutter.background") || fromTheme("editor.lineHighlightBackground") || fromTheme("editor.background"));
+		setVar("--bg-elevated", fromTheme("editorGutter.background") || fromTheme("editor.lineHighlightBackground") || fromTheme("editor.background"));
+		setVar("--text-primary", fromTheme("editor.foreground"));
+		setVar("--text-secondary", fromTheme("editorLineNumber.foreground"));
 		const editorEl = document.querySelector(".monaco-editor");
 		if (editorEl) {
 			const cs = getComputedStyle(editorEl);
-			setVar("--bg-primary", cs.backgroundColor);
-			const overlay = document.querySelector(".monaco-editor .margin") ?? editorEl;
-			const cs2 = getComputedStyle(overlay);
-			setVar("--bg-secondary", cs2.backgroundColor || cs.backgroundColor);
-			setVar("--bg-elevated", cs2.backgroundColor || cs.backgroundColor);
-			setVar("--text-primary", getComputedStyle(document.body).color);
-			const rgbNums = cs.backgroundColor.match(/\d+/g);
-			if (rgbNums && rgbNums.length >= 3) {
-				const lum = (.2126 * +rgbNums[0] + .7152 * +rgbNums[1] + .0722 * +rgbNums[2]) / 255;
-				document.documentElement.style.setProperty("--text-secondary", lum > .5 ? "#595c60" : "#858585");
+			if (!fromTheme("editor.background")) setVar("--bg-primary", cs.backgroundColor);
+			if (!fromTheme("editorGutter.background") && !fromTheme("editor.lineHighlightBackground")) {
+				const margin = document.querySelector(".monaco-editor .margin") ?? editorEl;
+				setVar("--bg-secondary", getComputedStyle(margin).backgroundColor || cs.backgroundColor);
+				setVar("--bg-elevated", getComputedStyle(margin).backgroundColor || cs.backgroundColor);
+			}
+			if (!fromTheme("editor.foreground")) setVar("--text-primary", getComputedStyle(document.body).color);
+			if (!fromTheme("editorLineNumber.foreground")) {
+				const rgbNums = cs.backgroundColor.match(/\d+/g);
+				if (rgbNums && rgbNums.length >= 3) {
+					const lum = (.2126 * +rgbNums[0] + .7152 * +rgbNums[1] + .0722 * +rgbNums[2]) / 255;
+					document.documentElement.style.setProperty("--text-secondary", lum > .5 ? "#595c60" : "#858585");
+				}
 			}
 		}
 	}
