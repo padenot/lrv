@@ -1279,6 +1279,7 @@ function prefersReducedMotion() {
 
 //#endregion
 //#region web/src/file-loading-methods.ts
+let _loadSerial = 0;
 var FileLoadingMethods = class {
 	getCurrentFile(index) {
 		return this.files[index];
@@ -1365,6 +1366,13 @@ var FileLoadingMethods = class {
 		if (window.DEBUG) console.info("[app] models created for", file.path, "lang", language, "old/new lines", oldContent.split("\n").length, newContent.split("\n").length);
 		window.Perf.mark("loadFile:setModel:start");
 		const diffEditor = this.editor;
+		const editorContainer = document.getElementById("editor-container");
+		editorContainer?.classList.add("diff-loading");
+		const mySerial = ++_loadSerial;
+		const uncover = () => {
+			if (_loadSerial === mySerial) editorContainer?.classList.remove("diff-loading");
+		};
+		const fallback = setTimeout(uncover, 1500);
 		diffEditor.setModel({
 			original: this.originalModel,
 			modified: this.modifiedModel
@@ -1374,8 +1382,10 @@ var FileLoadingMethods = class {
 		let scrollReset;
 		scrollReset = diffEditor.onDidUpdateDiff(() => {
 			scrollReset?.dispose();
+			clearTimeout(fallback);
 			diffEditor.getModifiedEditor().setScrollTop(0);
 			diffEditor.getOriginalEditor().setScrollTop(0);
+			requestAnimationFrame(() => requestAnimationFrame(uncover));
 		});
 		diffEditor.updateOptions({
 			renderSideBySide,

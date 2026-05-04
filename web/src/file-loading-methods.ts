@@ -6,6 +6,10 @@ import { markAppReady } from './ui-signals';
 import type { AppContext, DiffFile } from './types/app';
 import type { editor } from 'monaco-editor';
 
+// Incremented on every loadFile call so stale onDidUpdateDiff callbacks
+// from a superseded load cannot uncover the editor prematurely.
+let _loadSerial = 0;
+
 export class FileLoadingMethods {
   declare currentFileIsCommit: boolean;
   declare currentFileIndex: number;
@@ -154,24 +158,30 @@ export class FileLoadingMethods {
 
     window.Perf.mark('loadFile:setModel:start');
     const diffEditor = this.editor!;
+    const editorContainer = document.getElementById('editor-container');
+    editorContainer?.classList.add('diff-loading');
+    const mySerial = ++_loadSerial;
+    const uncover = () => {
+      if (_loadSerial === mySerial) editorContainer?.classList.remove('diff-loading');
+    };
+    const fallback = setTimeout(uncover, 1500);
     diffEditor.setModel({
       original: this.originalModel!,
       modified: this.modifiedModel!,
     });
     window.Perf.mark('loadFile:setModel:end');
     window.Perf.measure('loadFile:setModel', 'loadFile:setModel:start', 'loadFile:setModel:end');
-    // onDidUpdateDiff fires for both "model changed → undefined" and
-    // "undefined → diff ready". Skip the first (null result) so the scroll
-    // reset only runs once the real diff computation is available.
-    // Use `let` (not `const`) so that if onDidUpdateDiff fires synchronously
-    // during registration, scrollReset is still undefined and ?.dispose()
-    // is a safe no-op. The listener then stays alive to catch the real
-    // async diff-ready fire, at which point scrollReset is assigned.
+    // Use `let` so a synchronous onDidUpdateDiff fire (before scrollReset is
+    // assigned) hits ?.dispose() safely and leaves the listener active for
+    // the real async diff-ready fire.
     let scrollReset: ReturnType<typeof diffEditor.onDidUpdateDiff>;
     scrollReset = diffEditor.onDidUpdateDiff(() => {
       scrollReset?.dispose();
+      clearTimeout(fallback);
       diffEditor.getModifiedEditor().setScrollTop(0);
       diffEditor.getOriginalEditor().setScrollTop(0);
+      // Two rAFs: one for Monaco to commit view zones, one for the browser to paint.
+      requestAnimationFrame(() => requestAnimationFrame(uncover));
     });
     diffEditor.updateOptions({
       renderSideBySide,
