@@ -14,19 +14,20 @@ VCS-agnostic: supports any diff producer (git, jj, hg, etc.).
 
 ## Running lrv (Development)
 
-Always use the repo binary:
+Use the pre-built binary directly for speed (skips recompilation):
 
 ```bash
-cargo run --bin lrv --
+./target/debug/lrv
 ```
 
-Examples:
+After code changes, rebuild first with `just build`, then run. Examples:
 
 ```bash
-git diff | cargo run --bin lrv --
-git show HEAD^ | cargo run --bin lrv --
-jj diff --git | cargo run --bin lrv --
-jj show --git -r <change> | cargo run --bin lrv --
+git diff | ./target/debug/lrv
+git show HEAD^ | ./target/debug/lrv
+jj diff --git | ./target/debug/lrv
+jj show --git -r <change> | ./target/debug/lrv
+./target/debug/lrv --series "origin/main..HEAD"
 ```
 
 ## Build, Test, Lint
