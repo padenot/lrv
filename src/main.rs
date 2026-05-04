@@ -57,9 +57,11 @@ fn get_project_context() -> ProjectContext {
             }
         });
 
+    const EMBEDDED_SKILL: &str = include_str!("skill.md");
     let claude_skill_installed = dirs::home_dir()
         .map(|h| h.join(".claude").join("skills").join("lrv").join("SKILL.md"))
-        .map(|p| p.exists())
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .map(|installed| installed == EMBEDDED_SKILL)
         .unwrap_or(false);
 
     ProjectContext {
