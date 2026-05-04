@@ -11,7 +11,7 @@ export const CUSTOM_THEMES: ThemeMap = {
     base: 'vs-dark',
     inherit: true,
     rules: [
-      { token: 'comment', foreground: '586e75', fontStyle: 'italic' },
+      { token: 'comment', foreground: '7b9ea6', fontStyle: 'italic' },
       { token: 'keyword', foreground: '859900' },
       { token: 'number', foreground: 'd33682' },
       { token: 'string', foreground: '2aa198' },
@@ -34,7 +34,7 @@ export const CUSTOM_THEMES: ThemeMap = {
     base: 'vs',
     inherit: true,
     rules: [
-      { token: 'comment', foreground: '93a1a1', fontStyle: 'italic' },
+      { token: 'comment', foreground: '546e75', fontStyle: 'italic' },
       { token: 'keyword', foreground: '859900' },
       { token: 'number', foreground: 'd33682' },
       { token: 'string', foreground: '2aa198' },
