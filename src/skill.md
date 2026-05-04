@@ -32,5 +32,7 @@ lrv --series "main..HEAD"    # git range
 - Plan one fix per comment before touching any code. Never skip a comment.
 - Apply all fixes directly. No explanations or commentary.
 - Single-commit mode: put the change in the correct commit (amend, absorb, squash).
-- Series mode: each comment has a `commit_idx` field — apply the fix to that
-  specific commit, then return to the top of the stack.
+- Series mode: output is a `commits` array, each entry has `commit_hash`,
+  `commit_message`, and a `comments` list. Work through the array in order:
+  for each commit that has comments, edit that commit and apply all its fixes,
+  then return to the top of the stack before moving on.

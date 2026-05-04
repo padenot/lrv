@@ -41,5 +41,7 @@ The UI shows a commit strip; comments are grouped per commit in the output.
 - No explanations or commentary
 - Single-commit mode: put the change into the right commit (squash, absorb,
   git commit --amend, jj squash, etc.)
-- Series mode: each comment carries a `commit_idx` field — apply the fix to
-  that specific commit, then `jj edit` back to the top of the stack.
+- Series mode: output is a `commits` array, each entry has `commit_hash`,
+  `commit_message`, and a `comments` list. Work through commits in order:
+  for each commit that has comments, edit it and apply all its fixes,
+  then `jj edit` back to the top of the stack before moving on.
