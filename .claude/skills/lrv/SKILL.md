@@ -39,5 +39,7 @@ The UI shows a commit strip; comments are grouped per commit in the output.
   absolutely critical to avoid skipping comments.
 - Apply fixes directly to code
 - No explanations or commentary
-- If we're looking at something already committed, put the change into the right
-  commit, e.g. squash, absorb, git commit --amend, etc.
+- Single-commit mode: put the change into the right commit (squash, absorb,
+  git commit --amend, jj squash, etc.)
+- Series mode: each comment carries a `commit_idx` field — apply the fix to
+  that specific commit, then `jj edit` back to the top of the stack.
