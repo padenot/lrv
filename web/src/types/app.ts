@@ -45,6 +45,7 @@ export type AppContextData = {
   working_directory?: string;
   git_branch?: string;
   is_public?: boolean;
+  claude_skill_installed?: boolean;
 };
 
 export type UserTheme = {

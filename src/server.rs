@@ -614,6 +614,7 @@ pub fn create_router(state: AppState, enable_trace: bool) -> Router {
         .route("/api/context", get(get_context))
         .route("/api/config", get(get_config).put(update_config))
         .route("/api/themes", get(get_user_themes))
+        .route("/api/install-skill", post(install_skill))
         .route("/api/file", get(get_file_content))
         .route("/api/comment", post(add_comment))
         .route("/api/complete", post(complete_review))
@@ -767,6 +768,19 @@ async fn get_context(State(state): State<AppState>) -> Json<ProjectContext> {
 
 async fn get_user_themes() -> Json<Vec<UserTheme>> {
     Json(load_user_themes())
+}
+
+async fn install_skill() -> Result<Json<serde_json::Value>, StatusCode> {
+    const SKILL_CONTENT: &str = include_str!("skill.md");
+    let skill_path = dirs::home_dir()
+        .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?
+        .join(".claude")
+        .join("skills")
+        .join("lrv");
+    fs::create_dir_all(&skill_path).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    fs::write(skill_path.join("SKILL.md"), SKILL_CONTENT)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(serde_json::json!({ "ok": true })))
 }
 
 async fn get_file_content(

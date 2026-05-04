@@ -66,6 +66,46 @@ body {
   flex-direction: column;
 }
 
+.skill-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 16px;
+  background: #78350f;
+  color: #fef3c7;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.skill-banner span {
+  flex: 1;
+}
+.skill-install-btn {
+  background: #f59e0b;
+  color: #1c1917;
+  border: none;
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.skill-install-btn:hover {
+  background: #fbbf24;
+}
+.skill-dismiss-btn {
+  background: transparent;
+  border: none;
+  color: #fef3c7;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 4px;
+  opacity: 0.7;
+}
+.skill-dismiss-btn:hover {
+  opacity: 1;
+}
+
 .header {
   background: var(--bg-secondary);
   padding: 8px 16px;

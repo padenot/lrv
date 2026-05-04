@@ -121,6 +121,7 @@ pub struct ProjectContext {
     pub git_branch: Option<String>,
     pub title: Option<String>,
     pub is_public: bool,
+    pub claude_skill_installed: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

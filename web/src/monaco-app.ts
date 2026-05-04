@@ -462,8 +462,34 @@ export class MonacoApp {
     // Show banner for public mode
     if (this.context.is_public) {
       const b = $<HTMLElement>('#public-banner');
-      if (b) {
-        b.style.display = '';
+      if (b) b.style.display = '';
+    }
+
+    // Show skill install banner if Claude Code skill is not installed
+    if (this.context.claude_skill_installed === false) {
+      const banner = $<HTMLElement>('#skill-banner');
+      const installBtn = $<HTMLButtonElement>('#skill-install-btn');
+      const dismissBtn = $<HTMLButtonElement>('#skill-dismiss-btn');
+      if (banner) {
+        banner.style.display = '';
+        const hide = () => { banner.style.display = 'none'; };
+        dismissBtn?.addEventListener('click', hide);
+        installBtn?.addEventListener('click', async () => {
+          installBtn.disabled = true;
+          installBtn.textContent = 'Installing…';
+          try {
+            const res = await fetch('/api/install-skill', { method: 'POST' });
+            if (res.ok) {
+              hide();
+            } else {
+              installBtn.textContent = 'Failed — try again';
+              installBtn.disabled = false;
+            }
+          } catch {
+            installBtn.textContent = 'Failed — try again';
+            installBtn.disabled = false;
+          }
+        });
       }
     }
 

@@ -23,6 +23,7 @@ fn test_app_state_construction() {
         git_branch: Some("main".to_string()),
         title: None,
         is_public: false,
+            claude_skill_installed: false,
     };
 
     let (shutdown_tx, _rx) = tokio::sync::mpsc::channel::<()>(1);
@@ -65,6 +66,7 @@ fn test_create_router() {
         git_branch: None,
         title: None,
         is_public: false,
+            claude_skill_installed: false,
     };
 
     let (shutdown_tx, _rx) = tokio::sync::mpsc::channel::<()>(1);

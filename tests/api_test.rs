@@ -10,6 +10,7 @@ fn test_appstate_has_context_for_file_reading() {
         git_branch: None,
         title: None,
         is_public: false,
+            claude_skill_installed: false,
     };
 
     // This test ensures context is available in AppState
@@ -41,6 +42,7 @@ fn test_appstate_required_fields() {
         git_branch: Some("main".to_string()),
         title: None,
         is_public: false,
+            claude_skill_installed: false,
     };
 
     let (shutdown_tx, _rx) = tokio::sync::mpsc::channel(1);

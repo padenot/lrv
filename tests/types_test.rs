@@ -58,6 +58,7 @@ fn test_project_context() {
         git_branch: Some("feature/test".to_string()),
         title: None,
         is_public: false,
+            claude_skill_installed: false,
     };
 
     assert_eq!(context.working_directory, "/home/user/project");

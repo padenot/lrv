@@ -2962,6 +2962,32 @@ var MonacoApp = class {
 			const b = $("#public-banner");
 			if (b) b.style.display = "";
 		}
+		if (this.context.claude_skill_installed === false) {
+			const banner = $("#skill-banner");
+			const installBtn = $("#skill-install-btn");
+			const dismissBtn = $("#skill-dismiss-btn");
+			if (banner) {
+				banner.style.display = "";
+				const hide = () => {
+					banner.style.display = "none";
+				};
+				dismissBtn?.addEventListener("click", hide);
+				installBtn?.addEventListener("click", async () => {
+					installBtn.disabled = true;
+					installBtn.textContent = "Installing…";
+					try {
+						if ((await fetch("/api/install-skill", { method: "POST" })).ok) hide();
+						else {
+							installBtn.textContent = "Failed — try again";
+							installBtn.disabled = false;
+						}
+					} catch {
+						installBtn.textContent = "Failed — try again";
+						installBtn.disabled = false;
+					}
+				});
+			}
+		}
 		this.setupSidebarResizer();
 		this.setupCommitStripResizer();
 		this.setupFileListControls();

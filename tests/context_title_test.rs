@@ -25,6 +25,7 @@ async fn test_context_includes_title_when_set() {
         git_branch: None,
         title: Some("Test Title".to_string()),
         is_public: false,
+            claude_skill_installed: false,
     };
     let (shutdown_tx, _rx) = tokio::sync::mpsc::channel::<()>(1);
     let state = lrv::server::AppState {
@@ -85,6 +86,7 @@ async fn test_context_title_null_when_unset() {
         git_branch: None,
         title: None,
         is_public: false,
+            claude_skill_installed: false,
     };
     let (shutdown_tx, _rx) = tokio::sync::mpsc::channel::<()>(1);
     let state = lrv::server::AppState {

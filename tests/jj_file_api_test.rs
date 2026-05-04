@@ -73,6 +73,7 @@ fn make_jj_state(
             git_branch: None,
             title: None,
             is_public: false,
+            claude_skill_installed: false,
         }),
         old_caches: Arc::new(vec![tokio::sync::Mutex::new(std::collections::HashMap::new())]),
         new_caches: Arc::new(vec![tokio::sync::Mutex::new(std::collections::HashMap::new())]),

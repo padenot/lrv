@@ -57,11 +57,17 @@ fn get_project_context() -> ProjectContext {
             }
         });
 
+    let claude_skill_installed = dirs::home_dir()
+        .map(|h| h.join(".claude").join("skills").join("lrv").join("SKILL.md"))
+        .map(|p| p.exists())
+        .unwrap_or(false);
+
     ProjectContext {
         working_directory,
         git_branch,
         title: None,
         is_public: false,
+        claude_skill_installed,
     }
 }
 
