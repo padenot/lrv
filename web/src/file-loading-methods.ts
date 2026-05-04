@@ -106,7 +106,7 @@ export class FileLoadingMethods {
         glyphMargin: true,
         folding: false,
         lineDecorationsWidth: 0,
-        fontSize: 13,
+        fontSize: 14,
         fontFamily: mono,
         lineNumbers: 'on',
         renderOverviewRuler: true,

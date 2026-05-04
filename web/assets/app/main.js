@@ -51,7 +51,7 @@ const CUSTOM_THEMES = {
 		rules: [
 			{
 				token: "comment",
-				foreground: "586e75",
+				foreground: "7b9ea6",
 				fontStyle: "italic"
 			},
 			{
@@ -102,7 +102,7 @@ const CUSTOM_THEMES = {
 		rules: [
 			{
 				token: "comment",
-				foreground: "93a1a1",
+				foreground: "546e75",
 				fontStyle: "italic"
 			},
 			{
@@ -1197,7 +1197,7 @@ var FileLoadingMethods = class {
 			glyphMargin: true,
 			folding: false,
 			lineDecorationsWidth: 0,
-			fontSize: 13,
+			fontSize: 14,
 			fontFamily: mono,
 			lineNumbers: "on",
 			renderOverviewRuler: true,
