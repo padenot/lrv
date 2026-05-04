@@ -129,8 +129,14 @@ export interface AppContext {
   fileListFilter: string;
   seriesInfo: SeriesInfo | null;
   currentCommitIdx: number;
+  isStacked: boolean;
 
   updateUI(): void;
+  showStackedView(): void;
+  hideStackedView(): void;
+  toggleStackedView(): void;
+  scrollToFileInStacked(index: number): void;
+  renderStackedComments(): void;
   renderFileList(): void;
   renderSeriesNav(): void;
   loadCommit(idx: number): Promise<void>;

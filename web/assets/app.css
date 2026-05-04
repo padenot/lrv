@@ -591,6 +591,203 @@ body {
   position: relative;
 }
 
+/* ─── Stacked (Phabricator-style) view ────────────────────────────────────── */
+
+#stacked-container {
+  height: calc(100vh - 48px);
+  overflow-y: auto;
+  background: var(--bg-primary);
+  font-size: 12px;
+}
+
+.stacked-file-section {
+  margin: 16px 0;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.stacked-file-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border-color);
+  font-size: 12px;
+}
+
+.stacked-file-name {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--text-primary);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stacked-file-status {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 5px;
+  border-radius: 3px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+}
+
+.stacked-file-stats {
+  display: flex;
+  gap: 6px;
+  font-size: 11px;
+}
+
+.stacked-no-hunks,
+.stacked-empty {
+  padding: 16px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.stacked-diff-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.stacked-num {
+  width: 44px;
+  text-align: right;
+  padding: 0 6px;
+  color: var(--text-secondary);
+  background: var(--bg-elevated);
+  border-right: 1px solid var(--border-color);
+  user-select: none;
+  vertical-align: top;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.stacked-code {
+  padding: 1px 10px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  vertical-align: top;
+  color: var(--text-primary);
+}
+
+.stacked-code-add { background: rgba(151, 234, 151, 0.3); }
+.stacked-num-add  { background: rgba(151, 234, 151, 0.18); }
+.stacked-code-del { background: rgba(251, 175, 175, 0.3); }
+.stacked-num-del  { background: rgba(251, 175, 175, 0.18); }
+
+.stacked-old { border-right: 1px solid var(--border-color); }
+.stacked-code:hover { filter: brightness(0.93); }
+
+.stacked-hunk-header td {
+  padding: 2px 10px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  border-top: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.stacked-show-more td {
+  padding: 4px 0;
+  text-align: center;
+  background: var(--bg-elevated);
+  border-top: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.stacked-show-more-btn {
+  background: none;
+  border: none;
+  color: var(--accent-color, #007acc);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 12px;
+}
+
+.stacked-show-more-btn:hover { text-decoration: underline; }
+.stacked-show-more-btn:disabled { color: var(--text-secondary); cursor: default; }
+
+/* Inline comment form */
+.stacked-comment-form-row td,
+.stacked-comment-row td {
+  padding: 8px 12px;
+  background: var(--bg-elevated);
+  border-top: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.stacked-comment-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.stacked-comment-ta {
+  width: 100%;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 12px;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.stacked-comment-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.stacked-comment-box {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  position: relative;
+}
+
+.stacked-comment-meta {
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+.stacked-comment-body {
+  color: var(--text-primary);
+  font-size: 12px;
+  white-space: pre-wrap;
+  font-family: var(--font-sans);
+}
+
+.stacked-comment-del {
+  position: absolute;
+  top: 0;
+  right: 0;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 4px;
+}
+.stacked-comment-del:hover { color: var(--text-primary); }
+
+#toggle-stacked.active {
+  background: var(--accent-color, #007acc);
+  color: #fff;
+  border-color: var(--accent-color, #007acc);
+}
+
 #editor-container {
   height: calc(100vh - 48px);
   opacity: 0;

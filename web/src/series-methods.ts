@@ -20,6 +20,8 @@ export class SeriesMethods {
   declare loadCommitView: () => void;
   declare renderFileList: () => void;
   declare eagerPrefetchAllFiles: () => Promise<void>;
+  declare isStacked: boolean;
+  declare renderStackedView: () => void;
 
   renderSeriesNav() {
     const container = document.getElementById('commit-strip');
@@ -98,7 +100,9 @@ export class SeriesMethods {
     this.renderSeriesNav();
     this.renderFileList();
 
-    if (this.files.length > 0) {
+    if (this.isStacked) {
+      this.renderStackedView();
+    } else if (this.files.length > 0) {
       await this.loadFile(0);
     } else {
       this.loadCommitView();

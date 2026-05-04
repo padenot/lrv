@@ -14,6 +14,7 @@ import { CommitMethods } from './commit-methods';
 import { CommentsUIMethods } from './comments-ui-methods';
 import { DialogMethods } from './dialog-methods';
 import { SeriesMethods } from './series-methods';
+import { StackedViewMethods } from './stacked-view-methods';
 import type {
   AppConfig,
   AppConfigInput,
@@ -92,6 +93,12 @@ export class MonacoApp {
   declare showKeyboardHelp: () => void;
   declare showSubmitConfirmation: () => Promise<void>;
   declare userThemes: UserTheme[];
+  declare isStacked: boolean;
+  declare showStackedView: () => void;
+  declare hideStackedView: () => void;
+  declare toggleStackedView: () => void;
+  declare scrollToFileInStacked: (index: number) => void;
+  declare renderStackedComments: () => void;
   declare setupSidebarResizer: () => void;
   declare setupCommitStripResizer: () => void;
   declare setupFileListControls: () => void;
@@ -128,8 +135,12 @@ export class MonacoApp {
     this.fileListFilter = '';
     this.seriesInfo = null;
     this.currentCommitIdx = 0;
+    this.isStacked = false;
 
-    this.commentManager.onChange(() => this.updateUI());
+    this.commentManager.onChange(() => {
+      this.updateUI();
+      if (this.isStacked) this.renderStackedComments();
+    });
   }
 
   async init() {
@@ -447,7 +458,11 @@ export class MonacoApp {
         } else {
           const index = Number(li.dataset.index ?? -1);
           if (index >= 0) {
-            this.loadFile(index);
+            if (this.isStacked) {
+              this.scrollToFileInStacked(index);
+            } else {
+              this.loadFile(index);
+            }
           }
         }
       }
@@ -470,6 +485,10 @@ export class MonacoApp {
     $('#toggle-view')?.addEventListener('click', () => {
       this.isInline = !this.isInline;
       this.loadFile(this.currentFileIndex);
+    });
+
+    $('#toggle-stacked')?.addEventListener('click', () => {
+      this.toggleStackedView();
     });
 
     // Stats
@@ -530,3 +549,4 @@ applyMixin(MonacoApp, CommitMethods);
 applyMixin(MonacoApp, CommentsUIMethods);
 applyMixin(MonacoApp, DialogMethods);
 applyMixin(MonacoApp, SeriesMethods);
+applyMixin(MonacoApp, StackedViewMethods);

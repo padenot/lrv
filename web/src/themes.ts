@@ -214,6 +214,35 @@ export const CUSTOM_THEMES: ThemeMap = {
   },
 };
 
+// Fallback token colors for built-in Monaco themes (vs-dark, vs, hc-*)
+// that have no custom rules in CUSTOM_THEMES.
+export const FALLBACK_TOKEN_RULES: Record<'dark' | 'light', Array<{ token: string; foreground: string }>> = {
+  dark: [
+    { token: 'comment',  foreground: '6A9955' },
+    { token: 'keyword',  foreground: 'C586C0' },
+    { token: 'string',   foreground: 'CE9178' },
+    { token: 'number',   foreground: 'B5CEA8' },
+    { token: 'regexp',   foreground: 'D16969' },
+    { token: 'type',     foreground: '4EC9B0' },
+    { token: 'class',    foreground: '4EC9B0' },
+    { token: 'function', foreground: 'DCDCAA' },
+    { token: 'variable', foreground: '9CDCFE' },
+    { token: 'constant', foreground: '4FC1FF' },
+  ],
+  light: [
+    { token: 'comment',  foreground: '008000' },
+    { token: 'keyword',  foreground: '0000FF' },
+    { token: 'string',   foreground: 'A31515' },
+    { token: 'number',   foreground: '098658' },
+    { token: 'regexp',   foreground: 'EE0000' },
+    { token: 'type',     foreground: '267F99' },
+    { token: 'class',    foreground: '267F99' },
+    { token: 'function', foreground: '795E26' },
+    { token: 'variable', foreground: '001080' },
+    { token: 'constant', foreground: '0070C1' },
+  ],
+};
+
 export const UI_THEME_ACCENTS_HEX = {
   'firefox-devtools-dark': '#ff7de9',
   'firefox-devtools-light': '#d92bb4',
