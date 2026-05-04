@@ -338,6 +338,7 @@ export class MonacoApp {
     setVar('--bg-elevated',   fromTheme('editorGutter.background') || fromTheme('editor.lineHighlightBackground') || fromTheme('editor.background'));
     setVar('--text-primary',  fromTheme('editor.foreground'));
     setVar('--text-secondary', fromTheme('editorLineNumber.foreground'));
+    setVar('--border-color',  fromTheme('editorGroup.border'));
 
     // Fill any gaps with DOM-derived values (built-in themes have no colors map)
     const editorEl = document.querySelector('.monaco-editor');

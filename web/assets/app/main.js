@@ -97,6 +97,7 @@ const CUSTOM_THEMES = {
 			"editorGutter.background": "#073642",
 			"editorLineNumber.foreground": "#586e75",
 			"editorLineNumber.activeForeground": "#839496",
+			"editorGroup.border": "#0d3d4a",
 			"diffEditor.insertedLineBackground": "#22863a18",
 			"diffEditor.insertedTextBackground": "#22863a33",
 			"diffEditor.removedLineBackground": "#cf222e18",
@@ -155,6 +156,7 @@ const CUSTOM_THEMES = {
 			"editorGutter.background": "#eee8d5",
 			"editorLineNumber.foreground": "#93a1a1",
 			"editorLineNumber.activeForeground": "#657b83",
+			"editorGroup.border": "#ccc3a0",
 			"diffEditor.insertedLineBackground": "#22863a14",
 			"diffEditor.insertedTextBackground": "#22863a2a",
 			"diffEditor.removedLineBackground": "#cf222e14",
@@ -210,6 +212,7 @@ const CUSTOM_THEMES = {
 			"editorCursor.foreground": "#b1b1b3",
 			"editor.selectionBackground": "#2b2a33",
 			"editor.inactiveSelectionBackground": "#1c1b22",
+			"editorGroup.border": "#252525",
 			"diffEditor.insertedLineBackground": "#22863a18",
 			"diffEditor.insertedTextBackground": "#22863a33",
 			"diffEditor.removedLineBackground": "#cf222e18",
@@ -265,6 +268,7 @@ const CUSTOM_THEMES = {
 			"editorCursor.foreground": "#222222",
 			"editor.selectionBackground": "#e6e6e6",
 			"editor.inactiveSelectionBackground": "#f0f0f0",
+			"editorGroup.border": "#d7d7db",
 			"diffEditor.insertedLineBackground": "#22863a14",
 			"diffEditor.insertedTextBackground": "#22863a2a",
 			"diffEditor.removedLineBackground": "#cf222e14",
@@ -320,6 +324,7 @@ const CUSTOM_THEMES = {
 			"editorCursor.foreground": "#c9d1d9",
 			"editor.selectionBackground": "#1f6feb",
 			"editor.inactiveSelectionBackground": "#1f6feb40",
+			"editorGroup.border": "#30363d",
 			"diffEditor.insertedLineBackground": "#22863a18",
 			"diffEditor.insertedTextBackground": "#22863a33",
 			"diffEditor.removedLineBackground": "#cf222e18",
@@ -375,6 +380,7 @@ const CUSTOM_THEMES = {
 			"editorCursor.foreground": "#24292f",
 			"editor.selectionBackground": "#0969da30",
 			"editor.inactiveSelectionBackground": "#0969da20",
+			"editorGroup.border": "#d0d7de",
 			"diffEditor.insertedLineBackground": "#22863a14",
 			"diffEditor.insertedTextBackground": "#22863a2a",
 			"diffEditor.removedLineBackground": "#cf222e14",
@@ -433,6 +439,7 @@ const CUSTOM_THEMES = {
 			"editorGutter.background": "#f8f9fc",
 			"editorLineNumber.foreground": "#6b748c",
 			"editorLineNumber.activeForeground": "#464c5c",
+			"editorGroup.border": "#c7ccd9",
 			"diffEditor.insertedLineBackground": "#97ea974d",
 			"diffEditor.insertedTextBackground": "#97ea9799",
 			"diffEditor.removedLineBackground": "#fbafaf4d",
@@ -2926,6 +2933,7 @@ var MonacoApp = class {
 		setVar("--bg-elevated", fromTheme("editorGutter.background") || fromTheme("editor.lineHighlightBackground") || fromTheme("editor.background"));
 		setVar("--text-primary", fromTheme("editor.foreground"));
 		setVar("--text-secondary", fromTheme("editorLineNumber.foreground"));
+		setVar("--border-color", fromTheme("editorGroup.border"));
 		const editorEl = document.querySelector(".monaco-editor");
 		if (editorEl) {
 			const cs = getComputedStyle(editorEl);

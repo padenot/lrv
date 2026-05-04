@@ -41,10 +41,11 @@ which commit they belong to and are grouped per commit in the output.
 Useful flags:
 
 ```text
+--series <RANGE>   Review a jj revset or git range as a commit series
 --no-open          Don't auto-open a browser
 --format text      Print comments as text instead of JSON
 --title "..."      Show a custom title in the header
---series <RANGE>   Review a jj revset or git range as a commit series
+--config-dir       Print the config directory path and exit
 --bind <ADDR>      Bind a specific address (default: 127.0.0.1)
 --public           Bind on all interfaces
 --tailscale        Also bind detected Tailscale IPv4 addresses
