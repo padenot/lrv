@@ -266,8 +266,11 @@ export class MonacoApp {
         if (window.DEBUG) {
           console.info('[app] calling loadFile(0)');
         }
+        if (this.config.stacked_view) {
+          this.showStackedView();
+        }
         window.Perf.mark('init:first-file:load:start');
-        Promise.resolve(this.loadFile(0)).then(() => {
+        Promise.resolve(this.isStacked ? Promise.resolve() : this.loadFile(0)).then(() => {
           window.Perf.mark('init:first-file:load:end');
           window.Perf.measure(
             'init:first-file:load',

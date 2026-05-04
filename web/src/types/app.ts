@@ -35,6 +35,7 @@ export type AppConfig = {
   color_scheme: string;
   font: string;
   split_view: boolean;
+  stacked_view: boolean;
   auto_close_tab: boolean;
 };
 

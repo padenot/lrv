@@ -1,6 +1,7 @@
 import { el, clearEl } from './dom';
 import { detectLanguageFromPathAndContent } from './language';
-import type { AppContext, DiffFile, DiffHunk, DiffLine, FilePair, Side } from './types/app';
+import { fetchJSON } from './api';
+import type { AppConfig, AppContext, DiffFile, DiffHunk, DiffLine, FilePair, Side } from './types/app';
 
 const CONTEXT_LINES = 3;
 
@@ -13,6 +14,7 @@ export class StackedViewMethods {
   declare isStacked: boolean;
   declare currentCommitIdx: AppContext['currentCommitIdx'];
   declare seriesInfo: AppContext['seriesInfo'];
+  declare config: AppContext['config'];
 
   // ─── Toggle ──────────────────────────────────────────────────────────────
 
@@ -29,6 +31,7 @@ export class StackedViewMethods {
     // Inline/Side-by-Side is Monaco-only — hide it in stacked mode
     const toggleView = document.getElementById('toggle-view');
     if (toggleView) toggleView.style.display = 'none';
+    this.persistStackedPref(true);
   }
 
   hideStackedView() {
@@ -40,6 +43,16 @@ export class StackedViewMethods {
     document.getElementById('toggle-stacked')?.classList.remove('active');
     const toggleView = document.getElementById('toggle-view');
     if (toggleView) toggleView.style.display = '';
+    this.persistStackedPref(false);
+  }
+
+  private persistStackedPref(value: boolean) {
+    this.config.stacked_view = value;
+    fetchJSON<AppConfig>('/api/config', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(this.config),
+    }).catch(() => {/* best effort */});
   }
 
   toggleStackedView() {

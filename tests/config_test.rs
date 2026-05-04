@@ -17,6 +17,7 @@ fn test_config_serde() {
         font: "Monaco".to_string(),
         split_view: false,
         auto_close_tab: false,
+        stacked_view: false,
     };
 
     // Serialize to TOML

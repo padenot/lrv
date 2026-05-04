@@ -616,14 +616,16 @@ const DEFAULT_APP_CONFIG = {
 	color_scheme: "vs-dark",
 	font: "JetBrains Mono",
 	split_view: true,
-	auto_close_tab: true
+	auto_close_tab: true,
+	stacked_view: false
 };
 function resolveAppConfig(input) {
 	return {
 		color_scheme: input.color_scheme ?? DEFAULT_APP_CONFIG.color_scheme,
 		font: input.font?.trim() || DEFAULT_APP_CONFIG.font,
 		split_view: input.split_view ?? DEFAULT_APP_CONFIG.split_view,
-		auto_close_tab: input.auto_close_tab ?? DEFAULT_APP_CONFIG.auto_close_tab
+		auto_close_tab: input.auto_close_tab ?? DEFAULT_APP_CONFIG.auto_close_tab,
+		stacked_view: input.stacked_view ?? DEFAULT_APP_CONFIG.stacked_view
 	};
 }
 
@@ -2498,7 +2500,8 @@ var DialogMethods = class {
 				color_scheme: String(formData.get("color_scheme") ?? "vs-dark"),
 				font: String(formData.get("font") ?? ""),
 				split_view: formData.get("split_view") === "on",
-				auto_close_tab: formData.get("auto_close_tab") === "on"
+				auto_close_tab: formData.get("auto_close_tab") === "on",
+				stacked_view: this.config.stacked_view
 			});
 			try {
 				if ((await fetch("/api/config", {
@@ -2740,6 +2743,7 @@ var StackedViewMethods = class {
 		document.getElementById("toggle-stacked")?.classList.add("active");
 		const toggleView = document.getElementById("toggle-view");
 		if (toggleView) toggleView.style.display = "none";
+		this.persistStackedPref(true);
 	}
 	hideStackedView() {
 		this.isStacked = false;
@@ -2750,6 +2754,15 @@ var StackedViewMethods = class {
 		document.getElementById("toggle-stacked")?.classList.remove("active");
 		const toggleView = document.getElementById("toggle-view");
 		if (toggleView) toggleView.style.display = "";
+		this.persistStackedPref(false);
+	}
+	persistStackedPref(value) {
+		this.config.stacked_view = value;
+		fetchJSON("/api/config", {
+			method: "PUT",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify(this.config)
+		}).catch(() => {});
 	}
 	toggleStackedView() {
 		if (this.isStacked) this.hideStackedView();
@@ -3212,8 +3225,9 @@ var MonacoApp = class {
 				window.Perf.mark("init:file-list:render:end");
 				window.Perf.measure("init:file-list:render", "init:file-list:render:start", "init:file-list:render:end");
 				if (window.DEBUG) console.info("[app] calling loadFile(0)");
+				if (this.config.stacked_view) this.showStackedView();
 				window.Perf.mark("init:first-file:load:start");
-				Promise.resolve(this.loadFile(0)).then(() => {
+				Promise.resolve(this.isStacked ? Promise.resolve() : this.loadFile(0)).then(() => {
 					window.Perf.mark("init:first-file:load:end");
 					window.Perf.measure("init:first-file:load", "init:first-file:load:start", "init:first-file:load:end");
 					const reviewTime = document.getElementById("review-time");

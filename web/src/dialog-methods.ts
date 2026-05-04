@@ -234,6 +234,7 @@ export class DialogMethods {
         font: String(formData.get('font') ?? ''),
         split_view: formData.get('split_view') === 'on',
         auto_close_tab: formData.get('auto_close_tab') === 'on',
+        stacked_view: this.config.stacked_view,
       });
 
       try {
