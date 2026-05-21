@@ -468,7 +468,7 @@ async fn load_phabricator_notes(
         };
         for note in &mut revision_notes {
             if note.file != "(commit)" {
-                note.side = infer_review_note_side(&note, diffs, commit_idx);
+                note.side = infer_review_note_side(note, diffs, commit_idx);
             }
             note.commit_idx = commit_idx;
         }
