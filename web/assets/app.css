@@ -795,10 +795,15 @@ body {
 }
 
 /* Inline comment form */
-.stacked-comment-form-row td,
+.stacked-comment-form-row .stacked-comment-form-cell,
 .stacked-comment-row td {
   padding: 8px 12px;
   background: var(--bg-elevated);
+  border-top: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.stacked-comment-form-row .stacked-review-note-spacer {
   border-top: 1px solid var(--border-color);
   border-bottom: 1px solid var(--border-color);
 }
@@ -1117,7 +1122,6 @@ body {
   box-shadow: var(--shadow-sm);
   padding: 10px;
   border-radius: 4px;
-  width: 380px;
 }
 
 .inline-comment-box h3 {

@@ -245,6 +245,12 @@ export class StackedViewMethods {
     const oldNum = document.createElement('td');
     oldNum.className = 'stacked-num' + (isDel ? ' stacked-num-del' : '');
     oldNum.textContent = line.old_line != null ? String(line.old_line) : '';
+    if (line.old_line != null) {
+      oldNum.style.cursor = 'pointer';
+      oldNum.addEventListener('click', () =>
+        this.showInlineCommentForm(filePath, line.old_line!, 'old', tr, body),
+      );
+    }
 
     const oldCode = document.createElement('td');
     oldCode.className = 'stacked-code stacked-old' + (isDel ? ' stacked-code-del' : '');
@@ -262,6 +268,12 @@ export class StackedViewMethods {
     const newNum = document.createElement('td');
     newNum.className = 'stacked-num' + (isAdd ? ' stacked-num-add' : '');
     newNum.textContent = line.new_line != null ? String(line.new_line) : '';
+    if (line.new_line != null) {
+      newNum.style.cursor = 'pointer';
+      newNum.addEventListener('click', () =>
+        this.showInlineCommentForm(filePath, line.new_line!, 'new', tr, body),
+      );
+    }
 
     const newCode = document.createElement('td');
     newCode.className = 'stacked-code stacked-new' + (isAdd ? ' stacked-code-add' : '');
@@ -376,8 +388,21 @@ export class StackedViewMethods {
 
     const tr = document.createElement('tr');
     tr.className = 'stacked-comment-form-row';
-    const td = document.createElement('td');
-    td.colSpan = 4;
+
+    // 4-col layout: old-num | old-code | new-num | new-code
+    // Form goes in the code column for the clicked side; everything else is a spacer.
+    const oldNumCell = document.createElement('td');
+    oldNumCell.className = 'stacked-review-note-spacer';
+    const oldCodeCell = document.createElement('td');
+    const newNumCell = document.createElement('td');
+    newNumCell.className = 'stacked-review-note-spacer';
+    const newCodeCell = document.createElement('td');
+
+    const formCell = side === 'new' ? newCodeCell : oldCodeCell;
+    formCell.className = 'stacked-comment-form-cell';
+    const nonFormCodeCell = side === 'new' ? oldCodeCell : newCodeCell;
+    nonFormCodeCell.colSpan = 2;
+    nonFormCodeCell.className = 'stacked-review-note-spacer';
 
     const form = el('div', { className: 'stacked-comment-form' });
     const ta = document.createElement('textarea');
@@ -412,8 +437,12 @@ export class StackedViewMethods {
 
     actions.append(save, cancel);
     form.append(ta, actions);
-    td.appendChild(form);
-    tr.appendChild(td);
+    formCell.appendChild(form);
+    if (side === 'new') {
+      tr.append(nonFormCodeCell, newNumCell, newCodeCell);
+    } else {
+      tr.append(oldNumCell, oldCodeCell, nonFormCodeCell);
+    }
 
     const next = afterRow.nextSibling;
     body.insertBefore(tr, next ?? null);

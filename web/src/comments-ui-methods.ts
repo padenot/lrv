@@ -81,10 +81,12 @@ export class CommentsUIMethods {
     const existingIndex = this.commentManager.findComment(file, fileLineNumber, side);
     const existingComment = existingIndex >= 0 ? this.commentManager.comments[existingIndex] : null;
 
-    // Create the widget
+    // Create the widget, sized to the editor panel width
+    const editorWidth = targetEditor.getLayoutInfo().contentWidth;
     const domNode = el('div', { className: 'inline-comment-box' });
     domNode.style.position = 'relative';
     domNode.style.zIndex = '3';
+    domNode.style.width = `${editorWidth}px`;
     const modKey = MOD_KEY_LABEL;
     const title = el('h3', {
       text: `Line ${existingComment ? commentLineLabel(existingComment) : fileLineNumber}${existingComment ? ' - Edit' : ''}`,
