@@ -1,6 +1,6 @@
 [package]
 name = "lrv"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2021"
 description = "Local code review tool for unified diffs"
 license = "MIT OR Apache-2.0"
