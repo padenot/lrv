@@ -107,7 +107,7 @@ async function openApp(page: Page) {
   await page.waitForFunction(() => (window as any).require !== undefined, { timeout: 10000 });
   await page.locator('#file-list').waitFor({ state: 'attached', timeout: 10000 });
   if (!(await page.locator('.monaco-editor').first().isVisible())) {
-    const firstItem = page.locator('#file-list li').first();
+    const firstItem = page.locator('#file-list li[data-index]').first();
     if (await firstItem.count()) {
       await firstItem.click();
     }
