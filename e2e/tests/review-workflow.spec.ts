@@ -483,7 +483,9 @@ test.describe('Review Workflow E2E', () => {
     await expect(page.locator('text=Review Submitted')).toBeVisible({ timeout: 3000 });
   });
 
-  test('persists queued comments across reload and clears drafts after submit', async ({ page }) => {
+  test('persists queued comments across reload and clears drafts after submit', async ({
+    page,
+  }) => {
     await openApp(page, { requireEditor: false });
     await page.waitForFunction(() => {
       const app = (window as any).__APP;
