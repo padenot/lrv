@@ -3,6 +3,12 @@ import { CommentManager } from './comments';
 import { ReviewNoteManager } from './review-notes';
 import { fetchJSON } from './api';
 import { DEFAULT_APP_CONFIG, resolveAppConfig } from './config';
+import {
+  buildCommentDraftKey,
+  clearCommentDraft,
+  loadCommentDraft,
+  saveCommentDraft,
+} from './comment-draft-storage';
 import { CUSTOM_THEMES } from './themes';
 import { markAppReady } from './ui-signals';
 import { appendLinkifiedText } from './linkify';
@@ -88,6 +94,8 @@ export class MonacoApp {
   fileListFilter: string;
   seriesInfo: SeriesInfo | null;
   currentCommitIdx: number;
+  commentDraftKey: string | null;
+  commentDraftWrite: Promise<void>;
   declare updateUI: () => void;
   declare renderReviewNotes: () => void;
   declare renderFileList: () => void;
@@ -149,9 +157,12 @@ export class MonacoApp {
     this.fileListFilter = '';
     this.seriesInfo = null;
     this.currentCommitIdx = 0;
+    this.commentDraftKey = null;
+    this.commentDraftWrite = Promise.resolve();
     this.isStacked = false;
 
     this.commentManager.onChange(() => {
+      this.persistComments();
       this.updateUI();
       if (this.isStacked) {
         this.renderStackedComments();
@@ -218,6 +229,8 @@ export class MonacoApp {
     this.diff = diffData;
     this.files = diffData.files;
     this.stats = diffData.stats;
+    this.commentDraftKey = buildCommentDraftKey(this.context, this.diff, this.seriesInfo);
+    await this.restorePersistedComments();
 
     // Apply split view setting from config
     this.isInline = !this.config.split_view;
@@ -326,6 +339,47 @@ export class MonacoApp {
         });
       });
     });
+  }
+
+  private persistComments() {
+    if (!this.commentDraftKey) {
+      return;
+    }
+
+    const key = this.commentDraftKey;
+    const comments = this.commentManager.getComments();
+    this.commentDraftWrite = this.commentDraftWrite
+      .catch(() => undefined)
+      .then(() => saveCommentDraft(key, comments));
+  }
+
+  private async restorePersistedComments() {
+    if (!this.commentDraftKey) {
+      return;
+    }
+
+    const comments = await loadCommentDraft(this.commentDraftKey);
+    if (comments.length === 0) {
+      return;
+    }
+
+    this.commentManager.setComments(comments);
+    if (window.DEBUG) {
+      console.info('[app] restored persisted review comments:', comments.length);
+    }
+  }
+
+  async clearPersistedComments() {
+    if (!this.commentDraftKey) {
+      return;
+    }
+
+    try {
+      await this.commentDraftWrite.catch(() => undefined);
+      await clearCommentDraft(this.commentDraftKey);
+    } catch (error) {
+      console.warn('Failed to clear persisted review comments:', error);
+    }
   }
 
   applyThemeToUI(themeName: string) {

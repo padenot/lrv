@@ -29,7 +29,7 @@ export function commentLineLabel(comment: ReviewComment): string {
 }
 
 export class CommentManager {
-  private comments: ReviewComment[];
+  comments: ReviewComment[];
   private listeners: Array<() => void>;
   currentCommitIdx: number | null;
 
@@ -44,6 +44,11 @@ export class CommentManager {
       comment = { ...comment, commit_idx: this.currentCommitIdx };
     }
     this.comments.push(comment);
+    this.notifyListeners();
+  }
+
+  setComments(comments: ReviewComment[]): void {
+    this.comments = [...comments];
     this.notifyListeners();
   }
 

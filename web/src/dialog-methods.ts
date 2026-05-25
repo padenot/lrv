@@ -83,6 +83,10 @@ export class DialogMethods {
   declare isInline: boolean;
   declare currentFileIndex: number;
   declare commentManager: AppContext['commentManager'];
+  declare clearPersistedComments: () => Promise<void>;
+  declare updateDecorations: () => void;
+  declare loadCommitView: () => void;
+  declare currentFileIsCommit: boolean;
   declare applyThemeToUI: (theme: string) => void;
   declare loadFile: (index: number) => Promise<void>;
   declare userThemes: AppContext['userThemes'];
@@ -503,6 +507,13 @@ export class DialogMethods {
         });
         if (!resp.ok) {
           throw new Error(`HTTP ${resp.status}`);
+        }
+
+        await this.clearPersistedComments();
+        this.commentManager.setComments([]);
+        this.updateDecorations();
+        if (this.currentFileIsCommit) {
+          this.loadCommitView();
         }
 
         submitBtn.textContent = 'Submitted!';

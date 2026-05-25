@@ -523,6 +523,10 @@ var CommentManager = class {
 		this.comments.push(comment);
 		this.notifyListeners();
 	}
+	setComments(comments) {
+		this.comments = [...comments];
+		this.notifyListeners();
+	}
 	removeComment(index) {
 		this.comments.splice(index, 1);
 		this.notifyListeners();
@@ -680,6 +684,170 @@ function resolveAppConfig(input) {
 		auto_close_tab: input.auto_close_tab ?? DEFAULT_APP_CONFIG.auto_close_tab,
 		stacked_view: input.stacked_view ?? DEFAULT_APP_CONFIG.stacked_view
 	};
+}
+
+//#endregion
+//#region web/src/comment-draft-storage.ts
+const DB_NAME = "lrv-comment-drafts";
+const DB_VERSION = 1;
+const STORE_NAME = "drafts";
+let dbPromise = null;
+function buildCommentDraftKey(context, diff, seriesInfo) {
+	const fingerprint = JSON.stringify({
+		context: {
+			title: context.title ?? null,
+			working_directory: context.working_directory ?? null,
+			git_branch: context.git_branch ?? null
+		},
+		diff: {
+			commit_hash: diff.commit_hash ?? null,
+			commit_message: diff.commit_message ?? null,
+			stats: diff.stats,
+			files: diff.files.map(fingerprintFile)
+		},
+		series: seriesInfo?.is_series ? seriesInfo.commits.map((commit) => ({
+			idx: commit.idx,
+			commit_hash: commit.commit_hash ?? null,
+			commit_message: commit.commit_message ?? null
+		})) : null
+	});
+	return `review-comments:v1:${hashString(fingerprint)}:${fingerprint.length.toString(36)}`;
+}
+async function loadCommentDraft(key) {
+	const db = await openDraftDb();
+	if (!db) return [];
+	try {
+		const record = await runTransaction(db, "readonly", (store) => store.get(key));
+		if (!record || record.schemaVersion !== 1 || !Array.isArray(record.comments)) return [];
+		return sanitizeComments(record.comments);
+	} catch (error) {
+		console.warn("Failed to load persisted review comments:", error);
+		return [];
+	}
+}
+async function saveCommentDraft(key, comments) {
+	const sanitized = sanitizeComments(comments);
+	if (sanitized.length === 0) {
+		await clearCommentDraft(key);
+		return;
+	}
+	const db = await openDraftDb();
+	if (!db) return;
+	const record = {
+		key,
+		schemaVersion: 1,
+		savedAt: Date.now(),
+		comments: sanitized
+	};
+	try {
+		await runTransaction(db, "readwrite", (store) => store.put(record));
+	} catch (error) {
+		console.warn("Failed to persist review comments:", error);
+	}
+}
+async function clearCommentDraft(key) {
+	const db = await openDraftDb();
+	if (!db) return;
+	try {
+		await runTransaction(db, "readwrite", (store) => store.delete(key));
+	} catch (error) {
+		console.warn("Failed to clear persisted review comments:", error);
+	}
+}
+function openDraftDb() {
+	if (typeof indexedDB === "undefined") return Promise.resolve(null);
+	dbPromise ??= new Promise((resolve) => {
+		const request = indexedDB.open(DB_NAME, DB_VERSION);
+		request.onupgradeneeded = () => {
+			const db = request.result;
+			if (!db.objectStoreNames.contains(STORE_NAME)) db.createObjectStore(STORE_NAME, { keyPath: "key" });
+		};
+		request.onsuccess = () => resolve(request.result);
+		request.onerror = () => {
+			console.warn("Failed to open review comment draft database:", request.error);
+			resolve(null);
+		};
+		request.onblocked = () => {
+			console.warn("Review comment draft database open is blocked by another tab");
+			resolve(null);
+		};
+	});
+	return dbPromise;
+}
+function runTransaction(db, mode, action) {
+	return new Promise((resolve, reject) => {
+		const tx = db.transaction(STORE_NAME, mode);
+		let result;
+		tx.oncomplete = () => resolve(result);
+		tx.onerror = () => reject(tx.error ?? /* @__PURE__ */ new Error("IndexedDB transaction failed"));
+		tx.onabort = () => reject(tx.error ?? /* @__PURE__ */ new Error("IndexedDB transaction aborted"));
+		try {
+			const request = action(tx.objectStore(STORE_NAME));
+			request.onsuccess = () => {
+				result = request.result;
+			};
+			request.onerror = () => reject(request.error ?? /* @__PURE__ */ new Error("IndexedDB request failed"));
+		} catch (error) {
+			reject(error);
+		}
+	});
+}
+function fingerprintFile(file) {
+	return {
+		path: file.path,
+		old_path: file.old_path ?? null,
+		status: file.status,
+		hunks: file.hunks.map((hunk) => ({
+			old_start: hunk.old_start ?? null,
+			new_start: hunk.new_start ?? null,
+			lines: hunk.lines.map((line) => [
+				line.old_line ?? null,
+				line.new_line ?? null,
+				line.type ?? null,
+				line.content ?? null
+			])
+		}))
+	};
+}
+function sanitizeComments(value) {
+	if (!Array.isArray(value)) return [];
+	const comments = [];
+	for (const item of value) {
+		const comment = sanitizeComment(item);
+		if (comment) comments.push(comment);
+	}
+	return comments;
+}
+function sanitizeComment(value) {
+	if (!value || typeof value !== "object") return null;
+	const raw = value;
+	if (typeof raw.file !== "string" || !isCommentLine(raw.line) || raw.side !== "old" && raw.side !== "new" || typeof raw.body !== "string") return null;
+	const comment = {
+		file: raw.file,
+		line: cloneCommentLine(raw.line),
+		side: raw.side,
+		body: raw.body
+	};
+	if (typeof raw.commit_idx === "number" && Number.isInteger(raw.commit_idx)) comment.commit_idx = raw.commit_idx;
+	return comment;
+}
+function isCommentLine(value) {
+	if (typeof value === "number" && Number.isInteger(value) && value > 0) return true;
+	if (!Array.isArray(value) || value.length !== 2) return false;
+	const start = value[0];
+	const end = value[1];
+	return typeof start === "number" && typeof end === "number" && Number.isInteger(start) && Number.isInteger(end) && start > 0 && end >= start;
+}
+function cloneCommentLine(line) {
+	return Array.isArray(line) ? [line[0], line[1]] : line;
+}
+function hashString(value) {
+	let hash = 2166136261;
+	for (let i = 0; i < value.length; i++) {
+		hash ^= value.charCodeAt(i);
+		hash = Math.imul(hash, 16777619) >>> 0;
+	}
+	return hash.toString(16).padStart(8, "0");
 }
 
 //#endregion
@@ -3060,6 +3228,10 @@ var DialogMethods = class {
 					body: JSON.stringify({ comments })
 				});
 				if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+				await this.clearPersistedComments();
+				this.commentManager.setComments([]);
+				this.updateDecorations();
+				if (this.currentFileIsCommit) this.loadCommitView();
 				submitBtn.textContent = "Submitted!";
 				const submitReviewBtn = document.getElementById("submit-review");
 				if (submitReviewBtn) {
@@ -3593,6 +3765,8 @@ var MonacoApp = class {
 	fileListFilter;
 	seriesInfo;
 	currentCommitIdx;
+	commentDraftKey;
+	commentDraftWrite;
 	constructor() {
 		this.commentManager = new CommentManager();
 		this.reviewNoteManager = new ReviewNoteManager();
@@ -3633,8 +3807,11 @@ var MonacoApp = class {
 		this.fileListFilter = "";
 		this.seriesInfo = null;
 		this.currentCommitIdx = 0;
+		this.commentDraftKey = null;
+		this.commentDraftWrite = Promise.resolve();
 		this.isStacked = false;
 		this.commentManager.onChange(() => {
+			this.persistComments();
 			this.updateUI();
 			if (this.isStacked) this.renderStackedComments();
 		});
@@ -3680,6 +3857,8 @@ var MonacoApp = class {
 		this.diff = diffData;
 		this.files = diffData.files;
 		this.stats = diffData.stats;
+		this.commentDraftKey = buildCommentDraftKey(this.context, this.diff, this.seriesInfo);
+		await this.restorePersistedComments();
 		this.isInline = !this.config.split_view;
 		window.Perf.mark("init:amd-wait:start");
 		await new Promise((resolve, reject) => {
@@ -3748,6 +3927,28 @@ var MonacoApp = class {
 				});
 			});
 		});
+	}
+	persistComments() {
+		if (!this.commentDraftKey) return;
+		const key = this.commentDraftKey;
+		const comments = this.commentManager.getComments();
+		this.commentDraftWrite = this.commentDraftWrite.catch(() => void 0).then(() => saveCommentDraft(key, comments));
+	}
+	async restorePersistedComments() {
+		if (!this.commentDraftKey) return;
+		const comments = await loadCommentDraft(this.commentDraftKey);
+		if (comments.length === 0) return;
+		this.commentManager.setComments(comments);
+		if (window.DEBUG) console.info("[app] restored persisted review comments:", comments.length);
+	}
+	async clearPersistedComments() {
+		if (!this.commentDraftKey) return;
+		try {
+			await this.commentDraftWrite.catch(() => void 0);
+			await clearCommentDraft(this.commentDraftKey);
+		} catch (error) {
+			console.warn("Failed to clear persisted review comments:", error);
+		}
 	}
 	applyThemeToUI(themeName) {
 		const setVar = (k, v) => {

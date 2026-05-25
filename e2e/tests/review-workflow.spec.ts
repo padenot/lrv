@@ -89,13 +89,17 @@ async function startServer(port: number = 0, options?: { title?: string }): Prom
   });
 }
 
-async function openApp(page: Page) {
+async function openApp(page: Page, options: { requireEditor?: boolean } = {}) {
   const url = (serverUrl ?? 'http://localhost:9999') + '/';
+  const requireEditor = options.requireEditor ?? true;
   await page.goto(url);
   // AMD loader present
   await page.waitForFunction(() => (window as any).require !== undefined, { timeout: 10000 });
   // Ensure file list exists; click first item if editor not visible yet
   await page.locator('#file-list').waitFor({ state: 'attached', timeout: 10000 });
+  if (!requireEditor) {
+    return;
+  }
   if (!(await page.locator('.monaco-editor').first().isVisible())) {
     const firstItem = page.locator('#file-list li').first();
     if (await firstItem.count()) {
@@ -103,6 +107,51 @@ async function openApp(page: Page) {
     }
   }
   await page.waitForSelector('.monaco-editor', { timeout: 20000 });
+}
+
+async function readCommentDraftRecords(page: Page): Promise<Array<{ comments?: unknown[] }>> {
+  return page.evaluate(() => {
+    return new Promise<Array<{ comments?: unknown[] }>>((resolve, reject) => {
+      const request = indexedDB.open('lrv-comment-drafts', 1);
+
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        if (!db.objectStoreNames.contains('drafts')) {
+          db.createObjectStore('drafts', { keyPath: 'key' });
+        }
+      };
+
+      request.onerror = () => reject(request.error ?? new Error('Failed to open draft DB'));
+      request.onsuccess = () => {
+        const db = request.result;
+        const tx = db.transaction('drafts', 'readonly');
+        let records: Array<{ comments?: unknown[] }> = [];
+
+        tx.oncomplete = () => {
+          db.close();
+          resolve(records);
+        };
+        tx.onerror = () => {
+          db.close();
+          reject(tx.error ?? new Error('Failed to read draft DB'));
+        };
+
+        const getAll = tx.objectStore('drafts').getAll();
+        getAll.onsuccess = () => {
+          records = getAll.result as Array<{ comments?: unknown[] }>;
+        };
+        getAll.onerror = () => reject(getAll.error ?? new Error('Failed to read draft records'));
+      };
+    });
+  });
+}
+
+async function commentDraftCount(page: Page): Promise<number> {
+  const records = await readCommentDraftRecords(page);
+  return records.reduce(
+    (count, record) => count + (Array.isArray(record.comments) ? record.comments.length : 0),
+    0,
+  );
 }
 
 /**
@@ -432,6 +481,37 @@ test.describe('Review Workflow E2E', () => {
 
     // Wait for submission to complete
     await expect(page.locator('text=Review Submitted')).toBeVisible({ timeout: 3000 });
+  });
+
+  test('persists queued comments across reload and clears drafts after submit', async ({ page }) => {
+    await openApp(page, { requireEditor: false });
+    await page.waitForFunction(() => {
+      const app = (window as any).__APP;
+      return app?.files?.length > 0 && app?.commentDraftKey;
+    });
+
+    await page.evaluate(() => {
+      const app = (window as any).__APP;
+      app.commentManager.addComment({
+        file: app.files[0].path,
+        line: 1,
+        side: 'new',
+        body: 'Keep this comment after reload',
+      });
+    });
+
+    await expect(page.locator('#comment-count')).toHaveText('1');
+    await expect.poll(() => commentDraftCount(page)).toBe(1);
+
+    await openApp(page, { requireEditor: false });
+
+    await expect(page.locator('#comment-count')).toHaveText('1');
+    await page.locator('#submit-review').click();
+    await expect(page.locator('text=Keep this comment after reload')).toBeVisible();
+
+    await page.locator('.confirm-submit-btn').click();
+    await expect(page.locator('text=Review Submitted')).toBeVisible({ timeout: 3000 });
+    await expect.poll(() => commentDraftCount(page)).toBe(0);
   });
 
   test('should open and save settings', async ({ page }) => {

@@ -89,6 +89,7 @@ export interface AppContext {
     getComments(): ReviewComment[];
     getCommentsForFile(file: string): ReviewComment[];
     addComment(comment: ReviewComment): void;
+    setComments(comments: ReviewComment[]): void;
     updateComment(index: number, body: string): void;
     removeComment(index: number): void;
     findComment(file: string, line: number, side: Side): number;
@@ -171,6 +172,7 @@ export interface AppContext {
   applyThemeToUI(themeName: string): void;
   showSettingsModal(): void;
   showSubmitConfirmation(): Promise<void>;
+  clearPersistedComments(): Promise<void>;
   showKeyboardHelp(): void;
   updateDecorations(): void;
   renderReviewNotes(): void;
