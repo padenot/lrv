@@ -14,9 +14,13 @@ fn main() {
     println!("cargo:rerun-if-changed=package-lock.json");
 
     let bundle = Path::new("web/assets/app/main.js");
-    if frontend_needs_rebuild(bundle) {
+    if is_source_checkout() && frontend_needs_rebuild(bundle) {
         run_web_build();
     }
+}
+
+fn is_source_checkout() -> bool {
+    Path::new(".git").exists()
 }
 
 fn frontend_needs_rebuild(bundle: &Path) -> bool {
