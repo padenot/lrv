@@ -46,6 +46,9 @@ export class SeriesMethods {
     const { commits } = this.seriesInfo;
     const nav = el('div', { className: 'series-nav' });
 
+    const uniqueAuthors = new Set(commits.map((c) => c.commit_author).filter(Boolean));
+    const mixedAuthors = uniqueAuthors.size > 1;
+
     commits.forEach((commit) => {
       const isActive = commit.idx === this.currentCommitIdx;
       const row = el('div', { className: `series-commit${isActive ? ' active' : ''}` });
@@ -60,7 +63,11 @@ export class SeriesMethods {
       const hash = commit.commit_hash?.slice(0, 8) ?? '';
       const adds = commit.stats.additions;
       const dels = commit.stats.deletions;
-      meta.innerHTML = `<span class="series-hash">${hash}</span> <span class="delta-add">+${adds}</span> <span class="delta-del">-${dels}</span>`;
+      const authorPart =
+        mixedAuthors && commit.commit_author
+          ? ` <span class="series-author">${commit.commit_author}</span>`
+          : '';
+      meta.innerHTML = `<span class="series-hash">${hash}</span> <span class="delta-add">+${adds}</span> <span class="delta-del">-${dels}</span>${authorPart}`;
 
       info.appendChild(title);
       info.appendChild(meta);

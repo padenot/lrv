@@ -3314,6 +3314,7 @@ var SeriesMethods = class {
 		clearEl(container);
 		const { commits } = this.seriesInfo;
 		const nav = el("div", { className: "series-nav" });
+		const mixedAuthors = new Set(commits.map((c) => c.commit_author).filter(Boolean)).size > 1;
 		commits.forEach((commit) => {
 			const row = el("div", { className: `series-commit${commit.idx === this.currentCommitIdx ? " active" : ""}` });
 			const num = el("span", {
@@ -3326,7 +3327,7 @@ var SeriesMethods = class {
 				text: commit.commit_message?.split("\n")[0] ?? "(no message)"
 			});
 			const meta = el("div", { className: "series-commit-meta" });
-			meta.innerHTML = `<span class="series-hash">${commit.commit_hash?.slice(0, 8) ?? ""}</span> <span class="delta-add">+${commit.stats.additions}</span> <span class="delta-del">-${commit.stats.deletions}</span>`;
+			meta.innerHTML = `<span class="series-hash">${commit.commit_hash?.slice(0, 8) ?? ""}</span> <span class="delta-add">+${commit.stats.additions}</span> <span class="delta-del">-${commit.stats.deletions}</span>${mixedAuthors && commit.commit_author ? ` <span class="series-author">${commit.commit_author}</span>` : ""}`;
 			info.appendChild(title);
 			info.appendChild(meta);
 			row.appendChild(num);
