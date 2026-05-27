@@ -524,7 +524,9 @@ export class StackedViewMethods {
         ta_.value = comment.body;
         const saveEdit = () => {
           const newBody = ta_.value.trim();
-          if (!newBody) { return; }
+          if (!newBody) {
+            return;
+          }
           this.commentManager.updateComment(idx, newBody);
           this.renderStackedComments();
         };
