@@ -1156,7 +1156,7 @@ body {
 
 .inline-comment-box {
   background: var(--bg-secondary);
-  border: 6px solid red;
+  border: 1px solid var(--border-color);
   box-shadow: var(--shadow-sm);
   padding: 10px;
   border-radius: 4px;
