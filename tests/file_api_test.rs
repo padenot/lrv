@@ -33,7 +33,7 @@ fn make_state_with_root(root: &str) -> lrv::server::AppState {
         commit_author: None,
         commit_date: None,
         commit_message: None,
-            jj_change_id: None,
+        jj_change_id: None,
     };
     let config = lrv::config::UserConfig::default();
     let context = lrv::types::ProjectContext {

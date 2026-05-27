@@ -507,6 +507,9 @@ test.describe('Review Workflow E2E', () => {
 
     await openApp(page, { requireEditor: false });
 
+    // The restore banner should appear — click Restore to load saved comments.
+    await page.locator('#restore-yes-btn').click();
+
     await expect(page.locator('#comment-count')).toHaveText('1');
     await page.locator('#submit-review').click();
     await expect(page.locator('text=Keep this comment after reload')).toBeVisible();

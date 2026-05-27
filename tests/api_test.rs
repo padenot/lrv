@@ -34,7 +34,7 @@ fn test_appstate_required_fields() {
         commit_author: None,
         commit_date: None,
         commit_message: None,
-            jj_change_id: None,
+        jj_change_id: None,
     };
 
     let config = lrv::config::UserConfig::default();
