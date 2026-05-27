@@ -22,7 +22,7 @@ pub fn parse_phab_mcp_output(text: &str) -> Result<Vec<ReviewNote>> {
         let end = header_indices.get(n + 1).copied().unwrap_or(lines.len());
 
         let header = lines[start];
-        let body_lines = lines[start + 1..end].iter().copied().collect::<Vec<_>>();
+        let body_lines = lines[start + 1..end].to_vec();
         let body = body_lines.join("\n").trim().to_string();
 
         if body.is_empty() {
@@ -129,7 +129,7 @@ fn parse_line_spec(s: &str) -> Option<CommentLine> {
     let s = s.trim();
     if let Some((a, b)) = s.split_once('-') {
         let start: usize = a.trim().parse().ok()?;
-        let end: usize = b.trim().split_whitespace().next()?.parse().ok()?;
+        let end: usize = b.split_whitespace().next()?.parse().ok()?;
         if start > 0 && end >= start {
             return Some(CommentLine::Range((start, end)));
         }
