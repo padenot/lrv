@@ -43,7 +43,7 @@ fn hash_web_assets() -> u64 {
 }
 
 fn hash_dir(path: &Path, hasher: &mut DefaultHasher) {
-    let Ok(mut entries) = fs::read_dir(path) else {
+    let Ok(entries) = fs::read_dir(path) else {
         return;
     };
     let mut paths: Vec<_> = entries.flatten().map(|e| e.path()).collect();
