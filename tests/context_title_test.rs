@@ -15,6 +15,7 @@ async fn test_context_includes_title_when_set() {
         commit_author: None,
         commit_date: None,
         commit_message: None,
+            jj_change_id: None,
     };
     let config = lrv::config::UserConfig::default();
     let context = lrv::types::ProjectContext {
@@ -81,6 +82,7 @@ async fn test_context_title_null_when_unset() {
         commit_author: None,
         commit_date: None,
         commit_message: None,
+            jj_change_id: None,
     };
     let config = lrv::config::UserConfig::default();
     let context = lrv::types::ProjectContext {

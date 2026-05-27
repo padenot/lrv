@@ -68,6 +68,7 @@ export type CommitSummary = {
   commit_author?: string;
   commit_date?: string;
   commit_message?: string;
+  jj_change_id?: string;
   stats: DiffStats;
 };
 
@@ -126,6 +127,7 @@ export interface AppContext {
     stats: DiffStats;
     commit_message?: string;
     commit_hash?: string;
+    jj_change_id?: string;
   } | null;
   files: DiffFile[];
   stats: DiffStats;

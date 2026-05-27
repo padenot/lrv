@@ -31,6 +31,27 @@ git diff > /tmp/lrv.diff
 lrv --file /tmp/lrv.diff --review-notes-file /tmp/lrv-local-review.json
 ```
 
+## Loading external review comments
+
+```bash
+# Validate a review notes JSON file
+lrv --validate-review-notes /tmp/notes.json
+
+# GitHub PR comments (pipe gh output, don't let lrv call gh itself)
+gh api --paginate repos/OWNER/REPO/pulls/N/comments > /tmp/pr-comments.json
+git diff main..HEAD | lrv --github-pr-comments /tmp/pr-comments.json
+# or with process substitution
+git diff main..HEAD | lrv --github-pr-comments <(gh api --paginate repos/OWNER/REPO/pulls/N/comments)
+
+# Phabricator — with API token (PHABRICATOR_API_KEY env var)
+lrv --phab-revision D123456 ...
+
+# Phabricator — without token, using mcp__moz__get_phabricator_revision
+# 1. Call the MCP tool and write its output to a file
+# 2. Pass to lrv
+lrv --phab-mcp-comments /tmp/phab.md ...
+```
+
 ## Behavior
 
 - Run `lrv` synchronously. Never use a sub-agent or background task.

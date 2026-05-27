@@ -19,6 +19,7 @@ fn test_diff_response_structure() {
         commit_author: None,
         commit_date: None,
         commit_message: None,
+            jj_change_id: None,
     };
 
     assert_eq!(response.files.len(), 1);

@@ -1,6 +1,8 @@
 mod config;
 mod diff;
+mod github;
 mod output;
+mod phab_mcp;
 mod phabricator;
 mod server;
 mod themes;
@@ -219,6 +221,14 @@ struct Args {
     #[arg(long)]
     review_notes_file: Vec<String>,
 
+    /// Load Phabricator comments from the markdown output of mcp__moz__get_phabricator_revision
+    #[arg(long = "phab-mcp-comments")]
+    phab_mcp_comments: Option<String>,
+
+    /// Load GitHub PR review comments from a JSON file (output of `gh api repos/OWNER/REPO/pulls/N/comments`)
+    #[arg(long = "github-pr-comments")]
+    github_pr_comments: Option<String>,
+
     /// Load Phabricator review comments as inline review notes. Can be repeated for series mode.
     #[arg(long = "phab-revision")]
     phab_revisions: Vec<String>,
@@ -242,6 +252,10 @@ struct Args {
     /// Print the config directory path and exit
     #[arg(long)]
     config_dir: bool,
+
+    /// Validate a review notes JSON file and exit (exit 0 on success, 1 on error)
+    #[arg(long)]
+    validate_review_notes: Option<String>,
 }
 
 fn is_jj_repo(root: &str) -> bool {
@@ -547,6 +561,22 @@ async fn main() -> Result<()> {
         println!("{}", dir.display());
         return Ok(());
     }
+    if let Some(path) = args.validate_review_notes {
+        match load_review_notes_file(&path) {
+            Ok(notes) => {
+                eprintln!(
+                    "OK: {} note{}",
+                    notes.len(),
+                    if notes.len() == 1 { "" } else { "s" }
+                );
+                return Ok(());
+            }
+            Err(e) => {
+                eprintln!("Error: {}", e);
+                std::process::exit(1);
+            }
+        }
+    }
 
     // Derive dynamic behavior based on environment.
     // If we're over SSH and a Tailscale IP is present in env, auto-enable tailscale
@@ -688,6 +718,14 @@ async fn main() -> Result<()> {
         )
         .await?,
     );
+    if let Some(path) = &args.phab_mcp_comments {
+        let text = std::fs::read_to_string(path)
+            .with_context(|| format!("Failed to read Phabricator MCP comments file: {}", path))?;
+        review_notes.extend(phab_mcp::parse_phab_mcp_output(&text)?);
+    }
+    if let Some(path) = &args.github_pr_comments {
+        review_notes.extend(github::load_github_notes(path, &diffs)?);
+    }
 
     // Setup shutdown channel
     let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
@@ -764,11 +802,26 @@ async fn main() -> Result<()> {
     let mut listeners: Vec<(String, tokio::net::TcpListener)> = Vec::new();
     let actual_port: u16;
     if requested_port == 0 {
-        // Bind the first address to an ephemeral port to pick a port
+        // Derive a stable port from the CWD so the same directory always gets
+        // the same port. Fall back to an ephemeral port if the stable one is taken.
+        let stable_port = {
+            let cwd = env::current_dir().unwrap_or_default();
+            let bytes = cwd.to_string_lossy();
+            let mut h: u32 = 0x811c9dc5;
+            for b in bytes.bytes() {
+                h ^= b as u32;
+                h = h.wrapping_mul(0x01000193);
+            }
+            32768u16 + (h % 8192) as u16
+        };
         let first = &bind_addrs[0];
-        let first_listener = tokio::net::TcpListener::bind(format!("{}:{}", first, 0))
-            .await
-            .context("Failed to bind to ephemeral port")?;
+        let first_listener =
+            match tokio::net::TcpListener::bind(format!("{}:{}", first, stable_port)).await {
+                Ok(l) => l,
+                Err(_) => tokio::net::TcpListener::bind(format!("{}:0", first))
+                    .await
+                    .context("Failed to bind to ephemeral port")?,
+            };
         let addr = first_listener.local_addr()?;
         actual_port = addr.port();
         listeners.push((first.clone(), first_listener));

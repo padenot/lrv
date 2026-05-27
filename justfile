@@ -4,17 +4,16 @@ default:
     @just --list
 
 build-web:
-    npm install
     npm run build:web
 
-build: build-web
+build:
     cargo build
 
-build-release: build-web
+build-release:
     cargo build --release
 
-install: build-web
-    cargo install --path .
+install:
+    cargo install --path . --force
     mkdir -p ~/.claude/skills/lrv
     cp src/skill.md ~/.claude/skills/lrv/SKILL.md
 

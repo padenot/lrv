@@ -694,24 +694,12 @@ const STORE_NAME = "drafts";
 let dbPromise = null;
 function buildCommentDraftKey(context, diff, seriesInfo) {
 	const fingerprint = JSON.stringify({
-		context: {
-			title: context.title ?? null,
-			working_directory: context.working_directory ?? null,
-			git_branch: context.git_branch ?? null
-		},
-		diff: {
-			commit_hash: diff.commit_hash ?? null,
-			commit_message: diff.commit_message ?? null,
-			stats: diff.stats,
-			files: diff.files.map(fingerprintFile)
-		},
-		series: seriesInfo?.is_series ? seriesInfo.commits.map((commit) => ({
-			idx: commit.idx,
-			commit_hash: commit.commit_hash ?? null,
-			commit_message: commit.commit_message ?? null
-		})) : null
+		working_directory: context.working_directory ?? null,
+		git_branch: context.git_branch ?? null,
+		commit_id: diff.jj_change_id ?? diff.commit_hash ?? null,
+		series: seriesInfo?.is_series ? seriesInfo.commits.map((c) => c.jj_change_id ?? c.commit_hash ?? null) : null
 	});
-	return `review-comments:v1:${hashString(fingerprint)}:${fingerprint.length.toString(36)}`;
+	return `review-comments:v2:${hashString(fingerprint)}:${fingerprint.length.toString(36)}`;
 }
 async function loadCommentDraft(key) {
 	const db = await openDraftDb();
@@ -791,23 +779,6 @@ function runTransaction(db, mode, action) {
 			reject(error);
 		}
 	});
-}
-function fingerprintFile(file) {
-	return {
-		path: file.path,
-		old_path: file.old_path ?? null,
-		status: file.status,
-		hunks: file.hunks.map((hunk) => ({
-			old_start: hunk.old_start ?? null,
-			new_start: hunk.new_start ?? null,
-			lines: hunk.lines.map((line) => [
-				line.old_line ?? null,
-				line.new_line ?? null,
-				line.type ?? null,
-				line.content ?? null
-			])
-		}))
-	};
 }
 function sanitizeComments(value) {
 	if (!Array.isArray(value)) return [];
@@ -2543,8 +2514,6 @@ var CommentsUIMethods = class {
 		const existingComment = existingIndex >= 0 ? this.commentManager.comments[existingIndex] : null;
 		const editorWidth = targetEditor.getLayoutInfo().contentWidth;
 		const domNode = el("div", { className: "inline-comment-box" });
-		domNode.style.position = "relative";
-		domNode.style.zIndex = "3";
 		domNode.style.width = `${editorWidth}px`;
 		const modKey = MOD_KEY_LABEL;
 		const title = el("h3", { text: `Line ${existingComment ? commentLineLabel(existingComment) : fileLineNumber}${existingComment ? " - Edit" : ""}` });
@@ -2595,6 +2564,11 @@ var CommentsUIMethods = class {
 		this.currentWidgetEditor = targetEditor;
 		const saveBtn = domNode.querySelector(".save-btn");
 		const cancelBtn = domNode.querySelector(".cancel-btn");
+		const autoResize = () => {
+			textarea.style.height = "auto";
+			textarea.style.height = `${textarea.scrollHeight}px`;
+		};
+		textarea.addEventListener("input", autoResize);
 		if (existingComment) textarea.value = existingComment.body;
 		const handleKeydown = (e) => {
 			if (e.key === "Escape") cleanup();
@@ -2603,11 +2577,12 @@ var CommentsUIMethods = class {
 				saveComment();
 			}
 		};
-		document.addEventListener("keydown", handleKeydown);
+		textarea.addEventListener("keydown", handleKeydown);
 		const cleanup = () => {
 			targetEditor.removeContentWidget(widget);
 			this.currentWidget = null;
-			document.removeEventListener("keydown", handleKeydown);
+			textarea.removeEventListener("keydown", handleKeydown);
+			textarea.removeEventListener("input", autoResize);
 		};
 		const saveComment = () => {
 			if (!textarea.value.trim()) {
@@ -2635,7 +2610,11 @@ var CommentsUIMethods = class {
 			this.updateDecorations();
 			cleanup();
 		};
-		setTimeout(() => textarea.focus(), 100);
+		setTimeout(() => {
+			textarea.focus();
+			autoResize();
+			targetEditor.layoutContentWidget(widget);
+		}, 100);
 	}
 	updateUI() {
 		const count = this.commentManager.getComments().length;
@@ -3644,7 +3623,7 @@ var StackedViewMethods = class {
 			className: "stacked-comment-cancel btn-secondary",
 			text: "Cancel"
 		});
-		save.addEventListener("click", () => {
+		const doSave = () => {
 			const body_ = ta.value.trim();
 			if (!body_) return;
 			this.commentManager.addComment({
@@ -3656,8 +3635,15 @@ var StackedViewMethods = class {
 			});
 			tr.remove();
 			this.renderStackedComments();
-		});
+		};
+		save.addEventListener("click", doSave);
 		cancel.addEventListener("click", () => tr.remove());
+		ta.addEventListener("keydown", (e) => {
+			if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+				e.preventDefault();
+				doSave();
+			} else if (e.key === "Escape") tr.remove();
+		});
 		actions.append(save, cancel);
 		form.append(ta, actions);
 		formCell.appendChild(form);
@@ -3693,24 +3679,62 @@ var StackedViewMethods = class {
 			const td = document.createElement("td");
 			td.colSpan = 4;
 			const box = el("div", { className: "stacked-comment-box" });
-			const bodyEl = el("div", {
-				className: "stacked-comment-body",
-				text: comment.body
-			});
 			const meta = el("div", {
 				className: "stacked-comment-meta",
 				text: `${comment.side} line ${comment.line}`
 			});
+			const bodyEl = el("div", {
+				className: "stacked-comment-body",
+				text: comment.body
+			});
+			const actions_ = el("div", { className: "stacked-comment-actions-row" });
+			const edit = el("button", {
+				className: "stacked-comment-edit btn-secondary",
+				text: "Edit"
+			});
 			const del = el("button", {
-				className: "stacked-comment-del",
-				text: "✕",
-				attrs: { title: "Delete" }
+				className: "stacked-comment-del btn-danger",
+				text: "Delete"
+			});
+			edit.addEventListener("click", () => {
+				const ta_ = document.createElement("textarea");
+				ta_.className = "stacked-comment-ta";
+				ta_.rows = 3;
+				ta_.value = comment.body;
+				const saveEdit = () => {
+					const newBody = ta_.value.trim();
+					if (!newBody) return;
+					this.commentManager.updateComment(idx, newBody);
+					this.renderStackedComments();
+				};
+				const cancelEdit = () => this.renderStackedComments();
+				ta_.addEventListener("keydown", (e) => {
+					if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+						e.preventDefault();
+						saveEdit();
+					} else if (e.key === "Escape") cancelEdit();
+				});
+				const saveBtn_ = el("button", {
+					className: "btn-primary",
+					text: "Save"
+				});
+				const cancelBtn_ = el("button", {
+					className: "btn-secondary",
+					text: "Cancel"
+				});
+				saveBtn_.addEventListener("click", saveEdit);
+				cancelBtn_.addEventListener("click", cancelEdit);
+				const editActions = el("div", { className: "stacked-comment-actions-row" });
+				editActions.append(saveBtn_, cancelBtn_);
+				box.replaceChildren(meta, ta_, editActions);
+				ta_.focus();
 			});
 			del.addEventListener("click", () => {
 				this.commentManager.removeComment(idx);
 				this.renderStackedComments();
 			});
-			box.append(meta, bodyEl, del);
+			actions_.append(edit, del);
+			box.append(meta, bodyEl, actions_);
 			td.appendChild(box);
 			tr.appendChild(td);
 			const next = targetRow.nextSibling;
@@ -3939,8 +3963,27 @@ var MonacoApp = class {
 		if (!this.commentDraftKey) return;
 		const comments = await loadCommentDraft(this.commentDraftKey);
 		if (comments.length === 0) return;
-		this.commentManager.setComments(comments);
-		if (window.DEBUG) console.info("[app] restored persisted review comments:", comments.length);
+		const banner = document.getElementById("restore-banner");
+		const msg = document.getElementById("restore-banner-msg");
+		const yesBtn = document.getElementById("restore-yes-btn");
+		const noBtn = document.getElementById("restore-no-btn");
+		if (!banner || !msg || !yesBtn || !noBtn) {
+			this.commentManager.setComments(comments);
+			return;
+		}
+		msg.textContent = `${comments.length} comment${comments.length === 1 ? "" : "s"} from a previous session — restore?`;
+		banner.style.display = "";
+		const close = () => {
+			banner.style.display = "none";
+		};
+		yesBtn.onclick = () => {
+			this.commentManager.setComments(comments);
+			close();
+		};
+		noBtn.onclick = () => {
+			this.clearPersistedComments();
+			close();
+		};
 	}
 	async clearPersistedComments() {
 		if (!this.commentDraftKey) return;

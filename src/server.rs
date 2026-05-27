@@ -10,6 +10,7 @@ use axum::{
     Router,
 };
 use rust_embed::RustEmbed;
+include!(concat!(env!("OUT_DIR"), "/web_asset_hash.rs"));
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -777,6 +778,7 @@ async fn get_series(State(state): State<AppState>) -> Json<SeriesInfo> {
             commit_author: d.commit_author.clone(),
             commit_date: d.commit_date.clone(),
             commit_message: d.commit_message.clone(),
+            jj_change_id: d.jj_change_id.clone(),
             stats: d.stats.clone(),
         })
         .collect();

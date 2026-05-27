@@ -20,6 +20,7 @@ fn test_app_state_construction() {
         commit_author: None,
         commit_date: None,
         commit_message: None,
+            jj_change_id: None,
     };
 
     let config = lrv::config::UserConfig::default();
@@ -65,6 +66,7 @@ fn test_create_router() {
         commit_author: None,
         commit_date: None,
         commit_message: None,
+            jj_change_id: None,
     };
 
     let config = lrv::config::UserConfig::default();
@@ -114,6 +116,7 @@ async fn test_review_note_api_round_trip() {
         commit_author: None,
         commit_date: None,
         commit_message: None,
+            jj_change_id: None,
     };
 
     let config = lrv::config::UserConfig::default();

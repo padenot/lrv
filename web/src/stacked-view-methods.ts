@@ -417,7 +417,7 @@ export class StackedViewMethods {
       text: 'Cancel',
     });
 
-    save.addEventListener('click', () => {
+    const doSave = () => {
       const body_ = ta.value.trim();
       if (!body_) {
         return;
@@ -431,9 +431,18 @@ export class StackedViewMethods {
       } as Parameters<typeof this.commentManager.addComment>[0]);
       tr.remove();
       this.renderStackedComments();
-    });
+    };
 
+    save.addEventListener('click', doSave);
     cancel.addEventListener('click', () => tr.remove());
+    ta.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        doSave();
+      } else if (e.key === 'Escape') {
+        tr.remove();
+      }
+    });
 
     actions.append(save, cancel);
     form.append(ta, actions);
@@ -494,22 +503,55 @@ export class StackedViewMethods {
       td.colSpan = 4;
 
       const box = el('div', { className: 'stacked-comment-box' });
-      const bodyEl = el('div', { className: 'stacked-comment-body', text: comment.body });
       const meta = el('div', {
         className: 'stacked-comment-meta',
         text: `${comment.side} line ${comment.line}`,
       });
+      const bodyEl = el('div', { className: 'stacked-comment-body', text: comment.body });
+      const actions_ = el('div', { className: 'stacked-comment-actions-row' });
+      const edit = el('button', {
+        className: 'stacked-comment-edit btn-secondary',
+        text: 'Edit',
+      });
       const del = el('button', {
-        className: 'stacked-comment-del',
-        text: '✕',
-        attrs: { title: 'Delete' },
+        className: 'stacked-comment-del btn-danger',
+        text: 'Delete',
+      });
+      edit.addEventListener('click', () => {
+        const ta_ = document.createElement('textarea');
+        ta_.className = 'stacked-comment-ta';
+        ta_.rows = 3;
+        ta_.value = comment.body;
+        const saveEdit = () => {
+          const newBody = ta_.value.trim();
+          if (!newBody) return;
+          this.commentManager.updateComment(idx, newBody);
+          this.renderStackedComments();
+        };
+        const cancelEdit = () => this.renderStackedComments();
+        ta_.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+            e.preventDefault();
+            saveEdit();
+          } else if (e.key === 'Escape') {
+            cancelEdit();
+          }
+        });
+        const saveBtn_ = el('button', { className: 'btn-primary', text: 'Save' });
+        const cancelBtn_ = el('button', { className: 'btn-secondary', text: 'Cancel' });
+        saveBtn_.addEventListener('click', saveEdit);
+        cancelBtn_.addEventListener('click', cancelEdit);
+        const editActions = el('div', { className: 'stacked-comment-actions-row' });
+        editActions.append(saveBtn_, cancelBtn_);
+        box.replaceChildren(meta, ta_, editActions);
+        ta_.focus();
       });
       del.addEventListener('click', () => {
         this.commentManager.removeComment(idx);
         this.renderStackedComments();
       });
-
-      box.append(meta, bodyEl, del);
+      actions_.append(edit, del);
+      box.append(meta, bodyEl, actions_);
       td.appendChild(box);
       tr.appendChild(td);
 

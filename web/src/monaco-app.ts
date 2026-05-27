@@ -363,10 +363,30 @@ export class MonacoApp {
       return;
     }
 
-    this.commentManager.setComments(comments);
-    if (window.DEBUG) {
-      console.info('[app] restored persisted review comments:', comments.length);
+    const banner = document.getElementById('restore-banner');
+    const msg = document.getElementById('restore-banner-msg');
+    const yesBtn = document.getElementById('restore-yes-btn');
+    const noBtn = document.getElementById('restore-no-btn');
+    if (!banner || !msg || !yesBtn || !noBtn) {
+      this.commentManager.setComments(comments);
+      return;
     }
+
+    msg.textContent = `${comments.length} comment${comments.length === 1 ? '' : 's'} from a previous session — restore?`;
+    banner.style.display = '';
+
+    const close = () => {
+      banner.style.display = 'none';
+    };
+
+    yesBtn.onclick = () => {
+      this.commentManager.setComments(comments);
+      close();
+    };
+    noBtn.onclick = () => {
+      void this.clearPersistedComments();
+      close();
+    };
   }
 
   async clearPersistedComments() {

@@ -62,6 +62,7 @@ fn make_jj_state(
         commit_author: None,
         commit_date: None,
         commit_message: None,
+            jj_change_id: None,
     };
     let (shutdown_tx, _rx) = mpsc::channel::<()>(1);
     lrv::server::AppState {

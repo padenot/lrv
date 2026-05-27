@@ -10,6 +10,7 @@ pub fn parse_diff(diff_text: &str) -> Result<DiffResponse> {
     let mut commit_author: Option<String> = None;
     let mut commit_date: Option<String> = None;
     let mut commit_message: Option<String> = None;
+    let mut jj_change_id: Option<String> = None;
 
     // Parse commit metadata if present (from git show / jj show / jj diff output)
     let diff_start_idx = if let Some(first_line) = diff_text.lines().next() {
@@ -31,6 +32,9 @@ pub fn parse_diff(diff_text: &str) -> Result<DiffResponse> {
                 }
 
                 // git: "Author: name", jj: "Author   : name (date)"
+                if let Some(id) = line.strip_prefix("Change ID:") {
+                    jj_change_id = Some(id.trim().to_string());
+                }
                 let is_author = line.starts_with("Author:") || line.starts_with("author ");
                 let is_author_jj = !is_author
                     && line.starts_with("Author")
@@ -265,6 +269,7 @@ pub fn parse_diff(diff_text: &str) -> Result<DiffResponse> {
         commit_author,
         commit_date,
         commit_message,
+        jj_change_id,
     })
 }
 

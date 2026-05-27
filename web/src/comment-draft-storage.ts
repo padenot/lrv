@@ -6,6 +6,7 @@ type DiffSnapshot = {
   stats: DiffStats;
   commit_message?: string;
   commit_hash?: string;
+  jj_change_id?: string;
 };
 
 type CommentDraftRecord = {
@@ -26,28 +27,19 @@ export function buildCommentDraftKey(
   diff: DiffSnapshot,
   seriesInfo: SeriesInfo | null,
 ): string {
+  // Key on stable identifiers only (not diff content) so comments survive
+  // incremental edits between lrv runs.
   const fingerprint = JSON.stringify({
-    context: {
-      title: context.title ?? null,
-      working_directory: context.working_directory ?? null,
-      git_branch: context.git_branch ?? null,
-    },
-    diff: {
-      commit_hash: diff.commit_hash ?? null,
-      commit_message: diff.commit_message ?? null,
-      stats: diff.stats,
-      files: diff.files.map(fingerprintFile),
-    },
+    working_directory: context.working_directory ?? null,
+    git_branch: context.git_branch ?? null,
+    // Prefer jj change ID (stable across amends) over git commit hash.
+    commit_id: diff.jj_change_id ?? diff.commit_hash ?? null,
     series: seriesInfo?.is_series
-      ? seriesInfo.commits.map((commit) => ({
-          idx: commit.idx,
-          commit_hash: commit.commit_hash ?? null,
-          commit_message: commit.commit_message ?? null,
-        }))
+      ? seriesInfo.commits.map((c) => c.jj_change_id ?? c.commit_hash ?? null)
       : null,
   });
 
-  return `review-comments:v1:${hashString(fingerprint)}:${fingerprint.length.toString(36)}`;
+  return `review-comments:v2:${hashString(fingerprint)}:${fingerprint.length.toString(36)}`;
 }
 
 export async function loadCommentDraft(key: string): Promise<ReviewComment[]> {

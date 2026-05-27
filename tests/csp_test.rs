@@ -15,6 +15,7 @@ async fn test_csp_header_present() {
         commit_author: None,
         commit_date: None,
         commit_message: None,
+            jj_change_id: None,
     };
     let config = lrv::config::UserConfig::default();
     let context = lrv::types::ProjectContext {
@@ -70,6 +71,7 @@ async fn test_csp_on_assets_and_api() {
         commit_author: None,
         commit_date: None,
         commit_message: None,
+            jj_change_id: None,
     };
     let config = lrv::config::UserConfig::default();
     let context = lrv::types::ProjectContext {

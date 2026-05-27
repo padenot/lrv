@@ -64,6 +64,7 @@ fn test_series_json_output_nested_by_commit() {
             commit_author: None,
             commit_date: None,
             commit_message: Some("First commit".to_string()),
+            jj_change_id: None,
         },
         DiffResponse {
             files: vec![],
@@ -76,6 +77,7 @@ fn test_series_json_output_nested_by_commit() {
             commit_author: None,
             commit_date: None,
             commit_message: Some("Second commit".to_string()),
+            jj_change_id: None,
         },
     ];
 

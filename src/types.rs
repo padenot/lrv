@@ -8,6 +8,7 @@ pub struct DiffResponse {
     pub commit_author: Option<String>,
     pub commit_date: Option<String>,
     pub commit_message: Option<String>,
+    pub jj_change_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -172,6 +173,7 @@ pub struct CommitSummary {
     pub commit_author: Option<String>,
     pub commit_date: Option<String>,
     pub commit_message: Option<String>,
+    pub jj_change_id: Option<String>,
     pub stats: DiffStats,
 }
 

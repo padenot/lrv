@@ -81,11 +81,8 @@ export class CommentsUIMethods {
     const existingIndex = this.commentManager.findComment(file, fileLineNumber, side);
     const existingComment = existingIndex >= 0 ? this.commentManager.comments[existingIndex] : null;
 
-    // Create the widget, sized to the editor panel width
     const editorWidth = targetEditor.getLayoutInfo().contentWidth;
     const domNode = el('div', { className: 'inline-comment-box' });
-    domNode.style.position = 'relative';
-    domNode.style.zIndex = '3';
     domNode.style.width = `${editorWidth}px`;
     const modKey = MOD_KEY_LABEL;
     const title = el('h3', {
@@ -129,6 +126,12 @@ export class CommentsUIMethods {
 
     const saveBtn = domNode.querySelector<HTMLButtonElement>('.save-btn');
     const cancelBtn = domNode.querySelector<HTMLButtonElement>('.cancel-btn');
+    const autoResize = () => {
+      textarea.style.height = 'auto';
+      textarea.style.height = `${textarea.scrollHeight}px`;
+    };
+    textarea.addEventListener('input', autoResize);
+
     if (existingComment) {
       textarea.value = existingComment.body;
     }
@@ -142,12 +145,13 @@ export class CommentsUIMethods {
         saveComment();
       }
     };
-    document.addEventListener('keydown', handleKeydown);
+    textarea.addEventListener('keydown', handleKeydown);
 
     const cleanup = () => {
       targetEditor.removeContentWidget(widget);
       this.currentWidget = null;
-      document.removeEventListener('keydown', handleKeydown);
+      textarea.removeEventListener('keydown', handleKeydown);
+      textarea.removeEventListener('input', autoResize);
     };
 
     const saveComment = () => {
@@ -188,8 +192,13 @@ export class CommentsUIMethods {
       };
     }
 
-    // Focus after a brief delay to let Monaco position the widget
-    setTimeout(() => textarea.focus(), 100);
+    // Focus after a brief delay to let Monaco position the widget, then
+    // size to content (needed when pre-filling an existing comment).
+    setTimeout(() => {
+      textarea.focus();
+      autoResize();
+      targetEditor.layoutContentWidget(widget);
+    }, 100);
   }
 
   updateUI() {

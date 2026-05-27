@@ -75,6 +75,14 @@ Frontend:
 - `web/assets/app/*.js`: modular vanilla JS app
 - `web/assets/vendor/`: vendored Monaco assets
 
+## Dual Implementations to Keep in Sync
+
+The comment form exists in two places with independent implementations:
+- `web/src/comments-ui-methods.ts` — Monaco diff view (regular mode)
+- `web/src/stacked-view-methods.ts` — stacked table view
+
+Any change to comment UX (keyboard shortcuts, edit, delete, validation, etc.) must be applied to both.
+
 ## Important Patterns
 
 - No CDN at runtime; all frontend assets are vendored.
