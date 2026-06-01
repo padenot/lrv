@@ -105,7 +105,21 @@ jobs:
         id: package_windows
 
       - name: Upload release asset
-        uses: softprops/action-gh-release@v2
-        with:
-          prerelease: ${{ contains(github.ref_name, '-') }}
-          files: ${{ steps.package_unix.outputs.asset || steps.package_windows.outputs.asset }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ASSET: ${{ steps.package_unix.outputs.asset || steps.package_windows.outputs.asset }}
+        run: |
+          prerelease=()
+          if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
+            prerelease=(--prerelease)
+          fi
+
+          if ! gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release create "${GITHUB_REF_NAME}" \
+              --title "${GITHUB_REF_NAME}" \
+              --verify-tag \
+              "${prerelease[@]}" || true
+          fi
+
+          gh release upload "${GITHUB_REF_NAME}" "${ASSET}" --clobber
