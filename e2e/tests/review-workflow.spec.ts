@@ -181,6 +181,25 @@ async function selectFile(page: Page, pathOrName: string) {
   }, pathOrName);
 }
 
+async function openStackedView(page: Page) {
+  await openApp(page, { requireEditor: false });
+  await page.locator('#toggle-stacked').click();
+  await expect(page.locator('#toggle-stacked')).toHaveText('Mode: Stacked');
+  await page.locator('.stacked-code-view diffs-container').first().waitFor({ timeout: 10000 });
+}
+
+async function addStackedComment(page: Page, body: string) {
+  const lineNumber = page
+    .locator('.stacked-code-view diffs-container [data-interactive-line-numbers]')
+    .first();
+  await lineNumber.waitFor({ state: 'visible', timeout: 10000 });
+  await lineNumber.click({ position: { x: 8, y: 8 } });
+  await expect(page.locator('.stacked-comment-form')).toBeVisible({ timeout: 3000 });
+  await page.locator('.stacked-comment-form .stacked-comment-ta').fill(body);
+  await page.locator('.stacked-comment-form .stacked-comment-save').click();
+  await expect(page.locator('.stacked-comment-form')).not.toBeVisible();
+}
+
 async function readCommentDraftRecords(page: Page): Promise<Array<{ comments?: unknown[] }>> {
   return page.evaluate(() => {
     return new Promise<Array<{ comments?: unknown[] }>>((resolve, reject) => {
@@ -545,6 +564,39 @@ test.describe('Review Workflow E2E', () => {
     await page.locator('.confirm-submit-btn').click();
 
     // Wait for submission to complete
+    await expect(page.locator('text=Review Submitted')).toBeVisible({ timeout: 3000 });
+  });
+
+  test('stacked mode should add, edit, and delete a comment', async ({ page }) => {
+    await openStackedView(page);
+
+    await addStackedComment(page, 'Stacked comment');
+    await expect(page.locator('#comment-count')).toHaveText('1');
+    await expect(page.locator('.stacked-comment-box')).toContainText('Stacked comment');
+
+    const commentBox = page.locator('.stacked-comment-box').first();
+    await commentBox.locator('.stacked-comment-edit').click();
+    await commentBox.locator('.stacked-comment-ta').fill('Edited stacked comment');
+    await commentBox.locator('button', { hasText: 'Save' }).click();
+    await expect(page.locator('.stacked-comment-box')).toContainText('Edited stacked comment');
+
+    await page.locator('.stacked-comment-box .stacked-comment-del').click();
+    await expect(page.locator('#comment-count')).toHaveText('0');
+    await expect(page.locator('.stacked-comment-box')).toHaveCount(0);
+  });
+
+  test('stacked mode complete review workflow: add comment and submit', async ({ page }) => {
+    await openStackedView(page);
+
+    await addStackedComment(page, 'Please fix this from stacked mode');
+    await expect(page.locator('#comment-count')).toHaveText('1');
+
+    await page.locator('#submit-review').click();
+    const modal = page.locator('.submit-modal');
+    await expect(modal.locator('text=Review Comments')).toBeVisible();
+    await expect(modal.locator('text=Please fix this from stacked mode')).toBeVisible();
+
+    await page.locator('.confirm-submit-btn').click();
     await expect(page.locator('text=Review Submitted')).toBeVisible({ timeout: 3000 });
   });
 
