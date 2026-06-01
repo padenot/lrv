@@ -15,7 +15,11 @@ build-release:
 install:
     cargo install --path . --force
     mkdir -p ~/.claude/skills/lrv
+    mkdir -p ~/.codex/skills/lrv
+    mkdir -p ~/.agents/skills/lrv
     cp src/skill.md ~/.claude/skills/lrv/SKILL.md
+    cp src/skill.md ~/.codex/skills/lrv/SKILL.md
+    cp src/skill.md ~/.agents/skills/lrv/SKILL.md
 
 test: test-unit test-e2e
 

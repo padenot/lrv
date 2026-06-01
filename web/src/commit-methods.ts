@@ -317,12 +317,8 @@ export class CommitMethods {
     modal.style.maxWidth = '600px';
     body.style.padding = '20px';
 
-    const ta = el('textarea');
+    const ta = el('textarea', { className: 'comment-textarea' });
     ta.rows = 4;
-    ta.style.width = '100%';
-    ta.style.fontFamily = 'var(--font-sans)';
-    ta.style.fontSize = '13px';
-    ta.style.padding = '8px';
     ta.placeholder = 'Add your comment...';
     ta.autofocus = true;
     body.appendChild(ta);

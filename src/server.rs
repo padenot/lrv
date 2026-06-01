@@ -1,4 +1,5 @@
 use crate::config::UserConfig;
+use crate::skill::{skill_install_paths, EMBEDDED_SKILL};
 use crate::themes::{load_user_themes, UserTheme};
 use crate::types::*;
 use axum::{
@@ -797,16 +798,22 @@ async fn get_user_themes() -> Json<Vec<UserTheme>> {
 }
 
 async fn install_skill() -> Result<Json<serde_json::Value>, StatusCode> {
-    const SKILL_CONTENT: &str = include_str!("skill.md");
-    let skill_path = dirs::home_dir()
-        .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?
-        .join(".claude")
-        .join("skills")
-        .join("lrv");
-    fs::create_dir_all(&skill_path).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    fs::write(skill_path.join("SKILL.md"), SKILL_CONTENT)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    Ok(Json(serde_json::json!({ "ok": true })))
+    let paths = skill_install_paths();
+    if paths.is_empty() {
+        return Err(StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    for path in &paths {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        }
+        fs::write(path, EMBEDDED_SKILL).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    }
+
+    Ok(Json(serde_json::json!({
+        "ok": true,
+        "paths": paths,
+    })))
 }
 
 async fn get_file_content(

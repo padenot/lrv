@@ -25,21 +25,41 @@ async function startServer(port: number = 0): Promise<void> {
     })();
     const cmd = `cd "${testRepoPath}" && git diff HEAD | "${cargoPath}" --port ${port} --no-open`;
     serverUrl = null;
-    serverProcess = spawn('bash', ['-c', cmd], { stdio: ['inherit', 'pipe', 'pipe'] });
+    serverProcess = spawn('bash', ['-c', cmd], {
+      stdio: ['inherit', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        XDG_CONFIG_HOME: path.join(testRepoPath, '.config'),
+      },
+    });
     let output = '';
+    let settled = false;
+    const startupTimer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        reject(new Error('Server startup timeout'));
+      }
+    }, 15000);
     const check = (d: Buffer) => {
       const t = d.toString();
       output += t;
       const m = t.match(/http:\/\/[^\s]+:\d+/);
-      if (m && !serverUrl) {
+      if (m && !serverUrl && !settled) {
         serverUrl = m[0];
+        settled = true;
+        clearTimeout(startupTimer);
         setTimeout(resolve, 200);
       }
     };
     serverProcess.stdout?.on('data', check);
     serverProcess.stderr?.on('data', check);
-    serverProcess.on('error', reject);
-    setTimeout(() => reject(new Error('Server startup timeout')), 15000);
+    serverProcess.on('error', (error) => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(startupTimer);
+        reject(error);
+      }
+    });
   });
 }
 
@@ -103,11 +123,8 @@ test.describe('Editor Font', () => {
     await page.goto(url, { waitUntil: 'load' });
     await page.waitForSelector('.monaco-editor', { state: 'attached', timeout: 15000 });
 
-    // Click the first file to ensure Monaco renders
-    const firstItem = page.locator('#file-list li').first();
-    if (await firstItem.count()) {
-      await firstItem.click();
-    }
+    // Ensure Monaco renders without depending on FileTree pointer hit-testing internals.
+    await page.evaluate(() => (window as any).__APP?.loadFile?.(0));
     await page.waitForSelector('.monaco-editor', { timeout: 15000 });
 
     // Verify the editor font is monospace: measure 'm' and 'i' widths via canvas

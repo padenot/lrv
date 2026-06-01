@@ -100,6 +100,7 @@ export class FileLoadingMethods {
     if (!container) {
       return;
     }
+    container.classList.toggle('file-added-view', file.status === 'added');
     // Ensure commit view is hidden
     if (this._commitViewEl) {
       this._commitViewEl.style.display = 'none';

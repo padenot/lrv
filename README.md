@@ -156,6 +156,21 @@ just ci
 `cargo build` / `cargo run` will rebuild the embedded web bundle automatically when frontend inputs change.
 You can still run `npm run build:web` directly if you only want to rebuild the frontend bundle.
 
+### Frontend
+
+The browser UI uses Monaco for the file-by-file diff editor. The stacked diff
+view and the sidebar file tree are intentionally delegated to Pierre's
+components:
+
+- [`@pierre/diffs`](https://diffs.com/) renders the stacked diff. It is loaded
+  lazily only when stacked mode is opened, and syntax highlighting runs through
+  the library worker asset.
+- [`@pierre/trees`](https://trees.software/) renders the sidebar file tree.
+
+Keep the Monaco path separate from the stacked path. Changes to file selection,
+review note placement, comment rendering, or theme variables may need updates in
+both modes.
+
 ## License
 
 Licensed under either of:

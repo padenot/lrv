@@ -5,6 +5,7 @@ mod output;
 mod phab_mcp;
 mod phabricator;
 mod server;
+mod skill;
 mod themes;
 mod types;
 
@@ -61,24 +62,12 @@ fn get_project_context() -> ProjectContext {
             }
         });
 
-    const EMBEDDED_SKILL: &str = include_str!("skill.md");
-    let claude_skill_installed = dirs::home_dir()
-        .map(|h| {
-            h.join(".claude")
-                .join("skills")
-                .join("lrv")
-                .join("SKILL.md")
-        })
-        .and_then(|p| std::fs::read_to_string(p).ok())
-        .map(|installed| installed == EMBEDDED_SKILL)
-        .unwrap_or(false);
-
     ProjectContext {
         working_directory,
         git_branch,
         title: None,
         is_public: false,
-        claude_skill_installed,
+        claude_skill_installed: skill::all_skills_installed(),
     }
 }
 

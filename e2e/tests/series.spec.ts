@@ -29,7 +29,13 @@ async function startSeriesServer(port: number = 0, range: string = 'HEAD~2..HEAD
     } catch {}
     serverLogPath = path.join(resultsDir, `series-server-${Date.now()}.log`);
 
-    serverProcess = spawn('bash', ['-c', cmd], { stdio: ['inherit', 'pipe', 'pipe'] });
+    serverProcess = spawn('bash', ['-c', cmd], {
+      stdio: ['inherit', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        XDG_CONFIG_HOME: path.join(testRepoPath, '.config'),
+      },
+    });
 
     let output = '';
     let errorOutput = '';
@@ -42,13 +48,23 @@ async function startSeriesServer(port: number = 0, range: string = 'HEAD~2..HEAD
       } catch {}
     };
 
+    let settled = false;
+    const startupTimer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        reject(new Error(`Server startup timeout. Output: ${output}. Error: ${errorOutput}`));
+      }
+    }, 15000);
+
     const checkForReady = (data: Buffer) => {
       const text = data.toString();
       output += text;
       appendLog(text);
-      const urlMatch = text.match(/http:\/\/[^\s]+:\d+/);
-      if (urlMatch && !serverUrl) {
+      const urlMatch = output.match(/http:\/\/[^\s]+:\d+/);
+      if (urlMatch && !serverUrl && !settled) {
         serverUrl = urlMatch[0];
+        settled = true;
+        clearTimeout(startupTimer);
         setTimeout(resolve, 500);
       }
     };
@@ -62,13 +78,12 @@ async function startSeriesServer(port: number = 0, range: string = 'HEAD~2..HEAD
     });
     serverProcess.on('error', reject);
     serverProcess.on('exit', (code) => {
-      if (code !== 0 && code !== null) {
+      if (code !== 0 && code !== null && !settled) {
+        settled = true;
+        clearTimeout(startupTimer);
         reject(new Error(`Server exited with code ${code}. Error: ${errorOutput}`));
       }
     });
-    setTimeout(() => {
-      reject(new Error(`Server startup timeout. Output: ${output}. Error: ${errorOutput}`));
-    }, 15000);
   });
 }
 
@@ -106,13 +121,28 @@ async function openApp(page: Page) {
   await page.goto(url);
   await page.waitForFunction(() => (window as any).require !== undefined, { timeout: 10000 });
   await page.locator('#file-list').waitFor({ state: 'attached', timeout: 10000 });
+  await page.waitForFunction(
+    () => document.querySelector('file-tree-container.lrv-file-tree') !== null,
+    { timeout: 10000 },
+  );
   if (!(await page.locator('.monaco-editor').first().isVisible())) {
-    const firstItem = page.locator('#file-list li[data-index]').first();
-    if (await firstItem.count()) {
-      await firstItem.click();
-    }
+    await page.evaluate(() => (window as any).__APP?.loadFile?.(0));
   }
   await page.waitForSelector('.monaco-editor', { timeout: 20000 });
+}
+
+function fileTreeRows(page: Page) {
+  return page.locator(
+    'file-tree-container.lrv-file-tree [data-type="item"][data-item-type="file"]',
+  );
+}
+
+function fileTreeRow(page: Page, pathOrName: string) {
+  const escaped = pathOrName.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  return page.locator(
+    `file-tree-container.lrv-file-tree [data-type="item"][data-item-type="file"][data-item-path="${escaped}"], ` +
+      `file-tree-container.lrv-file-tree [data-type="item"][data-item-type="file"][data-item-path$="/${escaped}"]`,
+  );
 }
 
 async function makeSeriesRepo(dir: string): Promise<void> {
@@ -196,10 +226,8 @@ test.describe('Series mode E2E', () => {
     await expect(commits).toHaveCount(2, { timeout: 5000 });
 
     // File items (not the commit summary row which has data-commit="1")
-    const fileItems = page.locator('#file-list li[data-index]');
-
     // First commit ("Add beta") contains beta.txt
-    await expect(fileItems.filter({ hasText: 'beta.txt' })).toBeVisible({ timeout: 5000 });
+    await expect(fileTreeRow(page, 'beta.txt')).toBeVisible({ timeout: 5000 });
 
     // Click second commit ("Modify alpha")
     await commits.nth(1).click();
@@ -208,9 +236,9 @@ test.describe('Series mode E2E', () => {
     await expect(commits.nth(1)).toHaveClass(/active/, { timeout: 5000 });
 
     // File list should now show alpha.txt (the file modified in commit 2)
-    await expect(fileItems.filter({ hasText: 'alpha.txt' })).toBeVisible({ timeout: 10000 });
+    await expect(fileTreeRow(page, 'alpha.txt')).toBeVisible({ timeout: 10000 });
     // beta.txt should no longer be listed
-    await expect(fileItems.filter({ hasText: 'beta.txt' })).toHaveCount(0, { timeout: 5000 });
+    await expect(fileTreeRow(page, 'beta.txt')).toHaveCount(0, { timeout: 5000 });
   });
 
   test('commit strip shows commit message preview', async ({ page }) => {
@@ -252,19 +280,41 @@ test.describe('Series: first commit has no file changes', () => {
     const cargoPath = process.env.LRV_BIN || path.resolve(__dirname, '../../target/debug/lrv');
     const cmd = `cd "${repoDir}" && "${cargoPath}" --series "HEAD~2..HEAD" --port 0 --no-open`;
     await new Promise<void>((resolve, reject) => {
-      proc = spawn('bash', ['-c', cmd], { stdio: ['inherit', 'pipe', 'pipe'] });
+      proc = spawn('bash', ['-c', cmd], {
+        stdio: ['inherit', 'pipe', 'pipe'],
+        env: {
+          ...process.env,
+          XDG_CONFIG_HOME: path.join(repoDir!, '.config'),
+        },
+      });
+      let settled = false;
+      let output = '';
+      const startupTimer = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          reject(new Error('startup timeout'));
+        }
+      }, 15000);
       const check = (buf: Buffer) => {
         const text = buf.toString();
-        const m = text.match(/http:\/\/[^\s]+:\d+/);
-        if (m && !localUrl) {
+        output += text;
+        const m = output.match(/http:\/\/[^\s]+:\d+/);
+        if (m && !localUrl && !settled) {
           localUrl = m[0];
+          settled = true;
+          clearTimeout(startupTimer);
           setTimeout(resolve, 500);
         }
       };
       proc!.stdout?.on('data', check);
       proc!.stderr?.on('data', check);
-      proc!.on('error', reject);
-      setTimeout(() => reject(new Error('startup timeout')), 15000);
+      proc!.on('error', (error) => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(startupTimer);
+          reject(error);
+        }
+      });
     });
   });
 

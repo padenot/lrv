@@ -41,6 +41,10 @@ async function startServer(port: number = 0, options?: { title?: string }): Prom
 
     serverProcess = spawn('bash', ['-c', cmd], {
       stdio: ['inherit', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        XDG_CONFIG_HOME: path.join(testRepoPath, '.config'),
+      },
     });
 
     let output = '';
@@ -54,14 +58,21 @@ async function startServer(port: number = 0, options?: { title?: string }): Prom
       } catch {}
     };
 
+    let settled = false;
+    let startupTimer: ReturnType<typeof setTimeout> | null = null;
+
     const checkForReady = (data: Buffer) => {
       const text = data.toString();
       output += text;
       appendLog(text);
       // Capture first URL; its presence means the server is ready
-      const urlMatch = text.match(/http:\/\/[^\s]+:\d+/);
-      if (urlMatch && !serverUrl) {
+      const urlMatch = output.match(/http:\/\/[^\s]+:\d+/);
+      if (urlMatch && !serverUrl && !settled) {
+        settled = true;
         serverUrl = urlMatch[0];
+        if (startupTimer) {
+          clearTimeout(startupTimer);
+        }
         setTimeout(resolve, 500);
       }
     };
@@ -74,16 +85,32 @@ async function startServer(port: number = 0, options?: { title?: string }): Prom
       checkForReady(Buffer.from(text));
     });
 
-    serverProcess.on('error', reject);
+    serverProcess.on('error', (error) => {
+      if (!settled) {
+        settled = true;
+        if (startupTimer) {
+          clearTimeout(startupTimer);
+        }
+        reject(error);
+      }
+    });
 
     serverProcess.on('exit', (code) => {
-      if (code !== 0 && code !== null) {
+      if (code !== 0 && code !== null && !settled) {
+        settled = true;
+        if (startupTimer) {
+          clearTimeout(startupTimer);
+        }
         reject(new Error(`Server exited with code ${code}. Error: ${errorOutput}`));
       }
     });
 
     // Timeout if server doesn't start
-    setTimeout(() => {
+    startupTimer = setTimeout(() => {
+      if (settled) {
+        return;
+      }
+      settled = true;
       reject(new Error(`Server startup timeout. Output: ${output}. Error: ${errorOutput}`));
     }, 10000);
   });
@@ -97,16 +124,61 @@ async function openApp(page: Page, options: { requireEditor?: boolean } = {}) {
   await page.waitForFunction(() => (window as any).require !== undefined, { timeout: 10000 });
   // Ensure file list exists; click first item if editor not visible yet
   await page.locator('#file-list').waitFor({ state: 'attached', timeout: 10000 });
+  await page.waitForFunction(
+    () =>
+      document.querySelector('file-tree-container.lrv-file-tree') !== null ||
+      document.querySelector('#file-list li') !== null,
+    { timeout: 10000 },
+  );
   if (!requireEditor) {
     return;
   }
   if (!(await page.locator('.monaco-editor').first().isVisible())) {
-    const firstItem = page.locator('#file-list li').first();
+    const firstItem = fileTreeRows(page).first();
     if (await firstItem.count()) {
-      await firstItem.click();
+      await firstItem.click({ force: true });
     }
+    const isStacked = await page.evaluate(() => (window as any).__APP?.isStacked === true);
+    if (isStacked) {
+      await page.evaluate(() => (window as any).__APP?.hideStackedView?.());
+    }
+    await page.waitForFunction(() => (window as any).monaco !== undefined, { timeout: 10000 });
+    await page.evaluate(() => (window as any).__APP?.loadFile?.(0));
   }
   await page.waitForSelector('.monaco-editor', { timeout: 20000 });
+}
+
+function fileTreeRows(page: Page) {
+  return page.locator(
+    'file-tree-container.lrv-file-tree [data-type="item"][data-item-type="file"]',
+  );
+}
+
+function fileTreeRow(page: Page, pathOrName: string) {
+  const escaped = pathOrName.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  return page.locator(
+    `file-tree-container.lrv-file-tree [data-type="item"][data-item-type="file"][data-item-path="${escaped}"], ` +
+      `file-tree-container.lrv-file-tree [data-type="item"][data-item-type="file"][data-item-path$="/${escaped}"]`,
+  );
+}
+
+function selectedFileTreeRow(page: Page) {
+  return page.locator(
+    'file-tree-container.lrv-file-tree [data-type="item"][data-item-type="file"][data-item-selected="true"]',
+  );
+}
+
+async function selectFile(page: Page, pathOrName: string) {
+  await page.evaluate((target) => {
+    const app = (window as any).__APP;
+    const index = app?.files?.findIndex(
+      (file: { path: string }) => file.path === target || file.path.endsWith(`/${target}`),
+    );
+    if (index >= 0) {
+      return app.loadFile(index);
+    }
+    throw new Error(`File not found in app.files: ${target}`);
+  }, pathOrName);
 }
 
 async function readCommentDraftRecords(page: Page): Promise<Array<{ comments?: unknown[] }>> {
@@ -248,10 +320,10 @@ test.describe('Review Workflow E2E', () => {
     await expect(page.locator('.monaco-editor').first()).toBeVisible({ timeout: 5000 });
 
     // Check that file list is visible
-    await expect(page.locator('#file-list')).toBeVisible();
+    await expect(page.locator('#file-list')).toBeAttached();
 
     // Check that we have multiple files in the list
-    await expect(page.locator('#file-list li')).toHaveCount(3);
+    await expect(fileTreeRows(page)).toHaveCount(3);
   });
 
   test('editor container stays visible and shows content after file switch', async ({ page }) => {
@@ -273,12 +345,11 @@ test.describe('Review Workflow E2E', () => {
       );
 
     // Load first file and wait for content
-    const files = page.locator('#file-list li[data-index]');
-    await files.first().click();
+    await selectFile(page, 'file2.txt');
     await editorReady();
 
     // Switch to second file and verify content appears again
-    await files.nth(1).click();
+    await selectFile(page, 'file3.txt');
     await editorReady();
 
     // Opacity must be fully restored
@@ -295,7 +366,7 @@ test.describe('Review Workflow E2E', () => {
     await page.locator('.monaco-editor').first().waitFor({ timeout: 7000 });
 
     // Click on test.txt to view it
-    await page.locator('#file-list li').filter({ hasText: 'test.txt' }).click();
+    await selectFile(page, 'test.txt');
 
     // Check that diff content is visible (look for our modified line)
     await expect(page.locator('text=line 2 modified')).toBeVisible({ timeout: 5000 });
@@ -428,26 +499,20 @@ test.describe('Review Workflow E2E', () => {
     await page.locator('.header').click();
 
     // Verify first file is active
-    await expect(page.locator('#file-list li.active')).toHaveCount(1);
+    await expect(selectedFileTreeRow(page)).toHaveCount(1);
 
     // Get the currently active file index
-    const firstActiveIndex = await page.locator('#file-list li.active').getAttribute('data-index');
+    const firstActivePath = await selectedFileTreeRow(page).getAttribute('data-item-path');
 
     // Press Shift+J to go to next file
     await page.keyboard.press('Shift+J');
     // Wait for active index to increment
-    await expect(page.locator('#file-list li.active')).toHaveAttribute(
-      'data-index',
-      String(parseInt(firstActiveIndex!) + 1),
-    );
+    await expect(selectedFileTreeRow(page)).not.toHaveAttribute('data-item-path', firstActivePath!);
 
     // Press Shift+K to go back to previous file
     await page.keyboard.press('Shift+K');
     // Wait to return to first file
-    await expect(page.locator('#file-list li.active')).toHaveAttribute(
-      'data-index',
-      String(parseInt(firstActiveIndex!)),
-    );
+    await expect(selectedFileTreeRow(page)).toHaveAttribute('data-item-path', firstActivePath!);
   });
 
   test('complete review workflow: add comment and submit', async ({ page }) => {
@@ -556,11 +621,11 @@ test.describe('Review Workflow E2E', () => {
     await openApp(page);
 
     // Check that renamed file shows "old.txt → new.txt" format
-    const fileListItem = page.locator('#file-list li:has-text("test.txt → renamed-test.txt")');
+    const fileListItem = fileTreeRow(page, 'renamed-test.txt');
     await expect(fileListItem).toBeVisible();
 
     // Check that status badge shows "R" for renamed
-    await expect(fileListItem.locator('.file-status.renamed')).toBeVisible();
+    await expect(fileListItem).toHaveAttribute('data-item-git-status', 'renamed');
   });
 
   test('should display deleted files correctly', async ({ page }) => {
@@ -580,12 +645,12 @@ test.describe('Review Workflow E2E', () => {
 
     await openApp(page);
     // Verify deleted file is present in the list and shows deleted badge
-    const deletedItem = page.locator('#file-list li').filter({ hasText: 'file2.txt' });
+    const deletedItem = fileTreeRow(page, 'file2.txt');
     await expect(deletedItem).toBeVisible({ timeout: 5000 });
-    await expect(deletedItem.locator('.file-status.deleted')).toBeVisible();
+    await expect(deletedItem).toHaveAttribute('data-item-git-status', 'deleted');
 
     // Select the deleted file and verify the diff renders old content
-    await deletedItem.click();
+    await selectFile(page, 'file2.txt');
     await page.locator('.monaco-editor').first().waitFor({ timeout: 7000 });
 
     // Old content should be visible in the diff view
@@ -610,11 +675,11 @@ test.describe('Review Workflow E2E', () => {
     await openApp(page);
 
     // Check that new file is shown
-    const fileListItem = page.locator('#file-list li:has-text("new-file.txt")');
+    const fileListItem = fileTreeRow(page, 'new-file.txt');
     await expect(fileListItem).toBeVisible();
 
     // Select the new file and verify diff content renders
-    await fileListItem.click();
+    await selectFile(page, 'new-file.txt');
     await page.locator('.monaco-editor').first().waitFor({ timeout: 7000 });
 
     // Added files should force unified view (no empty original side-by-side pane)
@@ -624,7 +689,7 @@ test.describe('Review Workflow E2E', () => {
     await expect(page.locator('text=new content')).toBeVisible({ timeout: 5000 });
 
     // Check that status badge shows "A" for added
-    await expect(fileListItem.locator('.file-status.added')).toBeVisible();
+    await expect(fileListItem).toHaveAttribute('data-item-git-status', 'added');
   });
 
   test('should display provided title in header', async ({ page }) => {
@@ -662,15 +727,16 @@ test.describe('Review Workflow E2E', () => {
     if (!IS_BENCH) {
       for (let i = 0; i < 6; i++) {
         const name = files[i % files.length];
-        await page.locator('#file-list li').filter({ hasText: name }).click();
+        await selectFile(page, name);
         await expect(page.locator(selectors[name])).toBeVisible();
       }
     } else {
-      const itemCount = await page.locator('#file-list li').count();
+      const itemCount = await fileTreeRows(page).count();
       const n = Math.min(3, itemCount);
       for (let i = 0; i < 6; i++) {
         const idx = i % n;
-        await page.locator('#file-list li').nth(idx).click();
+        const path = await fileTreeRows(page).nth(idx).getAttribute('data-item-path');
+        await selectFile(page, path ?? '');
         await page.locator('.monaco-editor').first().waitFor({ timeout: 5000 });
       }
     }

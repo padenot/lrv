@@ -620,7 +620,7 @@ export class MonacoApp {
       }
     }
 
-    // Show skill install banner if Claude Code skill is not installed
+    // Show skill install banner if the agent skill is not installed everywhere lrv supports.
     if (this.context.claude_skill_installed === false) {
       const banner = $<HTMLElement>('#skill-banner');
       const installBtn = $<HTMLButtonElement>('#skill-install-btn');

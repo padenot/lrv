@@ -57,7 +57,19 @@ export class SeriesMethods {
 
       const info = el('div', { className: 'series-commit-info' });
       const msg = commit.commit_message?.split('\n')[0] ?? '(no message)';
+      const titleRow = el('div', { className: 'series-commit-title-row' });
       const title = el('div', { className: 'series-commit-msg', text: msg });
+      titleRow.appendChild(title);
+
+      const commitCommentCount = this.commentManager
+        .getComments()
+        .filter((c) => c.commit_idx === commit.idx).length;
+      if (commitCommentCount > 0) {
+        titleRow.appendChild(
+          el('span', { className: 'series-comment-badge', text: String(commitCommentCount) }),
+        );
+      }
+
       const meta = el('div', { className: 'series-commit-meta' });
 
       const hash = commit.commit_hash?.slice(0, 8) ?? '';
@@ -69,7 +81,7 @@ export class SeriesMethods {
           : '';
       meta.innerHTML = `<span class="series-hash">${hash}</span> <span class="delta-add">+${adds}</span> <span class="delta-del">-${dels}</span>${authorPart}`;
 
-      info.appendChild(title);
+      info.appendChild(titleRow);
       info.appendChild(meta);
       row.appendChild(num);
       row.appendChild(info);

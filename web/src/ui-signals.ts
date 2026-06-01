@@ -1,5 +1,6 @@
 let navTimer: ReturnType<typeof setTimeout> | null = null;
 const FIRST_LINE_SELECTOR = '.monaco-editor .view-lines .view-line';
+const STACKED_READY_SELECTOR = '.stacked-code-view diffs-container, .stacked-empty';
 
 function recordFirstLineVisible() {
   if (performance.getEntriesByName('init:first-line-visible').length !== 0) {
@@ -52,6 +53,11 @@ export function markAppReady() {
   if (hasLines) {
     recordFirstLineVisible();
     setAppReady('[app] APP_READY: diff lines visible');
+    return;
+  }
+  if (document.querySelector(STACKED_READY_SELECTOR)) {
+    recordFirstLineVisible();
+    setAppReady('[app] APP_READY: stacked diff visible');
     return;
   }
   const container = document.querySelector('.monaco-editor .view-lines');

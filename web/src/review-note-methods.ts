@@ -15,6 +15,8 @@ export class ReviewNoteMethods {
   declare originalReviewNoteDecorations: string[];
   declare modifiedReviewNoteZoneIds: string[];
   declare originalReviewNoteZoneIds: string[];
+  declare isStacked: AppContext['isStacked'];
+  declare renderStackedComments: AppContext['renderStackedComments'];
 
   renderReviewNotes() {
     this.renderMonacoReviewNotes();
@@ -123,6 +125,11 @@ export class ReviewNoteMethods {
   private renderStackedReviewNotes() {
     const container = document.getElementById('stacked-container');
     if (!container) {
+      return;
+    }
+
+    if (this.isStacked && container.querySelector('.stacked-code-view')) {
+      this.renderStackedComments();
       return;
     }
 

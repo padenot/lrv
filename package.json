@@ -16,5 +16,9 @@
     "build:web": "rolldown -c rolldown.config.mjs",
     "typecheck:web": "tsc -p tsconfig.web.json",
     "lint:web": "eslint web/src e2e"
+  },
+  "dependencies": {
+    "@pierre/diffs": "^1.2.5",
+    "@pierre/trees": "^1.0.0-beta.4"
   }
 }

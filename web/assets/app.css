@@ -483,6 +483,10 @@ body {
   list-style: none;
   margin-top: 8px;
   min-width: 0;
+  height: 100%;
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
 }
 
 .file-list li {
@@ -536,6 +540,12 @@ body {
 
 .file-tree {
   margin-top: 0;
+}
+
+.lrv-file-tree {
+  flex: 1 1 auto;
+  height: 100%;
+  min-height: 0;
 }
 
 .file-tree-root,
@@ -644,9 +654,16 @@ body {
   padding: 5px 8px;
 }
 
-.tree-row:hover > .tree-row-content,
+.tree-row:hover > .tree-row-content {
+  background: var(--bg-elevated);
+}
+
 .tree-row.active > .tree-row-content {
   background: var(--bg-elevated);
+  border-left: 3px solid var(--accent-color, #007acc);
+  padding-left: calc(8px - 3px);
+  font-weight: 600;
+  color: var(--text-primary);
 }
 
 /* File status badges */
@@ -696,9 +713,42 @@ body {
 
 #stacked-container {
   height: calc(100vh - 48px);
-  overflow-y: auto;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
   background: var(--bg-primary);
   font-size: 12px;
+}
+
+.stacked-commit-message {
+  flex: 0 0 auto;
+  margin: 0 0 16px 0;
+  padding: 12px 16px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--bg-elevated);
+}
+
+.stacked-commit-hash {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+
+.stacked-commit-msg-body {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+}
+
+.stacked-code-view {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .stacked-file-section {
@@ -706,6 +756,11 @@ body {
   border: 1px solid var(--border-color);
   border-radius: 4px;
   overflow: hidden;
+}
+
+.stacked-diffs-mount > diffs-container {
+  display: block;
+  width: 100%;
 }
 
 .stacked-file-header {
@@ -785,6 +840,12 @@ body {
 }
 .stacked-num-add {
   background: rgba(151, 234, 151, 0.18);
+}
+.stacked-file-added .stacked-code-add {
+  background: color-mix(in srgb, rgba(151, 234, 151, 1) 10%, transparent);
+}
+.stacked-file-added .stacked-num-add {
+  background: color-mix(in srgb, rgba(151, 234, 151, 1) 6%, transparent);
 }
 .stacked-code-del {
   background: rgba(251, 175, 175, 0.3);
@@ -941,6 +1002,26 @@ body {
 .line-added {
   background: rgba(76, 175, 80, 0.15);
 }
+/* For entirely added files, tone down the wall-of-green.
+   Individual added lines within a modified file are unaffected.
+   color-mix() preserves the theme's hue for any theme including user themes. */
+.file-added-view .monaco-diff-editor .line-insert,
+.file-added-view .monaco-editor .line-insert {
+  background-color: color-mix(
+    in srgb,
+    var(--vscode-diffEditor-insertedLineBackground) 30%,
+    transparent
+  ) !important;
+}
+.file-added-view .monaco-diff-editor .char-insert,
+.file-added-view .monaco-editor .char-insert {
+  background-color: color-mix(
+    in srgb,
+    var(--vscode-diffEditor-insertedTextBackground) 35%,
+    transparent
+  ) !important;
+}
+
 .line-deleted {
   background: rgba(244, 67, 54, 0.15);
 }
@@ -1688,7 +1769,9 @@ body {
 
 .series-commit.active {
   border-left-color: var(--accent-color, #f97316);
+  border-left-width: 4px;
   background: var(--bg-elevated);
+  font-weight: 600;
 }
 
 .series-commit-num {
@@ -1702,6 +1785,31 @@ body {
 .series-commit-info {
   flex: 1;
   min-width: 0;
+}
+
+.series-commit-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.series-commit-title-row .series-commit-msg {
+  flex: 1;
+}
+
+.series-comment-badge {
+  flex-shrink: 0;
+  display: inline-block;
+  min-width: 16px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: var(--accent-color, #f97316);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.4;
+  text-align: center;
 }
 
 .series-commit-msg {

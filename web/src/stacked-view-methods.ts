@@ -1,31 +1,76 @@
-import { el, clearEl } from './dom';
-import { detectLanguageFromPathAndContent } from './language';
-import { fetchJSON } from './api';
+import type { CodeView } from '../../node_modules/@pierre/diffs/dist/components/CodeView.js';
+import type { OnDiffLineClickProps } from '../../node_modules/@pierre/diffs/dist/managers/InteractionManager.js';
 import type {
-  AppConfig,
-  AppContext,
-  DiffFile,
-  DiffHunk,
-  DiffLine,
-  FilePair,
-  Side,
-} from './types/app';
+  AnnotationSide,
+  CodeViewDiffItem,
+  CodeViewItem,
+  DiffLineAnnotation,
+  FileDiffMetadata,
+} from '../../node_modules/@pierre/diffs/dist/types.js';
+import { el, clearEl } from './dom';
+import { commentEndLine, type ReviewComment } from './comments';
+import { fetchJSON } from './api';
+import type { ReviewNote } from './review-notes';
+import type { AppConfig, AppContext, DiffFile, DiffLine, Side } from './types/app';
 
-const CONTEXT_LINES = 3;
+type StackedAnnotation =
+  | { kind: 'comment'; comment: ReviewComment; index: number }
+  | { kind: 'review-note'; note: ReviewNote }
+  | { kind: 'draft'; file: string; line: number; side: Side };
+
+const DIFFS_THEME = { dark: 'pierre-dark', light: 'pierre-light' } as const;
+
+type ParsePatchFiles =
+  typeof import('../../node_modules/@pierre/diffs/dist/utils/parsePatchFiles.js').parsePatchFiles;
+type DiffsRuntime = {
+  CodeView: typeof import('../../node_modules/@pierre/diffs/dist/components/CodeView.js').CodeView;
+  parsePatchFiles: ParsePatchFiles;
+  getOrCreateWorkerPoolSingleton: typeof import('../../node_modules/@pierre/diffs/dist/worker/getOrCreateWorkerPoolSingleton.js').getOrCreateWorkerPoolSingleton;
+};
+
+let diffsRuntimePromise: Promise<DiffsRuntime> | null = null;
+
+function loadDiffsRuntime(): Promise<DiffsRuntime> {
+  diffsRuntimePromise ??= Promise.all([
+    import('../../node_modules/@pierre/diffs/dist/components/CodeView.js'),
+    import('../../node_modules/@pierre/diffs/dist/utils/parsePatchFiles.js'),
+    import('../../node_modules/@pierre/diffs/dist/worker/getOrCreateWorkerPoolSingleton.js'),
+  ]).then(([codeView, parser, workerPool]) => ({
+    CodeView: codeView.CodeView,
+    parsePatchFiles: parser.parsePatchFiles,
+    getOrCreateWorkerPoolSingleton: workerPool.getOrCreateWorkerPoolSingleton,
+  }));
+  return diffsRuntimePromise;
+}
+
+function createDiffsWorker() {
+  return new Worker('/assets/app/diffs-worker.js', { type: 'module' });
+}
 
 export class StackedViewMethods {
   declare files: AppContext['files'];
-  declare fileCache: AppContext['fileCache'];
-  declare fileCacheKey: AppContext['fileCacheKey'];
-  declare fetchFilePair: AppContext['fetchFilePair'];
   declare commentManager: AppContext['commentManager'];
+  declare reviewNoteManager: AppContext['reviewNoteManager'];
   declare isStacked: boolean;
   declare currentCommitIdx: AppContext['currentCommitIdx'];
   declare seriesInfo: AppContext['seriesInfo'];
   declare config: AppContext['config'];
+  declare diff: AppContext['diff'];
   declare renderReviewNotes: () => void;
+  declare renderFileList: () => void;
+  declare currentFileIndex: number;
+  declare currentFileIsCommit: boolean;
+  declare buildReviewNoteNode: (note: ReviewNote) => HTMLElement;
+  declare editor: AppContext['editor'];
+  declare loadFile: AppContext['loadFile'];
 
-  // ─── Toggle ──────────────────────────────────────────────────────────────
+  private stackedCodeView: CodeView<StackedAnnotation> | null;
+  private stackedItems: Map<string, CodeViewDiffItem<StackedAnnotation>>;
+  private stackedFileMetadata: Map<string, FileDiffMetadata>;
+  private stackedDraft: { file: string; line: number; side: Side } | null;
+  private stackedItemVersion: number;
+  private stackedScrollUnsubscribe: (() => void) | null;
+  private stackedRenderToken: number;
 
   showStackedView() {
     this.isStacked = true;
@@ -38,8 +83,7 @@ export class StackedViewMethods {
       stacked.style.display = '';
       this.renderStackedView();
     }
-    document.getElementById('toggle-stacked')?.classList.add('active');
-    // Inline/Side-by-Side is Monaco-only — hide it in stacked mode
+    this.updateStackedToggleLabel();
     const toggleView = document.getElementById('toggle-view');
     if (toggleView) {
       toggleView.style.display = 'none';
@@ -49,6 +93,7 @@ export class StackedViewMethods {
 
   hideStackedView() {
     this.isStacked = false;
+    this.stackedRenderToken = (this.stackedRenderToken ?? 0) + 1;
     const editor = document.getElementById('editor-container');
     const stacked = document.getElementById('stacked-container');
     if (editor) {
@@ -57,12 +102,25 @@ export class StackedViewMethods {
     if (stacked) {
       stacked.style.display = 'none';
     }
-    document.getElementById('toggle-stacked')?.classList.remove('active');
+    this.updateStackedToggleLabel();
     const toggleView = document.getElementById('toggle-view');
     if (toggleView) {
       toggleView.style.display = '';
     }
     this.persistStackedPref(false);
+    if (!this.editor && this.files.length > 0) {
+      void this.loadFile(this.currentFileIndex);
+    }
+  }
+
+  private updateStackedToggleLabel() {
+    const toggle = document.getElementById('toggle-stacked');
+    if (!toggle) {
+      return;
+    }
+    toggle.classList.toggle('active', this.isStacked);
+    toggle.textContent = this.isStacked ? 'Mode: Stacked' : 'Mode: File by file';
+    toggle.setAttribute('aria-pressed', String(this.isStacked));
   }
 
   private persistStackedPref(value: boolean) {
@@ -92,473 +150,455 @@ export class StackedViewMethods {
     if (!file) {
       return;
     }
-    const anchor = document.getElementById(`stacked-file-${CSS.escape(file.path)}`);
+    const anchor = document.getElementById(this.stackedSectionId(file.path));
+    if (this.stackedCodeView) {
+      this.stackedCodeView.scrollTo({
+        type: 'item',
+        id: this.stackedItemId(file.path),
+        align: 'start',
+        behavior: 'instant',
+      });
+      return;
+    }
     anchor?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
-  // ─── Main render ─────────────────────────────────────────────────────────
-
-  renderStackedView() {
+  async renderStackedView() {
     const container = document.getElementById('stacked-container');
     if (!container) {
       return;
     }
+
+    this.stackedScrollUnsubscribe?.();
+    this.stackedScrollUnsubscribe = null;
+    this.stackedCodeView?.cleanUp();
+    this.stackedCodeView = null;
+    this.stackedItems = new Map();
+    this.stackedFileMetadata = new Map();
+    this.stackedRenderToken = (this.stackedRenderToken ?? 0) + 1;
+    const renderToken = this.stackedRenderToken;
     clearEl(container);
+
+    const msg = this.diff?.commit_message;
+    const hash = this.diff?.commit_hash;
+    if (msg || hash) {
+      const msgBox = el('div', { className: 'stacked-commit-message' });
+      if (hash) {
+        msgBox.appendChild(
+          el('div', { className: 'stacked-commit-hash', text: hash.slice(0, 12) }),
+        );
+      }
+      if (msg) {
+        msgBox.appendChild(el('pre', { className: 'stacked-commit-msg-body', text: msg }));
+      }
+      container.appendChild(msgBox);
+    }
+
     if (!this.files.length) {
       container.appendChild(el('div', { className: 'stacked-empty', text: 'No files changed.' }));
       return;
     }
-    this.files.forEach((file) => {
-      container.appendChild(this.buildFileSection(file));
+
+    const { CodeView, parsePatchFiles, getOrCreateWorkerPoolSingleton } = await loadDiffsRuntime();
+    if (!this.isStacked || !container.isConnected || renderToken !== this.stackedRenderToken) {
+      return;
+    }
+
+    const codeViewRoot = el('div', { className: 'stacked-code-view' });
+    container.appendChild(codeViewRoot);
+
+    const items = this.files.flatMap((file): CodeViewItem<StackedAnnotation>[] => {
+      const item = this.buildCodeViewItem(file, parsePatchFiles);
+      return item ? [item] : [];
     });
-    // Re-render comments
+    if (!items.length) {
+      codeViewRoot.appendChild(
+        el('div', { className: 'stacked-empty', text: 'No renderable text changes.' }),
+      );
+      return;
+    }
+
+    const workerPool = getOrCreateWorkerPoolSingleton({
+      poolOptions: {
+        workerFactory: createDiffsWorker,
+        poolSize: Math.min(Math.max(navigator.hardwareConcurrency ?? 4, 2), 6),
+        totalASTLRUCacheSize: 64,
+      },
+      highlighterOptions: {
+        theme: DIFFS_THEME,
+        lineDiffType: 'word-alt',
+        maxLineDiffLength: 1000,
+        tokenizeMaxLineLength: 1000,
+      },
+    });
+    const view = new CodeView<StackedAnnotation>(
+      {
+        diffStyle: 'split',
+        theme: DIFFS_THEME,
+        lineHoverHighlight: 'both',
+        hunkSeparators: 'line-info-basic',
+        collapsedContextThreshold: 1,
+        expansionLineCount: 40,
+        stickyHeaders: true,
+        renderHeaderMetadata: (fileDiff) =>
+          this.buildHeaderMetadata(this.fileForPath(fileDiff.name)),
+        onLineNumberClick: (props, context) =>
+          this.showStackedDraft(this.pathFromCodeViewContext(context), props),
+        onLineClick: (props, context) =>
+          this.showStackedDraft(this.pathFromCodeViewContext(context), props),
+        renderAnnotation: (annotation) =>
+          this.renderStackedAnnotation(annotation as DiffLineAnnotation<StackedAnnotation>),
+        unsafeCSS: this.stackedDiffsCss(),
+      },
+      workerPool,
+    );
+    this.stackedCodeView = view;
+    view.setup(codeViewRoot);
+    view.setItems(items);
+    view.render(true);
+    this.stackedScrollUnsubscribe = view.subscribeToScroll((scrollTop) => {
+      this.syncCurrentFileFromStackedScroll(scrollTop);
+    });
+  }
+
+  private buildCodeViewItem(
+    file: DiffFile,
+    parsePatchFiles: ParsePatchFiles,
+  ): CodeViewDiffItem<StackedAnnotation> | null {
+    const metadata = this.toDiffsMetadata(file, parsePatchFiles);
+    if (!metadata) {
+      return null;
+    }
+
+    this.stackedFileMetadata.set(file.path, metadata);
+    const item: CodeViewDiffItem<StackedAnnotation> = {
+      id: this.stackedItemId(file.path),
+      type: 'diff',
+      fileDiff: metadata,
+      annotations: this.stackedAnnotationsForFile(file.path),
+      version: ++this.stackedItemVersion,
+    };
+    this.stackedItems.set(file.path, item);
+    return item;
+  }
+
+  private buildHeaderMetadata(file: DiffFile): HTMLElement {
+    const { additions, deletions } = this.fileDelta(file);
+    const meta = el('span', { className: 'stacked-file-meta' });
+    if (additions > 0) {
+      meta.appendChild(el('span', { className: 'delta-add', text: `+${additions}` }));
+    }
+    if (deletions > 0) {
+      meta.appendChild(el('span', { className: 'delta-del', text: `-${deletions}` }));
+    }
+    meta.appendChild(
+      el('span', {
+        className: `stacked-file-status status-${file.status}`,
+        text: file.status[0]?.toUpperCase() ?? '?',
+        attrs: { title: file.status },
+      }),
+    );
+    return meta;
+  }
+
+  private showStackedDraft(file: string, props: OnDiffLineClickProps) {
+    if (!file) {
+      return;
+    }
+    const side = this.fromAnnotationSide(props.annotationSide);
+    this.stackedDraft = { file, line: props.lineNumber, side };
     this.renderStackedComments();
-    this.renderReviewNotes();
   }
 
-  // ─── Per-file section ────────────────────────────────────────────────────
-
-  private buildFileSection(file: DiffFile): HTMLElement {
-    const section = el('div', {
-      className: 'stacked-file-section',
-      attrs: { id: `stacked-file-${CSS.escape(file.path)}` },
-    });
-
-    // File header
-    const header = el('div', { className: 'stacked-file-header' });
-    const nameEl = el('span', {
-      className: 'stacked-file-name',
-      text: file.old_path ? `${file.old_path} → ${file.path}` : file.path,
-    });
-    const statusEl = el('span', {
-      className: `stacked-file-status status-${file.status}`,
-      text: file.status[0]!.toUpperCase(),
-      attrs: { title: file.status },
-    });
-    const additions = file.hunks.flatMap((h) => h.lines).filter((l) => l.type === 'add').length;
-    const deletions = file.hunks.flatMap((h) => h.lines).filter((l) => l.type === 'delete').length;
-    const statsEl = el('span', { className: 'stacked-file-stats' });
-    if (additions) {
-      statsEl.appendChild(el('span', { className: 'delta-add', text: `+${additions}` }));
-    }
-    if (deletions) {
-      statsEl.appendChild(el('span', { className: 'delta-del', text: `-${deletions}` }));
-    }
-
-    header.append(nameEl, statusEl, statsEl);
-    section.appendChild(header);
-
-    if (!file.hunks.length) {
-      section.appendChild(
-        el('div', { className: 'stacked-no-hunks', text: 'Binary or empty file.' }),
-      );
-      return section;
-    }
-
-    const sampleContent = file.hunks[0]?.lines.find((l) => l.content)?.content ?? '';
-    const language = detectLanguageFromPathAndContent(file.old_path ?? file.path, sampleContent);
-    // Code cells to colorize after table is built: [element, content]
-    const codeCells: Array<[HTMLTableCellElement, string]> = [];
-
-    // Diff table — side-by-side: old-num | old-code | new-num | new-code
-    const table = document.createElement('table');
-    table.className = 'stacked-diff-table';
-    table.setAttribute('data-path', file.path);
-
-    const cg = document.createElement('colgroup');
-    for (const w of ['44px', 'calc(50% - 44px)', '44px', 'calc(50% - 44px)']) {
-      const col = document.createElement('col');
-      col.style.width = w;
-      cg.appendChild(col);
-    }
-    table.appendChild(cg);
-
-    const body = document.createElement('tbody');
-
-    file.hunks.forEach((hunk, hunkIdx) => {
-      const prevHunk = file.hunks[hunkIdx - 1];
-
-      const gapOldStart = prevHunk
-        ? (prevHunk.old_start ?? 0) + prevHunk.lines.filter((l) => l.type !== 'add').length
-        : 0;
-      const gapNewStart = prevHunk
-        ? (prevHunk.new_start ?? 0) + prevHunk.lines.filter((l) => l.type !== 'delete').length
-        : 0;
-      const gapCount = Math.max(0, (hunk.old_start ?? 1) - 1 - gapOldStart);
-
-      if (gapCount > 0) {
-        body.appendChild(this.buildShowMoreRow(file, gapOldStart + 1, gapNewStart + 1, gapCount));
-      }
-
-      // Hunk header
-      const hunkHeaderRow = document.createElement('tr');
-      hunkHeaderRow.className = 'stacked-hunk-header';
-      const hunkHeaderCell = document.createElement('td');
-      hunkHeaderCell.colSpan = 4;
-      hunkHeaderCell.textContent = `@@ -${hunk.old_start ?? 0} +${hunk.new_start ?? 0} @@`;
-      hunkHeaderRow.appendChild(hunkHeaderCell);
-      body.appendChild(hunkHeaderRow);
-
-      hunk.lines.forEach((line) => this.buildDiffRow(line, file.path, codeCells, body));
-    });
-
-    table.appendChild(body);
-    section.appendChild(table);
-
-    // Async colorize all code cells in one pass
-    if (codeCells.length > 0) {
-      const allContent = codeCells.map(([, c]) => c).join('\n');
-      monaco.editor
-        .colorize(allContent, language, { tabSize: 2 })
-        .then((html) => {
-          const lines = html.split('<br/>');
-          codeCells.forEach(([cell], i) => {
-            if (lines[i] !== undefined) {
-              cell.innerHTML = lines[i]!;
-            }
-          });
-        })
-        .catch(() => {
-          /* leave plain text */
-        });
-    }
-
-    return section;
-  }
-
-  // ─── Diff row ────────────────────────────────────────────────────────────
-
-  // Side-by-side layout: old-num | old-code | new-num | new-code
-  private buildDiffRow(
-    line: DiffLine,
-    filePath: string,
-    codeCells: Array<[HTMLTableCellElement, string]>,
-    body: HTMLTableSectionElement,
-  ) {
-    const type = line.type ?? 'context';
-    const isAdd = type === 'add';
-    const isDel = type === 'delete';
-    const content = line.content ?? '';
-
-    const tr = document.createElement('tr');
-
-    const oldNum = document.createElement('td');
-    oldNum.className = 'stacked-num' + (isDel ? ' stacked-num-del' : '');
-    oldNum.textContent = line.old_line != null ? String(line.old_line) : '';
-    if (line.old_line != null) {
-      oldNum.style.cursor = 'pointer';
-      oldNum.addEventListener('click', () =>
-        this.showInlineCommentForm(filePath, line.old_line!, 'old', tr, body),
-      );
-    }
-
-    const oldCode = document.createElement('td');
-    oldCode.className = 'stacked-code stacked-old' + (isDel ? ' stacked-code-del' : '');
-    if (!isAdd) {
-      oldCode.textContent = content;
-      codeCells.push([oldCode, content]);
-      if (line.old_line != null) {
-        oldCode.style.cursor = 'pointer';
-        oldCode.addEventListener('click', () =>
-          this.showInlineCommentForm(filePath, line.old_line!, 'old', tr, body),
-        );
-      }
-    }
-
-    const newNum = document.createElement('td');
-    newNum.className = 'stacked-num' + (isAdd ? ' stacked-num-add' : '');
-    newNum.textContent = line.new_line != null ? String(line.new_line) : '';
-    if (line.new_line != null) {
-      newNum.style.cursor = 'pointer';
-      newNum.addEventListener('click', () =>
-        this.showInlineCommentForm(filePath, line.new_line!, 'new', tr, body),
-      );
-    }
-
-    const newCode = document.createElement('td');
-    newCode.className = 'stacked-code stacked-new' + (isAdd ? ' stacked-code-add' : '');
-    if (!isDel) {
-      newCode.textContent = content;
-      codeCells.push([newCode, content]);
-      if (line.new_line != null) {
-        newCode.style.cursor = 'pointer';
-        newCode.addEventListener('click', () =>
-          this.showInlineCommentForm(filePath, line.new_line!, 'new', tr, body),
-        );
-      }
-    }
-
-    tr.append(oldNum, oldCode, newNum, newCode);
-    body.appendChild(tr);
-  }
-
-  // ─── Show more context ───────────────────────────────────────────────────
-
-  private buildShowMoreRow(
-    file: DiffFile,
-    oldStart: number,
-    newStart: number,
-    count: number,
-  ): HTMLTableRowElement {
-    const tr = document.createElement('tr');
-    tr.className = 'stacked-show-more';
-    const td = document.createElement('td');
-    td.colSpan = 4;
-
-    const btn = el('button', {
-      className: 'stacked-show-more-btn',
-      text: `↕ Show ${count} line${count === 1 ? '' : 's'}`,
-    });
-
-    btn.addEventListener('click', async () => {
-      btn.disabled = true;
-      btn.textContent = 'Loading…';
-      await this.expandContext(file, oldStart, newStart, count, tr);
-      tr.remove();
-    });
-
-    td.appendChild(btn);
-    tr.appendChild(td);
-    return tr;
-  }
-
-  private async expandContext(
-    file: DiffFile,
-    oldStart: number,
-    newStart: number,
-    count: number,
-    insertBefore: HTMLTableRowElement,
-  ) {
-    const body = insertBefore.parentElement as HTMLTableSectionElement;
-    if (!body) {
+  renderStackedComments() {
+    if (!this.isStacked) {
       return;
     }
-
-    let pair: FilePair;
-    try {
-      pair = await this.fetchFilePair(file.path);
-    } catch {
-      return;
+    for (const [path, item] of this.stackedItems) {
+      const nextItem = {
+        ...item,
+        annotations: this.stackedAnnotationsForFile(path),
+        version: ++this.stackedItemVersion,
+      };
+      this.stackedItems.set(path, nextItem);
+      if (!this.stackedCodeView?.updateItem(nextItem)) {
+        continue;
+      }
     }
-
-    const oldLines = pair.old.split('\n');
-    const newLines = pair.new.split('\n');
-
-    for (let i = 0; i < count; i++) {
-      const ol = oldStart + i;
-      const nl = newStart + i;
-      const tr = document.createElement('tr');
-      tr.className = 'stacked-ctx stacked-ctx-expanded';
-
-      const oldNum = document.createElement('td');
-      oldNum.className = 'stacked-num';
-      oldNum.textContent = String(ol);
-
-      const oldCode = document.createElement('td');
-      oldCode.className = 'stacked-code stacked-old';
-      oldCode.textContent = oldLines[ol - 1] ?? '';
-
-      const newNum = document.createElement('td');
-      newNum.className = 'stacked-num';
-      newNum.textContent = String(nl);
-
-      const newCode = document.createElement('td');
-      newCode.className = 'stacked-code stacked-new';
-      newCode.textContent = newLines[nl - 1] ?? '';
-
-      tr.append(oldNum, oldCode, newNum, newCode);
-      body.insertBefore(tr, insertBefore);
-    }
+    this.stackedCodeView?.render(true);
   }
 
-  // ─── Inline comments ─────────────────────────────────────────────────────
-
-  private showInlineCommentForm(
-    filePath: string,
-    lineNum: number,
-    side: Side,
-    afterRow: HTMLTableRowElement,
-    body: HTMLTableSectionElement,
-  ) {
-    // Don't open a second form for the same location
-    const existing = body.querySelector('.stacked-comment-form-row');
-    if (existing) {
-      existing.remove();
+  private renderStackedAnnotation(annotation: DiffLineAnnotation<StackedAnnotation>) {
+    const metadata = annotation.metadata;
+    if (!metadata) {
+      return undefined;
     }
+    if (metadata.kind === 'draft') {
+      return this.buildDraftAnnotation(metadata);
+    }
+    if (metadata.kind === 'review-note') {
+      const wrap = el('div', {
+        className: `stacked-annotation stacked-review-note-${metadata.note.side}`,
+      });
+      wrap.appendChild(this.buildReviewNoteNode(metadata.note));
+      return wrap;
+    }
+    return this.buildCommentAnnotation(metadata.comment, metadata.index);
+  }
 
-    const tr = document.createElement('tr');
-    tr.className = 'stacked-comment-form-row';
-
-    // 4-col layout: old-num | old-code | new-num | new-code
-    // Form goes in the code column for the clicked side; everything else is a spacer.
-    const oldNumCell = document.createElement('td');
-    oldNumCell.className = 'stacked-review-note-spacer';
-    const oldCodeCell = document.createElement('td');
-    const newNumCell = document.createElement('td');
-    newNumCell.className = 'stacked-review-note-spacer';
-    const newCodeCell = document.createElement('td');
-
-    const formCell = side === 'new' ? newCodeCell : oldCodeCell;
-    formCell.className = 'stacked-comment-form-cell';
-    const nonFormCodeCell = side === 'new' ? oldCodeCell : newCodeCell;
-    nonFormCodeCell.colSpan = 2;
-    nonFormCodeCell.className = 'stacked-review-note-spacer';
-
+  private buildDraftAnnotation(draft: Extract<StackedAnnotation, { kind: 'draft' }>) {
     const form = el('div', { className: 'stacked-comment-form' });
     const ta = document.createElement('textarea');
     ta.className = 'stacked-comment-ta';
-    ta.placeholder = 'Add a comment…';
+    ta.placeholder = 'Add a comment...';
     ta.rows = 3;
 
-    const actions = el('div', { className: 'stacked-comment-actions' });
     const save = el('button', { className: 'stacked-comment-save btn-primary', text: 'Save' });
     const cancel = el('button', {
       className: 'stacked-comment-cancel btn-secondary',
       text: 'Cancel',
     });
-
     const doSave = () => {
-      const body_ = ta.value.trim();
-      if (!body_) {
+      const body = ta.value.trim();
+      if (!body) {
+        ta.focus();
         return;
       }
-      this.commentManager.addComment({
-        file: filePath,
-        line: lineNum,
-        side,
-        body: body_,
-        commit_idx: this.seriesInfo?.is_series ? this.currentCommitIdx : undefined,
-      } as Parameters<typeof this.commentManager.addComment>[0]);
-      tr.remove();
+      const comment: ReviewComment = {
+        file: draft.file,
+        line: draft.line,
+        side: draft.side,
+        body,
+      };
+      this.commentManager.addComment(
+        this.seriesInfo?.is_series ? { ...comment, commit_idx: this.currentCommitIdx } : comment,
+      );
+      this.stackedDraft = null;
       this.renderStackedComments();
     };
-
     save.addEventListener('click', doSave);
-    cancel.addEventListener('click', () => tr.remove());
-    ta.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-        e.preventDefault();
+    cancel.addEventListener('click', () => {
+      this.stackedDraft = null;
+      this.renderStackedComments();
+    });
+    ta.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
         doSave();
-      } else if (e.key === 'Escape') {
-        tr.remove();
+      } else if (event.key === 'Escape') {
+        this.stackedDraft = null;
+        this.renderStackedComments();
       }
     });
 
-    actions.append(save, cancel);
-    form.append(ta, actions);
-    formCell.appendChild(form);
-    if (side === 'new') {
-      tr.append(nonFormCodeCell, newNumCell, newCodeCell);
-    } else {
-      tr.append(oldNumCell, oldCodeCell, nonFormCodeCell);
-    }
-
-    const next = afterRow.nextSibling;
-    body.insertBefore(tr, next ?? null);
-    ta.focus();
+    form.append(ta, el('div', { className: 'stacked-comment-actions' }, [save, cancel]));
+    queueMicrotask(() => ta.focus());
+    return form;
   }
 
-  renderStackedComments() {
-    const container = document.getElementById('stacked-container');
-    if (!container || !this.isStacked) {
+  private buildCommentAnnotation(comment: ReviewComment, index: number) {
+    const box = el('div', { className: 'stacked-comment-box' });
+    const meta = el('div', {
+      className: 'stacked-comment-meta',
+      text: `${comment.side} line ${commentEndLine(comment)}`,
+    });
+    const body = el('div', { className: 'stacked-comment-body', text: comment.body });
+    const actions = el('div', { className: 'stacked-comment-actions-row' });
+    const edit = el('button', { className: 'stacked-comment-edit btn-secondary', text: 'Edit' });
+    const del = el('button', { className: 'stacked-comment-del btn-danger', text: 'Delete' });
+
+    edit.addEventListener('click', () => {
+      const ta = document.createElement('textarea');
+      ta.className = 'stacked-comment-ta';
+      ta.rows = 3;
+      ta.value = comment.body;
+      const save = el('button', { className: 'btn-primary', text: 'Save' });
+      const cancel = el('button', { className: 'btn-secondary', text: 'Cancel' });
+      const saveEdit = () => {
+        const newBody = ta.value.trim();
+        if (!newBody) {
+          ta.focus();
+          return;
+        }
+        this.commentManager.updateComment(index, newBody);
+      };
+      save.addEventListener('click', saveEdit);
+      cancel.addEventListener('click', () => this.renderStackedComments());
+      ta.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+          event.preventDefault();
+          saveEdit();
+        } else if (event.key === 'Escape') {
+          this.renderStackedComments();
+        }
+      });
+      box.replaceChildren(
+        meta,
+        ta,
+        el('div', { className: 'stacked-comment-actions-row' }, [save, cancel]),
+      );
+      ta.focus();
+    });
+    del.addEventListener('click', () => this.commentManager.removeComment(index));
+
+    actions.append(edit, del);
+    box.append(meta, body, actions);
+    return box;
+  }
+
+  private stackedAnnotationsForFile(path: string): DiffLineAnnotation<StackedAnnotation>[] {
+    const annotations: DiffLineAnnotation<StackedAnnotation>[] = [];
+    this.commentManager.getComments().forEach((comment, index) => {
+      if (comment.file !== path) {
+        return;
+      }
+      annotations.push({
+        side: this.toAnnotationSide(comment.side),
+        lineNumber: commentEndLine(comment),
+        metadata: { kind: 'comment', comment, index },
+      });
+    });
+    this.reviewNoteManager.getNotesForFile(path).forEach((note) => {
+      annotations.push({
+        side: this.toAnnotationSide(note.side),
+        lineNumber: commentEndLine(note),
+        metadata: { kind: 'review-note', note },
+      });
+    });
+    if (this.stackedDraft?.file === path) {
+      annotations.push({
+        side: this.toAnnotationSide(this.stackedDraft.side),
+        lineNumber: this.stackedDraft.line,
+        metadata: { kind: 'draft', ...this.stackedDraft },
+      });
+    }
+    return annotations;
+  }
+
+  private syncCurrentFileFromStackedScroll(scrollTop: number) {
+    if (!this.stackedCodeView || !this.files.length) {
       return;
     }
-
-    // Remove existing comment display rows
-    container.querySelectorAll('.stacked-comment-row').forEach((el) => el.remove());
-
-    const comments = this.commentManager.getComments();
-    comments.forEach((comment, idx) => {
-      const table = container.querySelector<HTMLTableElement>(
-        `table[data-path="${CSS.escape(comment.file)}"]`,
-      );
-      if (!table) {
+    let bestIdx = this.currentFileIndex;
+    let bestTop = Number.NEGATIVE_INFINITY;
+    this.files.forEach((file, index) => {
+      const top = this.stackedCodeView?.getTopForItem(this.stackedItemId(file.path));
+      if (top == null || top > scrollTop + 32 || top < bestTop) {
         return;
       }
-      const body = table.querySelector('tbody');
-      if (!body) {
-        return;
-      }
+      bestTop = top;
+      bestIdx = index;
+    });
+    if (bestIdx !== this.currentFileIndex) {
+      this.currentFileIndex = bestIdx;
+      this.currentFileIsCommit = false;
+      this.renderFileList();
+    }
+  }
 
-      // Find the code cell for this comment's line + side
-      const selector = comment.side === 'new' ? '.stacked-new' : '.stacked-old';
-      let targetRow: HTMLTableRowElement | null = null;
-      for (const row of Array.from(body.rows)) {
-        const cells = row.querySelectorAll<HTMLTableCellElement>('.stacked-num');
-        // 4-col layout: col0=old-num, col1=new-num (old-code is not .stacked-num)
-        const num = comment.side === 'new' ? cells[1]?.textContent : cells[0]?.textContent;
-        if (num && parseInt(num) === comment.line) {
-          targetRow = row as HTMLTableRowElement;
-          break;
+  private toDiffsMetadata(
+    file: DiffFile,
+    parsePatchFiles: ParsePatchFiles,
+  ): FileDiffMetadata | null {
+    if (!file.hunks.length) {
+      return null;
+    }
+    const parsed = parsePatchFiles(this.toUnifiedPatch(file), `lrv:${file.path}`)[0]?.files[0];
+    return parsed ?? null;
+  }
+
+  private toUnifiedPatch(file: DiffFile): string {
+    const oldPath = file.old_path ?? file.path;
+    const oldHeader = file.status === 'added' ? '/dev/null' : `a/${oldPath}`;
+    const newHeader = file.status === 'deleted' ? '/dev/null' : `b/${file.path}`;
+    const lines = [`diff --git a/${oldPath} b/${file.path}`];
+    if (file.status === 'added') {
+      lines.push('new file mode 100644');
+    } else if (file.status === 'deleted') {
+      lines.push('deleted file mode 100644');
+    } else if (file.status === 'renamed' && file.old_path) {
+      lines.push(`rename from ${file.old_path}`, `rename to ${file.path}`);
+    }
+    lines.push(`--- ${oldHeader}`, `+++ ${newHeader}`);
+    for (const hunk of file.hunks) {
+      const oldCount = hunk.lines.filter((line) => line.type !== 'add').length;
+      const newCount = hunk.lines.filter((line) => line.type !== 'delete').length;
+      lines.push(`@@ -${hunk.old_start ?? 0},${oldCount} +${hunk.new_start ?? 0},${newCount} @@`);
+      for (const line of hunk.lines) {
+        lines.push(`${this.diffLinePrefix(line)}${line.content ?? ''}`);
+      }
+    }
+    return `${lines.join('\n')}\n`;
+  }
+
+  private diffLinePrefix(line: DiffLine) {
+    if (line.type === 'add') {
+      return '+';
+    }
+    if (line.type === 'delete') {
+      return '-';
+    }
+    return ' ';
+  }
+
+  private fileDelta(file: DiffFile) {
+    let additions = 0;
+    let deletions = 0;
+    for (const hunk of file.hunks) {
+      for (const line of hunk.lines) {
+        if (line.type === 'add') {
+          additions += 1;
+        } else if (line.type === 'delete') {
+          deletions += 1;
         }
       }
-      if (!targetRow) {
-        return;
+    }
+    return { additions, deletions };
+  }
+
+  private toAnnotationSide(side: Side): AnnotationSide {
+    return side === 'new' ? 'additions' : 'deletions';
+  }
+
+  private fromAnnotationSide(side: AnnotationSide): Side {
+    return side === 'additions' ? 'new' : 'old';
+  }
+
+  private stackedSectionId(path: string) {
+    return `stacked-file-${CSS.escape(path)}`;
+  }
+
+  private stackedItemId(path: string) {
+    return `file:${path}`;
+  }
+
+  private pathFromCodeViewContext(context: unknown): string {
+    const id = (context as { item?: { id?: string } } | undefined)?.item?.id ?? '';
+    return id.startsWith('file:') ? id.slice('file:'.length) : id;
+  }
+
+  private fileForPath(path: string): DiffFile {
+    return this.files.find((file) => file.path === path) ?? this.files[0]!;
+  }
+
+  private stackedDiffsCss() {
+    return `
+      :host {
+        --diffs-font-family: var(--font-mono);
+        --diffs-light-bg: var(--bg-primary);
+        --diffs-dark-bg: var(--bg-primary);
+        --diffs-light: var(--text-primary);
+        --diffs-dark: var(--text-primary);
+        --diffs-fg-number-override: var(--text-secondary);
+        --diffs-bg-context-override: color-mix(in srgb, var(--bg-primary) 88%, var(--text-primary));
+        --diffs-bg-context-gutter-override: color-mix(in srgb, var(--bg-primary) 84%, var(--text-primary));
+        --diffs-bg-separator-override: color-mix(in srgb, var(--bg-primary) 78%, var(--text-primary));
+        --diffs-bg-buffer-override: color-mix(in srgb, var(--bg-primary) 92%, var(--text-primary));
+        --diffs-bg-selection-override: var(--accent-color);
+        --diffs-bg-selection-number-override: var(--accent-color);
       }
-
-      const tr = document.createElement('tr');
-      tr.className = 'stacked-comment-row';
-      tr.setAttribute('data-comment-idx', String(idx));
-      const td = document.createElement('td');
-      td.colSpan = 4;
-
-      const box = el('div', { className: 'stacked-comment-box' });
-      const meta = el('div', {
-        className: 'stacked-comment-meta',
-        text: `${comment.side} line ${comment.line}`,
-      });
-      const bodyEl = el('div', { className: 'stacked-comment-body', text: comment.body });
-      const actions_ = el('div', { className: 'stacked-comment-actions-row' });
-      const edit = el('button', {
-        className: 'stacked-comment-edit btn-secondary',
-        text: 'Edit',
-      });
-      const del = el('button', {
-        className: 'stacked-comment-del btn-danger',
-        text: 'Delete',
-      });
-      edit.addEventListener('click', () => {
-        const ta_ = document.createElement('textarea');
-        ta_.className = 'stacked-comment-ta';
-        ta_.rows = 3;
-        ta_.value = comment.body;
-        const saveEdit = () => {
-          const newBody = ta_.value.trim();
-          if (!newBody) {
-            return;
-          }
-          this.commentManager.updateComment(idx, newBody);
-          this.renderStackedComments();
-        };
-        const cancelEdit = () => this.renderStackedComments();
-        ta_.addEventListener('keydown', (e) => {
-          if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-            e.preventDefault();
-            saveEdit();
-          } else if (e.key === 'Escape') {
-            cancelEdit();
-          }
-        });
-        const saveBtn_ = el('button', { className: 'btn-primary', text: 'Save' });
-        const cancelBtn_ = el('button', { className: 'btn-secondary', text: 'Cancel' });
-        saveBtn_.addEventListener('click', saveEdit);
-        cancelBtn_.addEventListener('click', cancelEdit);
-        const editActions = el('div', { className: 'stacked-comment-actions-row' });
-        editActions.append(saveBtn_, cancelBtn_);
-        box.replaceChildren(meta, ta_, editActions);
-        ta_.focus();
-      });
-      del.addEventListener('click', () => {
-        this.commentManager.removeComment(idx);
-        this.renderStackedComments();
-      });
-      actions_.append(edit, del);
-      box.append(meta, bodyEl, actions_);
-      td.appendChild(box);
-      tr.appendChild(td);
-
-      const next = targetRow.nextSibling;
-      body.insertBefore(tr, next ?? null);
-    });
+      [data-line-annotation] { padding: 8px 12px; }
+      [data-interactive-line-numbers] { cursor: pointer; }
+    `;
   }
 }

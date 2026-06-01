@@ -25,7 +25,13 @@ async function startServer(port: number = 0): Promise<void> {
     })();
     const cmd = `cd "${testRepoPath}" && git diff HEAD | "${cargoPath}" --port ${port} --no-open`;
     serverUrl = null;
-    serverProcess = spawn('bash', ['-c', cmd], { stdio: ['inherit', 'pipe', 'pipe'] });
+    serverProcess = spawn('bash', ['-c', cmd], {
+      stdio: ['inherit', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        XDG_CONFIG_HOME: path.join(testRepoPath, '.config'),
+      },
+    });
     let output = '';
     const check = (d: Buffer) => {
       const t = d.toString();

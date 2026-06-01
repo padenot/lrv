@@ -102,7 +102,13 @@ async function startServer(port: number = 0): Promise<void> {
     console.info(`[server] starting with cmd: ${cmd}`);
     const serverLog = path.join(outDir, `server-${Date.now()}.log`);
     fs.writeFileSync(serverLog, `[start] ${new Date().toISOString()}\nCMD: ${cmd}\n`);
-    serverProcess = spawn('bash', ['-c', cmd], { stdio: ['inherit', 'pipe', 'pipe'] });
+    serverProcess = spawn('bash', ['-c', cmd], {
+      stdio: ['inherit', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        XDG_CONFIG_HOME: path.join(testRepoPath, '.config'),
+      },
+    });
     let output = '';
     let settled = false;
     const startupTimeout = setTimeout(() => {
@@ -421,7 +427,8 @@ test.describe('Perf Bench', () => {
     await page.waitForSelector('.monaco-editor', { timeout: 60000, state: 'attached' });
     await page.waitForFunction(
       () =>
-        document.querySelectorAll('#file-list li').length > 0 &&
+        ((window as any).__APP?.files?.length ?? 0) > 0 &&
+        document.querySelector('file-tree-container.lrv-file-tree') !== null &&
         document.querySelectorAll('.monaco-editor .view-lines .view-line').length > 0,
       { timeout: 60000 },
     );
@@ -436,17 +443,31 @@ test.describe('Perf Bench', () => {
       () => (window as any).Perf && (window as any).Perf.clear && (window as any).Perf.clear(),
     );
     // Switch a few files repeatedly
-    await page.waitForFunction(() => document.querySelectorAll('#file-list li').length > 0, {
+    await page.waitForFunction(() => ((window as any).__APP?.files?.length ?? 0) > 0, {
       timeout: 30000,
     });
-    const count = await page.locator('#file-list li').count();
+    const count = await page.evaluate(() => (window as any).__APP?.files?.length ?? 0);
     const n = Math.min(3, count);
     for (let i = 0; i < 6; i++) {
-      await page
-        .locator('#file-list li')
-        .nth(i % n)
-        .click();
+      const index = (i + 1) % n;
+      const previousMetricCount = await page.evaluate(() => {
+        const metrics = (window as any).Perf?.getMetrics?.();
+        return Array.isArray(metrics?.fileSwitch) ? metrics.fileSwitch.length : 0;
+      });
+      await page.evaluate(async (index) => {
+        await (window as any).__APP?.loadFile?.(index);
+      }, index);
       await page.locator('.monaco-editor').first().waitFor({ timeout: 30000 });
+      await page.waitForFunction(
+        (previousMetricCount) => {
+          const metrics = (window as any).Perf?.getMetrics?.();
+          return (
+            Array.isArray(metrics?.fileSwitch) && metrics.fileSwitch.length > previousMetricCount
+          );
+        },
+        previousMetricCount,
+        { timeout: 30000 },
+      );
     }
     const fileSwitchValues = await page.evaluate(() => {
       const metrics = (window as any).Perf?.getMetrics?.();
