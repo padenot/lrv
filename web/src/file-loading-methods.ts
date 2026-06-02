@@ -9,6 +9,7 @@ import type { editor } from 'monaco-editor';
 // Incremented on every loadFile call so stale onDidUpdateDiff callbacks
 // from a superseded load cannot uncover the editor prematurely.
 let _loadSerial = 0;
+type EditorSelection = NonNullable<ReturnType<editor.IStandaloneCodeEditor['getSelection']>>;
 
 export class FileLoadingMethods {
   declare currentFileIsCommit: boolean;
@@ -39,6 +40,9 @@ export class FileLoadingMethods {
   declare jumpToHunk: AppContext['jumpToHunk'];
   declare setFocusedLine: AppContext['setFocusedLine'];
   declare expandCurrentFileAncestors: AppContext['expandCurrentFileAncestors'];
+  private lastModifiedRangeSelection: EditorSelection | null;
+  private lastOriginalRangeSelection: EditorSelection | null;
+  private editorClickDisposables: Array<{ dispose(): void }>;
 
   private getCurrentFile(index: number) {
     return this.files[index]!;
@@ -282,31 +286,149 @@ export class FileLoadingMethods {
     modifiedEditor: editor.IStandaloneCodeEditor,
     originalEditor: editor.IStandaloneCodeEditor,
   ) {
-    modifiedEditor.onMouseDown((e) => {
-      if (
-        e.target.type === monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS ||
-        e.target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN
-      ) {
-        if (!e.target.position) {
-          return;
-        }
-        const monacoLine = e.target.position.lineNumber;
-        this.showCommentDialog(filePath, monacoLine, monacoLine, 'new');
-      }
-    });
+    this.editorClickDisposables?.forEach((disposable) => disposable.dispose());
+    this.editorClickDisposables = [];
+    this.lastModifiedRangeSelection = this.editorRangeSelection(modifiedEditor.getSelection());
+    this.lastOriginalRangeSelection = this.editorRangeSelection(originalEditor.getSelection());
+    this.editorClickDisposables.push(
+      modifiedEditor.onDidChangeCursorSelection(() => {
+        this.lastModifiedRangeSelection =
+          this.editorRangeSelection(modifiedEditor.getSelection()) ??
+          this.lastModifiedRangeSelection;
+      }),
+      originalEditor.onDidChangeCursorSelection(() => {
+        this.lastOriginalRangeSelection =
+          this.editorRangeSelection(originalEditor.getSelection()) ??
+          this.lastOriginalRangeSelection;
+      }),
+      modifiedEditor.onMouseUp((e) => {
+        this.lastModifiedRangeSelection =
+          this.editorRangeSelection(modifiedEditor.getSelection()) ??
+          this.lastModifiedRangeSelection;
+      }),
+      originalEditor.onMouseUp((e) => {
+        this.lastOriginalRangeSelection =
+          this.editorRangeSelection(originalEditor.getSelection()) ??
+          this.lastOriginalRangeSelection;
+      }),
+    );
 
-    originalEditor.onMouseDown((e) => {
-      if (
-        e.target.type === monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS ||
-        e.target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN
-      ) {
-        if (!e.target.position) {
-          return;
+    this.editorClickDisposables.push(
+      modifiedEditor.onMouseDown((e) => {
+        if (this.isCommentGutterTarget(e) && e.target.position) {
+          this.beginEditorGutterGesture(
+            filePath,
+            modifiedEditor,
+            e.target.position.lineNumber,
+            'new',
+          );
         }
-        const monacoLine = e.target.position.lineNumber;
-        this.showCommentDialog(filePath, monacoLine, monacoLine, 'old');
-      }
-    });
+      }),
+
+      originalEditor.onMouseDown((e) => {
+        if (this.isCommentGutterTarget(e) && e.target.position) {
+          this.beginEditorGutterGesture(
+            filePath,
+            originalEditor,
+            e.target.position.lineNumber,
+            'old',
+          );
+        }
+      }),
+    );
+  }
+
+  private beginEditorGutterGesture(
+    filePath: string,
+    targetEditor: editor.IStandaloneCodeEditor,
+    downLine: number,
+    side: 'new' | 'old',
+  ) {
+    const handleMouseUp = (event: MouseEvent) => {
+      const target = targetEditor.getTargetAtClientPoint(event.clientX, event.clientY);
+      const upLine = target?.position?.lineNumber ?? downLine;
+      const fallbackSelection =
+        side === 'new' ? this.lastModifiedRangeSelection : this.lastOriginalRangeSelection;
+      this.showCommentDialog(
+        filePath,
+        this.commentLineFromGutterGesture(targetEditor, downLine, upLine, fallbackSelection),
+        upLine,
+        side,
+      );
+    };
+    document.addEventListener('mouseup', handleMouseUp, { capture: true, once: true });
+  }
+
+  private isCommentGutterTarget(e: editor.IEditorMouseEvent) {
+    return (
+      e.target.type === monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS ||
+      e.target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN
+    );
+  }
+
+  private commentLineFromGutterGesture(
+    editor: editor.IStandaloneCodeEditor,
+    downLine: number,
+    upLine: number,
+    fallbackSelection: EditorSelection | null,
+  ) {
+    if (downLine !== upLine) {
+      const start = Math.min(downLine, upLine);
+      const end = Math.max(downLine, upLine);
+      return [start, end] as [number, number];
+    }
+    return this.commentLineFromEditorSelection(editor, upLine, fallbackSelection);
+  }
+
+  commentLineFromEditorSelection(
+    editor: editor.IStandaloneCodeEditor,
+    clickedLine: number,
+    fallbackSelection: EditorSelection | null,
+  ) {
+    const current = this.commentLineFromSelection(editor.getSelection(), clickedLine);
+    if (Array.isArray(current)) {
+      return current;
+    }
+    return this.commentLineFromSelection(fallbackSelection, clickedLine) ?? current ?? clickedLine;
+  }
+
+  private commentLineFromSelection(
+    selection: EditorSelection | null,
+    clickedLine: number,
+  ): number | [number, number] | null {
+    if (!selection || selection.isEmpty()) {
+      return null;
+    }
+
+    const start = Math.min(selection.startLineNumber, selection.endLineNumber);
+    let end = Math.max(selection.startLineNumber, selection.endLineNumber);
+
+    // When selecting whole lines by dragging to column 1 of the next line,
+    // Monaco's selection endpoint is the first column after the intended range.
+    const forwardSelection =
+      selection.startLineNumber < selection.endLineNumber ||
+      (selection.startLineNumber === selection.endLineNumber &&
+        selection.startColumn <= selection.endColumn);
+    const exclusiveEndColumn = forwardSelection ? selection.endColumn : selection.startColumn;
+    if (end > start && exclusiveEndColumn === 1) {
+      end -= 1;
+    }
+
+    if (clickedLine < start || clickedLine > end || end < start) {
+      return null;
+    }
+    return start === end ? start : ([start, end] as [number, number]);
+  }
+
+  private editorRangeSelection(selection: EditorSelection | null): EditorSelection | null {
+    if (
+      !selection ||
+      selection.isEmpty() ||
+      selection.startLineNumber === selection.endLineNumber
+    ) {
+      return null;
+    }
+    return selection;
   }
 
   applyInitialHunkFocus(filePath: string) {

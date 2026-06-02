@@ -1,7 +1,10 @@
 import { el } from './dom';
 import { MOD_KEY_LABEL } from './platform';
-import { commentEndLine, commentLineLabel, commentStartLine } from './comments';
+import { commentEndLine, commentLineLabel, commentStartLine, type CommentLine } from './comments';
 import type { AppContext, Side } from './types/app';
+import type { editor } from 'monaco-editor';
+
+type EditorSelection = NonNullable<ReturnType<editor.IStandaloneCodeEditor['getSelection']>>;
 
 export class CommentsUIMethods {
   declare editor: AppContext['editor'];
@@ -13,6 +16,13 @@ export class CommentsUIMethods {
   declare currentWidget: AppContext['currentWidget'];
   declare currentWidgetEditor?: AppContext['currentWidgetEditor'];
   declare renderFileList: () => void;
+  declare lastModifiedRangeSelection: EditorSelection | null;
+  declare lastOriginalRangeSelection: EditorSelection | null;
+  declare commentLineFromEditorSelection: (
+    editor: editor.IStandaloneCodeEditor,
+    clickedLine: number,
+    fallbackSelection: EditorSelection | null,
+  ) => CommentLine;
 
   updateDecorations() {
     if (!this.editor) {
@@ -61,12 +71,22 @@ export class CommentsUIMethods {
     );
   }
 
-  showCommentDialog(file: string, fileLineNumber: number, monacoLineNumber: number, side: Side) {
+  showCommentDialog(file: string, commentLine: CommentLine, monacoLineNumber: number, side: Side) {
     if (!this.editor) {
       return;
     }
     const targetEditor =
       side === 'new' ? this.editor.getModifiedEditor() : this.editor.getOriginalEditor();
+    if (!Array.isArray(commentLine)) {
+      const resolvedCommentLine = this.commentLineFromEditorSelection(
+        targetEditor,
+        monacoLineNumber,
+        side === 'new' ? this.lastModifiedRangeSelection : this.lastOriginalRangeSelection,
+      );
+      if (Array.isArray(resolvedCommentLine)) {
+        commentLine = resolvedCommentLine;
+      }
+    }
 
     // Remove any existing widget
     if (this.currentWidget) {
@@ -78,7 +98,7 @@ export class CommentsUIMethods {
     }
 
     // Check for existing comment
-    const existingIndex = this.commentManager.findComment(file, fileLineNumber, side);
+    const existingIndex = this.commentManager.findComment(file, monacoLineNumber, side);
     const existingComment = existingIndex >= 0 ? this.commentManager.comments[existingIndex] : null;
 
     const editorWidth = targetEditor.getLayoutInfo().contentWidth;
@@ -86,7 +106,7 @@ export class CommentsUIMethods {
     domNode.style.width = `${editorWidth}px`;
     const modKey = MOD_KEY_LABEL;
     const title = el('h3', {
-      text: `Line ${existingComment ? commentLineLabel(existingComment) : fileLineNumber}${existingComment ? ' - Edit' : ''}`,
+      text: `Line ${existingComment ? commentLineLabel(existingComment) : this.commentLineLabel(commentLine)}${existingComment ? ' - Edit' : ''}`,
     });
     const textarea = el('textarea', {
       className: 'comment-textarea',
@@ -165,7 +185,7 @@ export class CommentsUIMethods {
       } else {
         const comment = {
           file,
-          line: fileLineNumber,
+          line: commentLine,
           side,
           body: textarea.value,
         };
@@ -199,6 +219,13 @@ export class CommentsUIMethods {
       autoResize();
       targetEditor.layoutContentWidget(widget);
     }, 100);
+  }
+
+  private commentLineLabel(line: CommentLine) {
+    if (Array.isArray(line)) {
+      return line[0] === line[1] ? String(line[0]) : `${line[0]}-${line[1]}`;
+    }
+    return String(line);
   }
 
   updateUI() {

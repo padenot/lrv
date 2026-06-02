@@ -421,6 +421,42 @@ test.describe('Review Workflow E2E', () => {
     await expect(page.locator('#comment-count')).toHaveText('1');
   });
 
+  test('should not open a comment when clicking code in Monaco mode', async ({ page }) => {
+    await openApp(page);
+    await page.locator('.monaco-editor').first().waitFor({ timeout: 7000 });
+
+    await page
+      .locator('.modified .view-line')
+      .first()
+      .click({ position: { x: 40, y: 8 } });
+
+    await expect(page.locator('.inline-comment-box')).toHaveCount(0);
+    await expect(page.locator('#comment-count')).toHaveText('0');
+  });
+
+  test('should create a Monaco range comment from a line-number drag', async ({ page }) => {
+    await openApp(page);
+    await page.locator('.monaco-editor').first().waitFor({ timeout: 7000 });
+
+    const startLine = page.locator('.modified .line-numbers').nth(1);
+    const endLine = page.locator('.modified .line-numbers').nth(3);
+    await startLine.hover({ position: { x: 8, y: 8 } });
+    await page.mouse.down();
+    await expect(page.locator('.inline-comment-box')).toHaveCount(0);
+    await endLine.hover({ position: { x: 8, y: 8 } });
+    await page.mouse.up();
+
+    await expect(page.locator('.inline-comment-box h3')).toContainText('Line 2-4');
+    await page.locator('.comment-textarea').fill('Selected Monaco range');
+    await page.locator('.save-btn').click();
+
+    await expect(page.locator('#comment-count')).toHaveText('1');
+    const line = await page.evaluate(
+      () => (window as any).__APP.commentManager.getComments()[0].line,
+    );
+    expect(line).toEqual([2, 4]);
+  });
+
   test('should handle range comments for decoration + edit/delete', async ({ page }) => {
     await openApp(page);
     await page.locator('.monaco-editor').first().waitFor({ timeout: 7000 });
@@ -583,6 +619,55 @@ test.describe('Review Workflow E2E', () => {
     await page.locator('.stacked-comment-box .stacked-comment-del').click();
     await expect(page.locator('#comment-count')).toHaveText('0');
     await expect(page.locator('.stacked-comment-box')).toHaveCount(0);
+  });
+
+  test('stacked mode should not open a comment when clicking code', async ({ page }) => {
+    await openStackedView(page);
+
+    await page
+      .locator('.stacked-code-view diffs-container [data-line]')
+      .first()
+      .click({
+        position: { x: 48, y: 8 },
+      });
+
+    await expect(page.locator('.stacked-comment-form')).toHaveCount(0);
+    await expect(page.locator('#comment-count')).toHaveText('0');
+  });
+
+  test('stacked mode should create a range comment from selected lines and a line number click', async ({
+    page,
+  }) => {
+    await openStackedView(page);
+
+    const startBox = await page
+      .locator('.stacked-code-view diffs-container [data-additions] [data-column-number]')
+      .filter({ hasText: '2' })
+      .first()
+      .boundingBox();
+    const endBox = await page
+      .locator('.stacked-code-view diffs-container [data-additions] [data-column-number]')
+      .filter({ hasText: '4' })
+      .first()
+      .boundingBox();
+    if (!startBox || !endBox) {
+      throw new Error('Could not locate stacked line numbers for range selection');
+    }
+    await page.mouse.move(startBox.x + 8, startBox.y + startBox.height / 2);
+    await page.mouse.down();
+    await expect(page.locator('.stacked-comment-form')).toHaveCount(0);
+    await page.mouse.move(endBox.x + 8, endBox.y + endBox.height / 2, { steps: 8 });
+    await page.mouse.up();
+
+    await expect(page.locator('.stacked-comment-form')).toBeVisible({ timeout: 3000 });
+    await page.locator('.stacked-comment-form .stacked-comment-ta').fill('Selected stacked range');
+    await page.locator('.stacked-comment-form .stacked-comment-save').click();
+
+    await expect(page.locator('#comment-count')).toHaveText('1');
+    const line = await page.evaluate(
+      () => (window as any).__APP.commentManager.getComments()[0].line,
+    );
+    expect(line).toEqual([2, 4]);
   });
 
   test('stacked mode complete review workflow: add comment and submit', async ({ page }) => {

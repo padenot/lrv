@@ -1,4 +1,4 @@
-import type { ReviewComment } from '../comments';
+import type { CommentLine, ReviewComment } from '../comments';
 import type { ReviewNote } from '../review-notes';
 import type { editor } from 'monaco-editor';
 
@@ -178,7 +178,7 @@ export interface AppContext {
   showKeyboardHelp(): void;
   updateDecorations(): void;
   renderReviewNotes(): void;
-  showCommentDialog(file: string, fileLine: number, monacoLine: number, side: Side): void;
+  showCommentDialog(file: string, fileLine: CommentLine, monacoLine: number, side: Side): void;
   initFileHunks(file: DiffFile): void;
   isAddedFile(file: DiffFile): boolean;
   fetchFilePair(filePath: string): Promise<FilePair>;

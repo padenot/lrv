@@ -1,4 +1,7 @@
-import type { CodeView } from '../../node_modules/@pierre/diffs/dist/components/CodeView.js';
+import type {
+  CodeView,
+  CodeViewLineSelection,
+} from '../../node_modules/@pierre/diffs/dist/components/CodeView.js';
 import type { OnDiffLineClickProps } from '../../node_modules/@pierre/diffs/dist/managers/InteractionManager.js';
 import type {
   AnnotationSide,
@@ -6,9 +9,11 @@ import type {
   CodeViewItem,
   DiffLineAnnotation,
   FileDiffMetadata,
+  FileContents,
+  SelectedLineRange,
 } from '../../node_modules/@pierre/diffs/dist/types.js';
 import { el, clearEl } from './dom';
-import { commentEndLine, type ReviewComment } from './comments';
+import { commentEndLine, commentLineLabel, type CommentLine, type ReviewComment } from './comments';
 import { fetchJSON } from './api';
 import type { ReviewNote } from './review-notes';
 import type { AppConfig, AppContext, DiffFile, DiffLine, Side } from './types/app';
@@ -16,15 +21,18 @@ import type { AppConfig, AppContext, DiffFile, DiffLine, Side } from './types/ap
 type StackedAnnotation =
   | { kind: 'comment'; comment: ReviewComment; index: number }
   | { kind: 'review-note'; note: ReviewNote }
-  | { kind: 'draft'; file: string; line: number; side: Side };
+  | { kind: 'draft'; file: string; line: CommentLine; side: Side };
 
 const DIFFS_THEME = { dark: 'pierre-dark', light: 'pierre-light' } as const;
 
 type ParsePatchFiles =
   typeof import('../../node_modules/@pierre/diffs/dist/utils/parsePatchFiles.js').parsePatchFiles;
+type ParseDiffFromFile =
+  typeof import('../../node_modules/@pierre/diffs/dist/utils/parseDiffFromFile.js').parseDiffFromFile;
 type DiffsRuntime = {
   CodeView: typeof import('../../node_modules/@pierre/diffs/dist/components/CodeView.js').CodeView;
   parsePatchFiles: ParsePatchFiles;
+  parseDiffFromFile: ParseDiffFromFile;
   getOrCreateWorkerPoolSingleton: typeof import('../../node_modules/@pierre/diffs/dist/worker/getOrCreateWorkerPoolSingleton.js').getOrCreateWorkerPoolSingleton;
 };
 
@@ -34,10 +42,12 @@ function loadDiffsRuntime(): Promise<DiffsRuntime> {
   diffsRuntimePromise ??= Promise.all([
     import('../../node_modules/@pierre/diffs/dist/components/CodeView.js'),
     import('../../node_modules/@pierre/diffs/dist/utils/parsePatchFiles.js'),
+    import('../../node_modules/@pierre/diffs/dist/utils/parseDiffFromFile.js'),
     import('../../node_modules/@pierre/diffs/dist/worker/getOrCreateWorkerPoolSingleton.js'),
-  ]).then(([codeView, parser, workerPool]) => ({
+  ]).then(([codeView, patchParser, fileParser, workerPool]) => ({
     CodeView: codeView.CodeView,
-    parsePatchFiles: parser.parsePatchFiles,
+    parsePatchFiles: patchParser.parsePatchFiles,
+    parseDiffFromFile: fileParser.parseDiffFromFile,
     getOrCreateWorkerPoolSingleton: workerPool.getOrCreateWorkerPoolSingleton,
   }));
   return diffsRuntimePromise;
@@ -63,14 +73,19 @@ export class StackedViewMethods {
   declare buildReviewNoteNode: (note: ReviewNote) => HTMLElement;
   declare editor: AppContext['editor'];
   declare loadFile: AppContext['loadFile'];
+  declare fetchFilePair: AppContext['fetchFilePair'];
+  declare fileCacheKey: AppContext['fileCacheKey'];
 
   private stackedCodeView: CodeView<StackedAnnotation> | null;
   private stackedItems: Map<string, CodeViewDiffItem<StackedAnnotation>>;
   private stackedFileMetadata: Map<string, FileDiffMetadata>;
-  private stackedDraft: { file: string; line: number; side: Side } | null;
+  private stackedDraft: { file: string; line: CommentLine; side: Side } | null;
   private stackedItemVersion: number;
   private stackedScrollUnsubscribe: (() => void) | null;
   private stackedRenderToken: number;
+  private stackedHydratedFiles: Set<string>;
+  private stackedParseDiffFromFile: ParseDiffFromFile | null;
+  private stackedLastRangeSelection: CodeViewLineSelection | null;
 
   showStackedView() {
     this.isStacked = true;
@@ -175,6 +190,9 @@ export class StackedViewMethods {
     this.stackedCodeView = null;
     this.stackedItems = new Map();
     this.stackedFileMetadata = new Map();
+    this.stackedHydratedFiles = new Set();
+    this.stackedParseDiffFromFile = null;
+    this.stackedLastRangeSelection = null;
     this.stackedRenderToken = (this.stackedRenderToken ?? 0) + 1;
     const renderToken = this.stackedRenderToken;
     clearEl(container);
@@ -199,18 +217,19 @@ export class StackedViewMethods {
       return;
     }
 
-    const { CodeView, parsePatchFiles, getOrCreateWorkerPoolSingleton } = await loadDiffsRuntime();
+    const { CodeView, parsePatchFiles, parseDiffFromFile, getOrCreateWorkerPoolSingleton } =
+      await loadDiffsRuntime();
     if (!this.isStacked || !container.isConnected || renderToken !== this.stackedRenderToken) {
       return;
     }
+    this.stackedParseDiffFromFile = parseDiffFromFile;
 
     const codeViewRoot = el('div', { className: 'stacked-code-view' });
     container.appendChild(codeViewRoot);
 
-    const items = this.files.flatMap((file): CodeViewItem<StackedAnnotation>[] => {
-      const item = this.buildCodeViewItem(file, parsePatchFiles);
-      return item ? [item] : [];
-    });
+    const items = this.files
+      .map((file) => this.buildCodeViewItem(file, parsePatchFiles))
+      .filter((item): item is CodeViewDiffItem<StackedAnnotation> => !!item);
     if (!items.length) {
       codeViewRoot.appendChild(
         el('div', { className: 'stacked-empty', text: 'No renderable text changes.' }),
@@ -240,12 +259,14 @@ export class StackedViewMethods {
         collapsedContextThreshold: 1,
         expansionLineCount: 40,
         stickyHeaders: true,
+        enableLineSelection: true,
         renderHeaderMetadata: (fileDiff) =>
           this.buildHeaderMetadata(this.fileForPath(fileDiff.name)),
         onLineNumberClick: (props, context) =>
           this.showStackedDraft(this.pathFromCodeViewContext(context), props),
-        onLineClick: (props, context) =>
-          this.showStackedDraft(this.pathFromCodeViewContext(context), props),
+        onSelectedLinesChange: (selection) => this.rememberStackedSelection(selection),
+        onLineSelected: (range, context) =>
+          this.showStackedDraftFromSelection(this.pathFromCodeViewContext(context), range),
         renderAnnotation: (annotation) =>
           this.renderStackedAnnotation(annotation as DiffLineAnnotation<StackedAnnotation>),
         unsafeCSS: this.stackedDiffsCss(),
@@ -259,13 +280,14 @@ export class StackedViewMethods {
     this.stackedScrollUnsubscribe = view.subscribeToScroll((scrollTop) => {
       this.syncCurrentFileFromStackedScroll(scrollTop);
     });
+    void this.hydrateStackedFile(this.files[this.currentFileIndex], parseDiffFromFile);
   }
 
   private buildCodeViewItem(
     file: DiffFile,
     parsePatchFiles: ParsePatchFiles,
   ): CodeViewDiffItem<StackedAnnotation> | null {
-    const metadata = this.toDiffsMetadata(file, parsePatchFiles);
+    const metadata = this.toPatchDiffsMetadata(file, parsePatchFiles);
     if (!metadata) {
       return null;
     }
@@ -280,6 +302,81 @@ export class StackedViewMethods {
     };
     this.stackedItems.set(file.path, item);
     return item;
+  }
+
+  private async hydrateStackedFile(
+    file: DiffFile | undefined,
+    parseDiffFromFile: ParseDiffFromFile,
+  ) {
+    if (!file || this.stackedHydratedFiles.has(file.path)) {
+      return;
+    }
+    this.stackedHydratedFiles.add(file.path);
+
+    const metadata = await this.toFullFileDiffsMetadata(file, parseDiffFromFile);
+    if (!metadata || !this.isStacked || this.stackedParseDiffFromFile !== parseDiffFromFile) {
+      return;
+    }
+
+    const existing = this.stackedItems.get(file.path);
+    if (!existing) {
+      return;
+    }
+    const nextItem: CodeViewDiffItem<StackedAnnotation> = {
+      ...existing,
+      fileDiff: metadata,
+      annotations: this.stackedAnnotationsForFile(file.path),
+      version: ++this.stackedItemVersion,
+    };
+    this.stackedFileMetadata.set(file.path, metadata);
+    this.stackedItems.set(file.path, nextItem);
+    if (this.stackedCodeView?.updateItem(nextItem)) {
+      this.stackedCodeView.render(true);
+    }
+  }
+
+  private async toFullFileDiffsMetadata(
+    file: DiffFile,
+    parseDiffFromFile: ParseDiffFromFile,
+  ): Promise<FileDiffMetadata | null> {
+    let pair;
+    try {
+      pair = await this.fetchFilePair(file.path);
+    } catch {
+      return null;
+    }
+
+    if (!pair.old && !pair.new) {
+      return null;
+    }
+
+    const oldFile: FileContents = {
+      name: file.old_path ?? file.path,
+      contents: pair.old,
+      cacheKey: `${this.fileCacheKey(file.path)}:old`,
+    };
+    const newFile: FileContents = {
+      name: file.path,
+      contents: pair.new,
+      cacheKey: `${this.fileCacheKey(file.path)}:new`,
+    };
+
+    try {
+      return parseDiffFromFile(oldFile, newFile);
+    } catch {
+      return null;
+    }
+  }
+
+  private toPatchDiffsMetadata(
+    file: DiffFile,
+    parsePatchFiles: ParsePatchFiles,
+  ): FileDiffMetadata | null {
+    if (!file.hunks.length) {
+      return null;
+    }
+    const parsed = parsePatchFiles(this.toUnifiedPatch(file), `lrv:${file.path}`)[0]?.files[0];
+    return parsed ?? null;
   }
 
   private buildHeaderMetadata(file: DiffFile): HTMLElement {
@@ -306,8 +403,92 @@ export class StackedViewMethods {
       return;
     }
     const side = this.fromAnnotationSide(props.annotationSide);
-    this.stackedDraft = { file, line: props.lineNumber, side };
+    this.stackedDraft = {
+      file,
+      line: this.stackedSelectedLine(file, props.lineNumber, side),
+      side,
+    };
     this.renderStackedComments();
+  }
+
+  private showStackedDraftFromSelection(file: string, range: SelectedLineRange | null) {
+    if (!file || !range) {
+      return;
+    }
+    const startSide = range.side ? this.fromAnnotationSide(range.side) : null;
+    const endSide = range.endSide ? this.fromAnnotationSide(range.endSide) : startSide;
+    if (!startSide || startSide !== endSide) {
+      return;
+    }
+    const start = Math.min(range.start, range.end);
+    const end = Math.max(range.start, range.end);
+    this.stackedDraft = {
+      file,
+      line: start === end ? start : [start, end],
+      side: startSide,
+    };
+    this.renderStackedComments();
+  }
+
+  private stackedSelectedLine(file: string, clickedLine: number, side: Side): CommentLine {
+    const current = this.commentLineFromStackedSelection(
+      this.stackedCodeView?.getSelectedLines(),
+      file,
+      clickedLine,
+      side,
+    );
+    if (Array.isArray(current)) {
+      return current;
+    }
+    return (
+      this.commentLineFromStackedSelection(
+        this.stackedLastRangeSelection,
+        file,
+        clickedLine,
+        side,
+      ) ??
+      current ??
+      clickedLine
+    );
+  }
+
+  private rememberStackedSelection(selection: CodeViewLineSelection | null) {
+    if (this.isStackedRangeSelection(selection)) {
+      this.stackedLastRangeSelection = selection;
+    }
+  }
+
+  private commentLineFromStackedSelection(
+    selected: CodeViewLineSelection | null | undefined,
+    file: string,
+    clickedLine: number,
+    side: Side,
+  ): CommentLine | null {
+    const startSide = selected?.range.side ? this.fromAnnotationSide(selected.range.side) : null;
+    const endSide = selected?.range.endSide
+      ? this.fromAnnotationSide(selected.range.endSide)
+      : startSide;
+    if (
+      !selected ||
+      selected.id !== this.stackedItemId(file) ||
+      startSide !== side ||
+      endSide !== side
+    ) {
+      return clickedLine;
+    }
+
+    const start = Math.min(selected.range.start, selected.range.end);
+    const end = Math.max(selected.range.start, selected.range.end);
+    if (clickedLine < start || clickedLine > end) {
+      return null;
+    }
+    return start === end ? start : [start, end];
+  }
+
+  private isStackedRangeSelection(
+    selection: CodeViewLineSelection | null,
+  ): selection is CodeViewLineSelection {
+    return !!selection && selection.range.start !== selection.range.end;
   }
 
   renderStackedComments() {
@@ -345,7 +526,6 @@ export class StackedViewMethods {
     }
     return this.buildCommentAnnotation(metadata.comment, metadata.index);
   }
-
   private buildDraftAnnotation(draft: Extract<StackedAnnotation, { kind: 'draft' }>) {
     const form = el('div', { className: 'stacked-comment-form' });
     const ta = document.createElement('textarea');
@@ -374,11 +554,15 @@ export class StackedViewMethods {
         this.seriesInfo?.is_series ? { ...comment, commit_idx: this.currentCommitIdx } : comment,
       );
       this.stackedDraft = null;
+      this.stackedLastRangeSelection = null;
+      this.stackedCodeView?.clearSelectedLines({ notify: false });
       this.renderStackedComments();
     };
     save.addEventListener('click', doSave);
     cancel.addEventListener('click', () => {
       this.stackedDraft = null;
+      this.stackedLastRangeSelection = null;
+      this.stackedCodeView?.clearSelectedLines({ notify: false });
       this.renderStackedComments();
     });
     ta.addEventListener('keydown', (event) => {
@@ -387,6 +571,8 @@ export class StackedViewMethods {
         doSave();
       } else if (event.key === 'Escape') {
         this.stackedDraft = null;
+        this.stackedLastRangeSelection = null;
+        this.stackedCodeView?.clearSelectedLines({ notify: false });
         this.renderStackedComments();
       }
     });
@@ -400,7 +586,7 @@ export class StackedViewMethods {
     const box = el('div', { className: 'stacked-comment-box' });
     const meta = el('div', {
       className: 'stacked-comment-meta',
-      text: `${comment.side} line ${commentEndLine(comment)}`,
+      text: `${comment.side} line ${commentLineLabel(comment)}`,
     });
     const body = el('div', { className: 'stacked-comment-body', text: comment.body });
     const actions = el('div', { className: 'stacked-comment-actions-row' });
@@ -468,7 +654,9 @@ export class StackedViewMethods {
     if (this.stackedDraft?.file === path) {
       annotations.push({
         side: this.toAnnotationSide(this.stackedDraft.side),
-        lineNumber: this.stackedDraft.line,
+        lineNumber: Array.isArray(this.stackedDraft.line)
+          ? this.stackedDraft.line[1]
+          : this.stackedDraft.line,
         metadata: { kind: 'draft', ...this.stackedDraft },
       });
     }
@@ -493,18 +681,10 @@ export class StackedViewMethods {
       this.currentFileIndex = bestIdx;
       this.currentFileIsCommit = false;
       this.renderFileList();
+      if (this.stackedParseDiffFromFile) {
+        void this.hydrateStackedFile(this.files[bestIdx], this.stackedParseDiffFromFile);
+      }
     }
-  }
-
-  private toDiffsMetadata(
-    file: DiffFile,
-    parsePatchFiles: ParsePatchFiles,
-  ): FileDiffMetadata | null {
-    if (!file.hunks.length) {
-      return null;
-    }
-    const parsed = parsePatchFiles(this.toUnifiedPatch(file), `lrv:${file.path}`)[0]?.files[0];
-    return parsed ?? null;
   }
 
   private toUnifiedPatch(file: DiffFile): string {

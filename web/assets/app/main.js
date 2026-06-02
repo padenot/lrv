@@ -10823,6 +10823,9 @@ function prefersReducedMotion() {
 //#region web/src/file-loading-methods.ts
 let _loadSerial = 0;
 var FileLoadingMethods = class {
+	lastModifiedRangeSelection;
+	lastOriginalRangeSelection;
+	editorClickDisposables;
 	getCurrentFile(index) {
 		return this.files[index];
 	}
@@ -11001,20 +11004,60 @@ var FileLoadingMethods = class {
 		this.applyInitialHunkFocus(file.path);
 	}
 	setupEditorClickHandlers(filePath, modifiedEditor, originalEditor) {
-		modifiedEditor.onMouseDown((e) => {
-			if (e.target.type === monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS || e.target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN) {
-				if (!e.target.position) return;
-				const monacoLine = e.target.position.lineNumber;
-				this.showCommentDialog(filePath, monacoLine, monacoLine, "new");
-			}
+		this.editorClickDisposables?.forEach((disposable) => disposable.dispose());
+		this.editorClickDisposables = [];
+		this.lastModifiedRangeSelection = this.editorRangeSelection(modifiedEditor.getSelection());
+		this.lastOriginalRangeSelection = this.editorRangeSelection(originalEditor.getSelection());
+		this.editorClickDisposables.push(modifiedEditor.onDidChangeCursorSelection(() => {
+			this.lastModifiedRangeSelection = this.editorRangeSelection(modifiedEditor.getSelection()) ?? this.lastModifiedRangeSelection;
+		}), originalEditor.onDidChangeCursorSelection(() => {
+			this.lastOriginalRangeSelection = this.editorRangeSelection(originalEditor.getSelection()) ?? this.lastOriginalRangeSelection;
+		}), modifiedEditor.onMouseUp((e) => {
+			this.lastModifiedRangeSelection = this.editorRangeSelection(modifiedEditor.getSelection()) ?? this.lastModifiedRangeSelection;
+		}), originalEditor.onMouseUp((e) => {
+			this.lastOriginalRangeSelection = this.editorRangeSelection(originalEditor.getSelection()) ?? this.lastOriginalRangeSelection;
+		}));
+		this.editorClickDisposables.push(modifiedEditor.onMouseDown((e) => {
+			if (this.isCommentGutterTarget(e) && e.target.position) this.beginEditorGutterGesture(filePath, modifiedEditor, e.target.position.lineNumber, "new");
+		}), originalEditor.onMouseDown((e) => {
+			if (this.isCommentGutterTarget(e) && e.target.position) this.beginEditorGutterGesture(filePath, originalEditor, e.target.position.lineNumber, "old");
+		}));
+	}
+	beginEditorGutterGesture(filePath, targetEditor, downLine, side) {
+		const handleMouseUp = (event) => {
+			const upLine = targetEditor.getTargetAtClientPoint(event.clientX, event.clientY)?.position?.lineNumber ?? downLine;
+			const fallbackSelection = side === "new" ? this.lastModifiedRangeSelection : this.lastOriginalRangeSelection;
+			this.showCommentDialog(filePath, this.commentLineFromGutterGesture(targetEditor, downLine, upLine, fallbackSelection), upLine, side);
+		};
+		document.addEventListener("mouseup", handleMouseUp, {
+			capture: true,
+			once: true
 		});
-		originalEditor.onMouseDown((e) => {
-			if (e.target.type === monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS || e.target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN) {
-				if (!e.target.position) return;
-				const monacoLine = e.target.position.lineNumber;
-				this.showCommentDialog(filePath, monacoLine, monacoLine, "old");
-			}
-		});
+	}
+	isCommentGutterTarget(e) {
+		return e.target.type === monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS || e.target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN;
+	}
+	commentLineFromGutterGesture(editor, downLine, upLine, fallbackSelection) {
+		if (downLine !== upLine) return [Math.min(downLine, upLine), Math.max(downLine, upLine)];
+		return this.commentLineFromEditorSelection(editor, upLine, fallbackSelection);
+	}
+	commentLineFromEditorSelection(editor, clickedLine, fallbackSelection) {
+		const current = this.commentLineFromSelection(editor.getSelection(), clickedLine);
+		if (Array.isArray(current)) return current;
+		return this.commentLineFromSelection(fallbackSelection, clickedLine) ?? current ?? clickedLine;
+	}
+	commentLineFromSelection(selection, clickedLine) {
+		if (!selection || selection.isEmpty()) return null;
+		const start = Math.min(selection.startLineNumber, selection.endLineNumber);
+		let end = Math.max(selection.startLineNumber, selection.endLineNumber);
+		const exclusiveEndColumn = selection.startLineNumber < selection.endLineNumber || selection.startLineNumber === selection.endLineNumber && selection.startColumn <= selection.endColumn ? selection.endColumn : selection.startColumn;
+		if (end > start && exclusiveEndColumn === 1) end -= 1;
+		if (clickedLine < start || clickedLine > end || end < start) return null;
+		return start === end ? start : [start, end];
+	}
+	editorRangeSelection(selection) {
+		if (!selection || selection.isEmpty() || selection.startLineNumber === selection.endLineNumber) return null;
+		return selection;
 	}
 	applyInitialHunkFocus(filePath) {
 		const hunks = this.fileHunks[filePath];
@@ -11791,21 +11834,25 @@ var CommentsUIMethods = class {
 		this.modifiedDecorations = modifiedEditor.deltaDecorations(this.modifiedDecorations, modifiedDecorations);
 		this.originalDecorations = originalEditor.deltaDecorations(this.originalDecorations, originalDecorations);
 	}
-	showCommentDialog(file, fileLineNumber, monacoLineNumber, side) {
+	showCommentDialog(file, commentLine, monacoLineNumber, side) {
 		if (!this.editor) return;
 		const targetEditor = side === "new" ? this.editor.getModifiedEditor() : this.editor.getOriginalEditor();
+		if (!Array.isArray(commentLine)) {
+			const resolvedCommentLine = this.commentLineFromEditorSelection(targetEditor, monacoLineNumber, side === "new" ? this.lastModifiedRangeSelection : this.lastOriginalRangeSelection);
+			if (Array.isArray(resolvedCommentLine)) commentLine = resolvedCommentLine;
+		}
 		if (this.currentWidget) {
 			if (this.currentWidgetEditor) this.currentWidgetEditor.removeContentWidget(this.currentWidget);
 			this.currentWidget = null;
 			this.currentWidgetEditor = null;
 		}
-		const existingIndex = this.commentManager.findComment(file, fileLineNumber, side);
+		const existingIndex = this.commentManager.findComment(file, monacoLineNumber, side);
 		const existingComment = existingIndex >= 0 ? this.commentManager.comments[existingIndex] : null;
 		const editorWidth = targetEditor.getLayoutInfo().contentWidth;
 		const domNode = el("div", { className: "inline-comment-box" });
 		domNode.style.width = `${editorWidth}px`;
 		const modKey = MOD_KEY_LABEL;
-		const title = el("h3", { text: `Line ${existingComment ? commentLineLabel(existingComment) : fileLineNumber}${existingComment ? " - Edit" : ""}` });
+		const title = el("h3", { text: `Line ${existingComment ? commentLineLabel(existingComment) : this.commentLineLabel(commentLine)}${existingComment ? " - Edit" : ""}` });
 		const textarea = el("textarea", {
 			className: "comment-textarea",
 			attrs: {
@@ -11882,7 +11929,7 @@ var CommentsUIMethods = class {
 			else {
 				const comment = {
 					file,
-					line: fileLineNumber,
+					line: commentLine,
 					side,
 					body: textarea.value
 				};
@@ -11904,6 +11951,10 @@ var CommentsUIMethods = class {
 			autoResize();
 			targetEditor.layoutContentWidget(widget);
 		}, 100);
+	}
+	commentLineLabel(line) {
+		if (Array.isArray(line)) return line[0] === line[1] ? String(line[0]) : `${line[0]}-${line[1]}`;
+		return String(line);
 	}
 	updateUI() {
 		const count = this.commentManager.getComments().length;
@@ -12661,12 +12712,14 @@ const DIFFS_THEME = {
 let diffsRuntimePromise = null;
 function loadDiffsRuntime() {
 	diffsRuntimePromise ??= Promise.all([
-		import("./chunks/stacked-diff-DljMlort.js").then((n) => n.La),
-		import("./chunks/stacked-diff-DljMlort.js").then((n) => n.Ra),
-		import("./chunks/stacked-diff-DljMlort.js").then((n) => n.Ia)
-	]).then(([codeView, parser, workerPool]) => ({
+		import("./chunks/stacked-diff-a6Yv5Xck.js").then((n) => n.La),
+		import("./chunks/stacked-diff-a6Yv5Xck.js").then((n) => n.za),
+		import("./chunks/stacked-diff-a6Yv5Xck.js").then((n) => n.Ra),
+		import("./chunks/stacked-diff-a6Yv5Xck.js").then((n) => n.Ia)
+	]).then(([codeView, patchParser, fileParser, workerPool]) => ({
 		CodeView: codeView.CodeView,
-		parsePatchFiles: parser.parsePatchFiles,
+		parsePatchFiles: patchParser.parsePatchFiles,
+		parseDiffFromFile: fileParser.parseDiffFromFile,
 		getOrCreateWorkerPoolSingleton: workerPool.getOrCreateWorkerPoolSingleton
 	}));
 	return diffsRuntimePromise;
@@ -12682,6 +12735,9 @@ var StackedViewMethods = class {
 	stackedItemVersion;
 	stackedScrollUnsubscribe;
 	stackedRenderToken;
+	stackedHydratedFiles;
+	stackedParseDiffFromFile;
+	stackedLastRangeSelection;
 	showStackedView() {
 		this.isStacked = true;
 		const editor = document.getElementById("editor-container");
@@ -12756,6 +12812,9 @@ var StackedViewMethods = class {
 		this.stackedCodeView = null;
 		this.stackedItems = /* @__PURE__ */ new Map();
 		this.stackedFileMetadata = /* @__PURE__ */ new Map();
+		this.stackedHydratedFiles = /* @__PURE__ */ new Set();
+		this.stackedParseDiffFromFile = null;
+		this.stackedLastRangeSelection = null;
 		this.stackedRenderToken = (this.stackedRenderToken ?? 0) + 1;
 		const renderToken = this.stackedRenderToken;
 		clearEl(container);
@@ -12780,14 +12839,12 @@ var StackedViewMethods = class {
 			}));
 			return;
 		}
-		const { CodeView, parsePatchFiles, getOrCreateWorkerPoolSingleton } = await loadDiffsRuntime();
+		const { CodeView, parsePatchFiles, parseDiffFromFile, getOrCreateWorkerPoolSingleton } = await loadDiffsRuntime();
 		if (!this.isStacked || !container.isConnected || renderToken !== this.stackedRenderToken) return;
+		this.stackedParseDiffFromFile = parseDiffFromFile;
 		const codeViewRoot = el("div", { className: "stacked-code-view" });
 		container.appendChild(codeViewRoot);
-		const items = this.files.flatMap((file) => {
-			const item = this.buildCodeViewItem(file, parsePatchFiles);
-			return item ? [item] : [];
-		});
+		const items = this.files.map((file) => this.buildCodeViewItem(file, parsePatchFiles)).filter((item) => !!item);
 		if (!items.length) {
 			codeViewRoot.appendChild(el("div", {
 				className: "stacked-empty",
@@ -12816,9 +12873,11 @@ var StackedViewMethods = class {
 			collapsedContextThreshold: 1,
 			expansionLineCount: 40,
 			stickyHeaders: true,
+			enableLineSelection: true,
 			renderHeaderMetadata: (fileDiff) => this.buildHeaderMetadata(this.fileForPath(fileDiff.name)),
 			onLineNumberClick: (props, context) => this.showStackedDraft(this.pathFromCodeViewContext(context), props),
-			onLineClick: (props, context) => this.showStackedDraft(this.pathFromCodeViewContext(context), props),
+			onSelectedLinesChange: (selection) => this.rememberStackedSelection(selection),
+			onLineSelected: (range, context) => this.showStackedDraftFromSelection(this.pathFromCodeViewContext(context), range),
 			renderAnnotation: (annotation) => this.renderStackedAnnotation(annotation),
 			unsafeCSS: this.stackedDiffsCss()
 		}, workerPool);
@@ -12829,9 +12888,10 @@ var StackedViewMethods = class {
 		this.stackedScrollUnsubscribe = view.subscribeToScroll((scrollTop) => {
 			this.syncCurrentFileFromStackedScroll(scrollTop);
 		});
+		this.hydrateStackedFile(this.files[this.currentFileIndex], parseDiffFromFile);
 	}
 	buildCodeViewItem(file, parsePatchFiles) {
-		const metadata = this.toDiffsMetadata(file, parsePatchFiles);
+		const metadata = this.toPatchDiffsMetadata(file, parsePatchFiles);
 		if (!metadata) return null;
 		this.stackedFileMetadata.set(file.path, metadata);
 		const item = {
@@ -12843,6 +12903,51 @@ var StackedViewMethods = class {
 		};
 		this.stackedItems.set(file.path, item);
 		return item;
+	}
+	async hydrateStackedFile(file, parseDiffFromFile) {
+		if (!file || this.stackedHydratedFiles.has(file.path)) return;
+		this.stackedHydratedFiles.add(file.path);
+		const metadata = await this.toFullFileDiffsMetadata(file, parseDiffFromFile);
+		if (!metadata || !this.isStacked || this.stackedParseDiffFromFile !== parseDiffFromFile) return;
+		const existing = this.stackedItems.get(file.path);
+		if (!existing) return;
+		const nextItem = {
+			...existing,
+			fileDiff: metadata,
+			annotations: this.stackedAnnotationsForFile(file.path),
+			version: ++this.stackedItemVersion
+		};
+		this.stackedFileMetadata.set(file.path, metadata);
+		this.stackedItems.set(file.path, nextItem);
+		if (this.stackedCodeView?.updateItem(nextItem)) this.stackedCodeView.render(true);
+	}
+	async toFullFileDiffsMetadata(file, parseDiffFromFile) {
+		let pair;
+		try {
+			pair = await this.fetchFilePair(file.path);
+		} catch {
+			return null;
+		}
+		if (!pair.old && !pair.new) return null;
+		const oldFile = {
+			name: file.old_path ?? file.path,
+			contents: pair.old,
+			cacheKey: `${this.fileCacheKey(file.path)}:old`
+		};
+		const newFile = {
+			name: file.path,
+			contents: pair.new,
+			cacheKey: `${this.fileCacheKey(file.path)}:new`
+		};
+		try {
+			return parseDiffFromFile(oldFile, newFile);
+		} catch {
+			return null;
+		}
+	}
+	toPatchDiffsMetadata(file, parsePatchFiles) {
+		if (!file.hunks.length) return null;
+		return parsePatchFiles(this.toUnifiedPatch(file), `lrv:${file.path}`)[0]?.files[0] ?? null;
 	}
 	buildHeaderMetadata(file) {
 		const { additions, deletions } = this.fileDelta(file);
@@ -12867,10 +12972,44 @@ var StackedViewMethods = class {
 		const side = this.fromAnnotationSide(props.annotationSide);
 		this.stackedDraft = {
 			file,
-			line: props.lineNumber,
+			line: this.stackedSelectedLine(file, props.lineNumber, side),
 			side
 		};
 		this.renderStackedComments();
+	}
+	showStackedDraftFromSelection(file, range) {
+		if (!file || !range) return;
+		const startSide = range.side ? this.fromAnnotationSide(range.side) : null;
+		const endSide = range.endSide ? this.fromAnnotationSide(range.endSide) : startSide;
+		if (!startSide || startSide !== endSide) return;
+		const start = Math.min(range.start, range.end);
+		const end = Math.max(range.start, range.end);
+		this.stackedDraft = {
+			file,
+			line: start === end ? start : [start, end],
+			side: startSide
+		};
+		this.renderStackedComments();
+	}
+	stackedSelectedLine(file, clickedLine, side) {
+		const current = this.commentLineFromStackedSelection(this.stackedCodeView?.getSelectedLines(), file, clickedLine, side);
+		if (Array.isArray(current)) return current;
+		return this.commentLineFromStackedSelection(this.stackedLastRangeSelection, file, clickedLine, side) ?? current ?? clickedLine;
+	}
+	rememberStackedSelection(selection) {
+		if (this.isStackedRangeSelection(selection)) this.stackedLastRangeSelection = selection;
+	}
+	commentLineFromStackedSelection(selected, file, clickedLine, side) {
+		const startSide = selected?.range.side ? this.fromAnnotationSide(selected.range.side) : null;
+		const endSide = selected?.range.endSide ? this.fromAnnotationSide(selected.range.endSide) : startSide;
+		if (!selected || selected.id !== this.stackedItemId(file) || startSide !== side || endSide !== side) return clickedLine;
+		const start = Math.min(selected.range.start, selected.range.end);
+		const end = Math.max(selected.range.start, selected.range.end);
+		if (clickedLine < start || clickedLine > end) return null;
+		return start === end ? start : [start, end];
+	}
+	isStackedRangeSelection(selection) {
+		return !!selection && selection.range.start !== selection.range.end;
 	}
 	renderStackedComments() {
 		if (!this.isStacked) return;
@@ -12927,11 +13066,15 @@ var StackedViewMethods = class {
 				commit_idx: this.currentCommitIdx
 			} : comment);
 			this.stackedDraft = null;
+			this.stackedLastRangeSelection = null;
+			this.stackedCodeView?.clearSelectedLines({ notify: false });
 			this.renderStackedComments();
 		};
 		save.addEventListener("click", doSave);
 		cancel.addEventListener("click", () => {
 			this.stackedDraft = null;
+			this.stackedLastRangeSelection = null;
+			this.stackedCodeView?.clearSelectedLines({ notify: false });
 			this.renderStackedComments();
 		});
 		ta.addEventListener("keydown", (event) => {
@@ -12940,6 +13083,8 @@ var StackedViewMethods = class {
 				doSave();
 			} else if (event.key === "Escape") {
 				this.stackedDraft = null;
+				this.stackedLastRangeSelection = null;
+				this.stackedCodeView?.clearSelectedLines({ notify: false });
 				this.renderStackedComments();
 			}
 		});
@@ -12951,7 +13096,7 @@ var StackedViewMethods = class {
 		const box = el("div", { className: "stacked-comment-box" });
 		const meta = el("div", {
 			className: "stacked-comment-meta",
-			text: `${comment.side} line ${commentEndLine(comment)}`
+			text: `${comment.side} line ${commentLineLabel(comment)}`
 		});
 		const body = el("div", {
 			className: "stacked-comment-body",
@@ -13029,7 +13174,7 @@ var StackedViewMethods = class {
 		});
 		if (this.stackedDraft?.file === path) annotations.push({
 			side: this.toAnnotationSide(this.stackedDraft.side),
-			lineNumber: this.stackedDraft.line,
+			lineNumber: Array.isArray(this.stackedDraft.line) ? this.stackedDraft.line[1] : this.stackedDraft.line,
 			metadata: {
 				kind: "draft",
 				...this.stackedDraft
@@ -13051,11 +13196,8 @@ var StackedViewMethods = class {
 			this.currentFileIndex = bestIdx;
 			this.currentFileIsCommit = false;
 			this.renderFileList();
+			if (this.stackedParseDiffFromFile) this.hydrateStackedFile(this.files[bestIdx], this.stackedParseDiffFromFile);
 		}
-	}
-	toDiffsMetadata(file, parsePatchFiles) {
-		if (!file.hunks.length) return null;
-		return parsePatchFiles(this.toUnifiedPatch(file), `lrv:${file.path}`)[0]?.files[0] ?? null;
 	}
 	toUnifiedPatch(file) {
 		const oldPath = file.old_path ?? file.path;
