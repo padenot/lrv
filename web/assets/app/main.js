@@ -12929,14 +12929,15 @@ var StackedViewMethods = class {
 			return null;
 		}
 		if (!pair.old && !pair.new) return null;
+		const normalise = (s) => s && !s.endsWith("\n") ? s + "\n" : s;
 		const oldFile = {
 			name: file.old_path ?? file.path,
-			contents: pair.old,
+			contents: normalise(pair.old),
 			cacheKey: `${this.fileCacheKey(file.path)}:old`
 		};
 		const newFile = {
 			name: file.path,
-			contents: pair.new,
+			contents: normalise(pair.new),
 			cacheKey: `${this.fileCacheKey(file.path)}:new`
 		};
 		try {

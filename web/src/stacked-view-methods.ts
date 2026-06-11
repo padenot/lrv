@@ -350,14 +350,18 @@ export class StackedViewMethods {
       return null;
     }
 
+    // @pierre/diffs splitWithNewlines skips the last line when it lacks a
+    // trailing newline, causing an out-of-bounds lineIndex in the renderer.
+    // Normalise both sides so the content always ends with \n.
+    const normalise = (s: string) => (s && !s.endsWith('\n') ? s + '\n' : s);
     const oldFile: FileContents = {
       name: file.old_path ?? file.path,
-      contents: pair.old,
+      contents: normalise(pair.old),
       cacheKey: `${this.fileCacheKey(file.path)}:old`,
     };
     const newFile: FileContents = {
       name: file.path,
-      contents: pair.new,
+      contents: normalise(pair.new),
       cacheKey: `${this.fileCacheKey(file.path)}:new`,
     };
 
