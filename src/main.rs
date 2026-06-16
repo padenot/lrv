@@ -651,12 +651,14 @@ async fn main() -> Result<()> {
             std::fs::read_to_string(&file_path)
                 .context(format!("Failed to read file: {}", file_path))?
         } else if let Some(cmd) = args.cmd {
+            let spinner = Spinner::start("Running command");
             let output = if cfg!(target_os = "windows") {
                 Command::new("cmd").args(["/C", &cmd]).output()
             } else {
                 Command::new("sh").args(["-c", &cmd]).output()
             }
             .context("Failed to execute command")?;
+            spinner.finish("Done");
 
             if !output.status.success() {
                 anyhow::bail!(

@@ -24,6 +24,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, Mutex, Semaphore};
 use tokio::task::JoinSet;
+use tower_http::compression::CompressionLayer;
 use tower_http::trace::TraceLayer;
 
 #[cfg(unix)]
@@ -647,11 +648,13 @@ pub fn create_router(state: AppState, enable_trace: bool) -> Router {
         .layer(middleware::from_fn(security_headers))
         .with_state(state);
 
-    if enable_trace {
+    let router = if enable_trace {
         router.layer(TraceLayer::new_for_http())
     } else {
         router
-    }
+    };
+
+    router.layer(CompressionLayer::new())
 }
 
 async fn serve_index() -> impl IntoResponse {
