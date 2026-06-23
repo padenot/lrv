@@ -1,4 +1,4 @@
-import { $ } from './dom';
+import { $, el } from './dom';
 import { detectLanguageFromPathAndContent } from './language';
 import { MONACO_HIDE_UNCHANGED } from './diff-utils';
 import { monoFontStack, prefersReducedMotion } from './font';
@@ -105,10 +105,31 @@ export class FileLoadingMethods {
       return;
     }
     container.classList.toggle('file-added-view', file.status === 'added');
+    container.classList.remove('binary-file-view');
+    const binaryNotice = container.querySelector<HTMLElement>('.binary-file-notice');
+    binaryNotice?.remove();
     // Ensure commit view is hidden
     if (this._commitViewEl) {
       this._commitViewEl.style.display = 'none';
       container.style.display = '';
+    }
+    const oldBanner = $<HTMLElement>('#old-missing-banner');
+    if (oldBanner) {
+      oldBanner.style.display = 'none';
+    }
+    if (file.is_binary) {
+      container.classList.add('binary-file-view');
+      container.appendChild(
+        el('div', { className: 'binary-file-notice' }, [
+          el('div', { className: 'binary-file-title', text: 'Binary file' }),
+          el('div', {
+            className: 'binary-file-body',
+            text: `${file.path} changed, but its contents cannot be rendered as text.`,
+          }),
+        ]),
+      );
+      markAppReady();
+      return;
     }
     const mono = monoFontStack(this.config.font);
     const reduceMotion = prefersReducedMotion();
@@ -148,7 +169,6 @@ export class FileLoadingMethods {
     const language = detectLanguageFromPathAndContent(detectionPath, newContent || oldContent);
 
     // Show/hide banner when old content is unavailable but new content exists
-    const oldBanner = $<HTMLElement>('#old-missing-banner');
     if (oldBanner) {
       const show = !isAddedFile && filePair.old.length === 0 && filePair.new.length > 0;
       oldBanner.style.display = show ? '' : 'none';

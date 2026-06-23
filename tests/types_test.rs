@@ -9,6 +9,7 @@ fn test_diff_response_structure() {
             hunks: vec![],
             old_blob: None,
             new_blob: None,
+            is_binary: false,
         }],
         stats: lrv::types::DiffStats {
             files_changed: 1,

@@ -226,14 +226,25 @@ export class StackedViewMethods {
 
     const codeViewRoot = el('div', { className: 'stacked-code-view' });
     container.appendChild(codeViewRoot);
+    const binaryFiles = this.files.filter((file) => file.is_binary);
 
     const items = this.files
       .map((file) => this.buildCodeViewItem(file, parsePatchFiles))
       .filter((item): item is CodeViewDiffItem<StackedAnnotation> => !!item);
     if (!items.length) {
-      codeViewRoot.appendChild(
-        el('div', { className: 'stacked-empty', text: 'No renderable text changes.' }),
-      );
+      if (binaryFiles.length) {
+        codeViewRoot.appendChild(
+          el('div', {
+            className: 'stacked-empty',
+            text: 'This review contains only binary files.',
+          }),
+        );
+        binaryFiles.forEach((file) => codeViewRoot.appendChild(this.renderBinaryFileNotice(file)));
+      } else {
+        codeViewRoot.appendChild(
+          el('div', { className: 'stacked-empty', text: 'No renderable text changes.' }),
+        );
+      }
       return;
     }
 
@@ -277,6 +288,9 @@ export class StackedViewMethods {
     view.setup(codeViewRoot);
     view.setItems(items);
     view.render(true);
+    if (binaryFiles.length) {
+      binaryFiles.forEach((file) => container.appendChild(this.renderBinaryFileNotice(file)));
+    }
     this.stackedScrollUnsubscribe = view.subscribeToScroll((scrollTop) => {
       this.syncCurrentFileFromStackedScroll(scrollTop);
     });
@@ -287,6 +301,9 @@ export class StackedViewMethods {
     file: DiffFile,
     parsePatchFiles: ParsePatchFiles,
   ): CodeViewDiffItem<StackedAnnotation> | null {
+    if (file.is_binary) {
+      return null;
+    }
     const metadata = this.toPatchDiffsMetadata(file, parsePatchFiles);
     if (!metadata) {
       return null;
@@ -308,7 +325,7 @@ export class StackedViewMethods {
     file: DiffFile | undefined,
     parseDiffFromFile: ParseDiffFromFile,
   ) {
-    if (!file || this.stackedHydratedFiles.has(file.path)) {
+    if (!file || file.is_binary || this.stackedHydratedFiles.has(file.path)) {
       return;
     }
     this.stackedHydratedFiles.add(file.path);
@@ -400,6 +417,20 @@ export class StackedViewMethods {
       }),
     );
     return meta;
+  }
+
+  private renderBinaryFileNotice(file: DiffFile): HTMLElement {
+    return el(
+      'div',
+      { className: 'stacked-binary-file', attrs: { id: this.stackedSectionId(file.path) } },
+      [
+        el('div', { className: 'stacked-binary-title', text: file.path }),
+        el('div', {
+          className: 'stacked-binary-body',
+          text: `${file.status[0]?.toUpperCase() ?? '?'}${file.status.slice(1)} binary file. Text diff is unavailable.`,
+        }),
+      ],
+    );
   }
 
   private showStackedDraft(file: string, props: OnDiffLineClickProps) {

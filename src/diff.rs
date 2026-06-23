@@ -95,6 +95,8 @@ pub fn parse_diff(diff_text: &str) -> Result<DiffResponse> {
     let mut rename_from: Option<String> = None;
     let mut current_old_blob: Option<String> = None;
     let mut current_new_blob: Option<String> = None;
+    let mut is_deleted_file = false;
+    let mut is_binary_file = false;
 
     for line in diff_text.lines().skip(diff_start_idx) {
         if line.starts_with("diff --git") {
@@ -109,8 +111,8 @@ pub fn parse_diff(diff_text: &str) -> Result<DiffResponse> {
                     });
                     current_lines = Vec::new();
                 }
-                // Include renames even without hunks (100% similarity)
-                if !current_hunks.is_empty() || status == FileStatus::Renamed {
+                // Include renames without hunks (100% similarity) and binary files
+                if !current_hunks.is_empty() || status == FileStatus::Renamed || is_binary_file {
                     files.push(FileDiff {
                         path,
                         old_path,
@@ -118,6 +120,7 @@ pub fn parse_diff(diff_text: &str) -> Result<DiffResponse> {
                         hunks: current_hunks,
                         old_blob: current_old_blob.take(),
                         new_blob: current_new_blob.take(),
+                        is_binary: is_binary_file,
                     });
                 }
                 current_hunks = Vec::new();
@@ -128,6 +131,8 @@ pub fn parse_diff(diff_text: &str) -> Result<DiffResponse> {
             rename_from = None;
             current_old_blob = None;
             current_new_blob = None;
+            is_deleted_file = false;
+            is_binary_file = false;
         } else if let Some(rest) = line.strip_prefix("index ") {
             // Example: index 2d81a82fc6..0dca82f7e2 100644
             let mut parts = rest.split_whitespace();
@@ -153,7 +158,28 @@ pub fn parse_diff(diff_text: &str) -> Result<DiffResponse> {
             // Mark as new file
             old_path_temp = Some("/dev/null".to_string());
         } else if line.starts_with("deleted file mode") {
-            // Mark as deleted file
+            is_deleted_file = true;
+        } else if let Some(stripped) = line.strip_prefix("Binary files ") {
+            // e.g. "Binary files /dev/null and b/path differ"
+            //      "Binary files a/path and b/path differ"
+            //      "Binary files a/path and /dev/null differ"
+            is_binary_file = true;
+            if let Some(rest) = stripped.strip_suffix(" differ") {
+                if let Some((a_part, b_part)) = rest.split_once(" and ") {
+                    let (path, old_path, status) = if b_part == "/dev/null" || is_deleted_file {
+                        let p = a_part.trim_start_matches("a/").to_string();
+                        (p, None, FileStatus::Deleted)
+                    } else if a_part == "/dev/null" || old_path_temp.as_deref() == Some("/dev/null")
+                    {
+                        let p = b_part.trim_start_matches("b/").to_string();
+                        (p, None, FileStatus::Added)
+                    } else {
+                        let p = b_part.trim_start_matches("b/").to_string();
+                        (p, None, FileStatus::Modified)
+                    };
+                    current_file = Some((path, old_path, status));
+                }
+            }
         } else if let Some(stripped) = line.strip_prefix("--- ") {
             // Old file path
             let old_path = stripped.trim_start_matches("a/").to_string();
@@ -244,8 +270,8 @@ pub fn parse_diff(diff_text: &str) -> Result<DiffResponse> {
                 lines: current_lines,
             });
         }
-        // Include renames even without hunks (100% similarity)
-        if !current_hunks.is_empty() || status == FileStatus::Renamed {
+        // Include renames without hunks (100% similarity) and binary files
+        if !current_hunks.is_empty() || status == FileStatus::Renamed || is_binary_file {
             files.push(FileDiff {
                 path,
                 old_path,
@@ -253,6 +279,7 @@ pub fn parse_diff(diff_text: &str) -> Result<DiffResponse> {
                 hunks: current_hunks,
                 old_blob: current_old_blob,
                 new_blob: current_new_blob,
+                is_binary: is_binary_file,
             });
         }
     }

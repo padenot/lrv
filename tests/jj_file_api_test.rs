@@ -52,6 +52,7 @@ fn make_jj_state(
             hunks: vec![],
             old_blob: Some("aabbccdd".to_string()),
             new_blob: Some("eeff1122".to_string()),
+            is_binary: false,
         }],
         stats: lrv::types::DiffStats {
             files_changed: 1,

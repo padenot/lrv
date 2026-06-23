@@ -10868,9 +10868,25 @@ var FileLoadingMethods = class {
 		const container = document.getElementById("editor-container");
 		if (!container) return;
 		container.classList.toggle("file-added-view", file.status === "added");
+		container.classList.remove("binary-file-view");
+		container.querySelector(".binary-file-notice")?.remove();
 		if (this._commitViewEl) {
 			this._commitViewEl.style.display = "none";
 			container.style.display = "";
+		}
+		const oldBanner = $$2("#old-missing-banner");
+		if (oldBanner) oldBanner.style.display = "none";
+		if (file.is_binary) {
+			container.classList.add("binary-file-view");
+			container.appendChild(el("div", { className: "binary-file-notice" }, [el("div", {
+				className: "binary-file-title",
+				text: "Binary file"
+			}), el("div", {
+				className: "binary-file-body",
+				text: `${file.path} changed, but its contents cannot be rendered as text.`
+			})]));
+			markAppReady();
+			return;
 		}
 		const mono = monoFontStack(this.config.font);
 		const reduceMotion = prefersReducedMotion();
@@ -10903,7 +10919,6 @@ var FileLoadingMethods = class {
 		const oldContent = filePair.old;
 		const newContent = filePair.new;
 		const language = detectLanguageFromPathAndContent(file.path || file.old_path || "", newContent || oldContent);
-		const oldBanner = $$2("#old-missing-banner");
 		if (oldBanner) {
 			const show = !isAddedFile && filePair.old.length === 0 && filePair.new.length > 0;
 			oldBanner.style.display = show ? "" : "none";
@@ -12844,9 +12859,16 @@ var StackedViewMethods = class {
 		this.stackedParseDiffFromFile = parseDiffFromFile;
 		const codeViewRoot = el("div", { className: "stacked-code-view" });
 		container.appendChild(codeViewRoot);
+		const binaryFiles = this.files.filter((file) => file.is_binary);
 		const items = this.files.map((file) => this.buildCodeViewItem(file, parsePatchFiles)).filter((item) => !!item);
 		if (!items.length) {
-			codeViewRoot.appendChild(el("div", {
+			if (binaryFiles.length) {
+				codeViewRoot.appendChild(el("div", {
+					className: "stacked-empty",
+					text: "This review contains only binary files."
+				}));
+				binaryFiles.forEach((file) => codeViewRoot.appendChild(this.renderBinaryFileNotice(file)));
+			} else codeViewRoot.appendChild(el("div", {
 				className: "stacked-empty",
 				text: "No renderable text changes."
 			}));
@@ -12885,12 +12907,14 @@ var StackedViewMethods = class {
 		view.setup(codeViewRoot);
 		view.setItems(items);
 		view.render(true);
+		if (binaryFiles.length) binaryFiles.forEach((file) => container.appendChild(this.renderBinaryFileNotice(file)));
 		this.stackedScrollUnsubscribe = view.subscribeToScroll((scrollTop) => {
 			this.syncCurrentFileFromStackedScroll(scrollTop);
 		});
 		this.hydrateStackedFile(this.files[this.currentFileIndex], parseDiffFromFile);
 	}
 	buildCodeViewItem(file, parsePatchFiles) {
+		if (file.is_binary) return null;
 		const metadata = this.toPatchDiffsMetadata(file, parsePatchFiles);
 		if (!metadata) return null;
 		this.stackedFileMetadata.set(file.path, metadata);
@@ -12905,7 +12929,7 @@ var StackedViewMethods = class {
 		return item;
 	}
 	async hydrateStackedFile(file, parseDiffFromFile) {
-		if (!file || this.stackedHydratedFiles.has(file.path)) return;
+		if (!file || file.is_binary || this.stackedHydratedFiles.has(file.path)) return;
 		this.stackedHydratedFiles.add(file.path);
 		const metadata = await this.toFullFileDiffsMetadata(file, parseDiffFromFile);
 		if (!metadata || !this.isStacked || this.stackedParseDiffFromFile !== parseDiffFromFile) return;
@@ -12967,6 +12991,18 @@ var StackedViewMethods = class {
 			attrs: { title: file.status }
 		}));
 		return meta;
+	}
+	renderBinaryFileNotice(file) {
+		return el("div", {
+			className: "stacked-binary-file",
+			attrs: { id: this.stackedSectionId(file.path) }
+		}, [el("div", {
+			className: "stacked-binary-title",
+			text: file.path
+		}), el("div", {
+			className: "stacked-binary-body",
+			text: `${file.status[0]?.toUpperCase() ?? "?"}${file.status.slice(1)} binary file. Text diff is unavailable.`
+		})]);
 	}
 	showStackedDraft(file, props) {
 		if (!file) return;

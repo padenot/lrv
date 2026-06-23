@@ -22,6 +22,8 @@ pub struct FileDiff {
     // contents for the old/new sides.
     pub old_blob: Option<String>,
     pub new_blob: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub is_binary: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

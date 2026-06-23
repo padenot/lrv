@@ -79,6 +79,40 @@ index abc123..0000000
     assert_eq!(diff.stats.deletions, 2);
 }
 
+#[test]
+fn test_parse_binary_file_modification() {
+    let diff_text = r#"diff --git a/logo.png b/logo.png
+index abc1234..def5678 100644
+Binary files a/logo.png and b/logo.png differ
+"#;
+
+    let diff = lrv::diff::parse_diff(diff_text).unwrap();
+    assert_eq!(diff.files.len(), 1);
+    assert_eq!(diff.files[0].path, "logo.png");
+    assert_eq!(diff.files[0].status, lrv::types::FileStatus::Modified);
+    assert!(diff.files[0].hunks.is_empty());
+    assert!(diff.files[0].is_binary);
+    assert_eq!(diff.files[0].old_blob.as_deref(), Some("abc1234"));
+    assert_eq!(diff.files[0].new_blob.as_deref(), Some("def5678"));
+    assert_eq!(diff.stats.additions, 0);
+    assert_eq!(diff.stats.deletions, 0);
+}
+
+#[test]
+fn test_parse_binary_file_addition() {
+    let diff_text = r#"diff --git a/screenshot.webp b/screenshot.webp
+new file mode 100644
+index 0000000..abc1234
+Binary files /dev/null and b/screenshot.webp differ
+"#;
+
+    let diff = lrv::diff::parse_diff(diff_text).unwrap();
+    assert_eq!(diff.files.len(), 1);
+    assert_eq!(diff.files[0].path, "screenshot.webp");
+    assert_eq!(diff.files[0].status, lrv::types::FileStatus::Added);
+    assert!(diff.files[0].is_binary);
+}
+
 /// Test parsing multiple files
 #[test]
 fn test_parse_multiple_files() {

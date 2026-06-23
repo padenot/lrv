@@ -22,6 +22,7 @@ export type DiffFile = {
   old_path?: string;
   status: string;
   hunks: DiffHunk[];
+  is_binary?: boolean;
 };
 
 export type FilePair = { old: string; new: string };
