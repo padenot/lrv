@@ -133,6 +133,7 @@ export interface AppContext {
   files: DiffFile[];
   stats: DiffStats;
   fileCache: Record<string, FilePair>;
+  overallReviewComment: string;
   userThemes: UserTheme[];
   fileCacheKey(filePath: string): string;
   fileHunks: Record<string, HunkRange[]>;
@@ -180,7 +181,6 @@ export interface AppContext {
   updateDecorations(): void;
   renderReviewNotes(): void;
   showCommentDialog(file: string, fileLine: CommentLine, monacoLine: number, side: Side): void;
-  showContextPeek(): void;
   showCommitSummaryDialog(): void;
   initFileHunks(file: DiffFile): void;
   isAddedFile(file: DiffFile): boolean;

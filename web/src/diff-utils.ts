@@ -2,7 +2,7 @@ export const MONACO_HIDE_UNCHANGED = {
   enabled: true,
   contextLineCount: 8,
   minimumLineCount: 3,
-  revealLineCount: 20,
+  revealLineCount: 30,
 };
 
 import type { DiffHunk, DiffLine, HunkRange } from './types/app';

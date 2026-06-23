@@ -16,6 +16,7 @@ export class CommitMethods {
   declare diff: AppContext['diff'];
   declare renderFileList: () => void;
   declare buildReviewNoteNode: (note: ReviewNote) => HTMLElement;
+  declare overallReviewComment: AppContext['overallReviewComment'];
 
   showCommitSummaryDialog() {
     const modKey = MOD_KEY_LABEL;
@@ -57,19 +58,15 @@ export class CommitMethods {
       ta.style.height = `${ta.scrollHeight}px`;
     };
     ta.addEventListener('input', autoResize);
+    ta.value = this.overallReviewComment;
 
     const save = () => {
       const bodyText = ta.value.trim();
-      if (!bodyText) {
-        ta.focus();
-        return;
+      this.overallReviewComment = bodyText;
+      this.renderFileList();
+      if (this.currentFileIsCommit) {
+        this.loadCommitView();
       }
-      this.commentManager.addComment({
-        file: '(commit)',
-        line: 1,
-        side: 'new',
-        body: bodyText,
-      });
       close();
     };
 
@@ -224,12 +221,30 @@ export class CommitMethods {
         className: 'commit-summary-copy',
         text: 'High-level review comments live here and are submitted as commit-level feedback.',
       }),
-      el('button', { className: 'btn-primary', text: 'Add Summary Comment' }),
+      el('div', {
+        className: 'commit-summary-hint',
+        text: 'This is the global review note. It also appears in the final submit check.',
+      }),
     ]);
-    summaryBox.querySelector<HTMLButtonElement>('button')!.onclick = () => {
-      this.showCommitSummaryDialog();
+    const summaryEditor = el('textarea', {
+      className: 'commit-summary-input',
+      attrs: {
+        placeholder: 'Add overall feedback for the agent…',
+      },
+    }) as HTMLTextAreaElement;
+    summaryEditor.value = this.overallReviewComment;
+    const autoResizeSummary = () => {
+      summaryEditor.style.height = 'auto';
+      summaryEditor.style.height = `${Math.max(summaryEditor.scrollHeight, 120)}px`;
     };
+    summaryEditor.addEventListener('input', () => {
+      this.overallReviewComment = summaryEditor.value;
+      this.renderFileList();
+      autoResizeSummary();
+    });
+    summaryBox.appendChild(summaryEditor);
     viewEl.appendChild(summaryBox);
+    setTimeout(autoResizeSummary, 0);
 
     const msgText = this.diff?.commit_message ?? '(no message)';
     const msgLines = msgText.split('\n');

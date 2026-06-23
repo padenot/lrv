@@ -72,6 +72,7 @@ export class StackedViewMethods {
   declare currentFileIsCommit: boolean;
   declare buildReviewNoteNode: (note: ReviewNote) => HTMLElement;
   declare editor: AppContext['editor'];
+  declare _commitViewEl: HTMLElement | null;
   declare loadFile: AppContext['loadFile'];
   declare fetchFilePair: AppContext['fetchFilePair'];
   declare fileCacheKey: AppContext['fileCacheKey'];
@@ -157,6 +158,13 @@ export class StackedViewMethods {
     }
   }
 
+  private stackedTopForFile(file: DiffFile) {
+    if (file.is_binary) {
+      return document.getElementById(this.stackedSectionId(file.path))?.offsetTop ?? null;
+    }
+    return this.stackedCodeView?.getTopForItem(this.stackedItemId(file.path)) ?? null;
+  }
+
   scrollToFileInStacked(index: number) {
     if (!this.isStacked) {
       return;
@@ -165,7 +173,17 @@ export class StackedViewMethods {
     if (!file) {
       return;
     }
+    this.currentFileIndex = index;
+    this.currentFileIsCommit = false;
+    if (this._commitViewEl) {
+      this._commitViewEl.style.display = 'none';
+    }
+    this.renderFileList();
     const anchor = document.getElementById(this.stackedSectionId(file.path));
+    if (file.is_binary) {
+      anchor?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
     if (this.stackedCodeView) {
       this.stackedCodeView.scrollTo({
         type: 'item',
@@ -268,7 +286,7 @@ export class StackedViewMethods {
         lineHoverHighlight: 'both',
         hunkSeparators: 'line-info-basic',
         collapsedContextThreshold: 1,
-        expansionLineCount: 20,
+        expansionLineCount: 30,
         stickyHeaders: true,
         enableLineSelection: true,
         renderHeaderMetadata: (fileDiff) =>
@@ -699,13 +717,13 @@ export class StackedViewMethods {
   }
 
   private syncCurrentFileFromStackedScroll(scrollTop: number) {
-    if (!this.stackedCodeView || !this.files.length) {
+    if (!this.files.length) {
       return;
     }
     let bestIdx = this.currentFileIndex;
     let bestTop = Number.NEGATIVE_INFINITY;
     this.files.forEach((file, index) => {
-      const top = this.stackedCodeView?.getTopForItem(this.stackedItemId(file.path));
+      const top = this.stackedTopForFile(file);
       if (top == null || top > scrollTop + 32 || top < bestTop) {
         return;
       }
@@ -780,7 +798,7 @@ export class StackedViewMethods {
   }
 
   private stackedSectionId(path: string) {
-    return `stacked-file-${CSS.escape(path)}`;
+    return `stacked-file-${path.replace(/[^a-zA-Z0-9_-]+/g, '-')}`;
   }
 
   private stackedItemId(path: string) {

@@ -14,6 +14,7 @@ type EditorSelection = NonNullable<ReturnType<editor.IStandaloneCodeEditor['getS
 export class FileLoadingMethods {
   declare currentFileIsCommit: boolean;
   declare currentFileIndex: number;
+  declare currentCommitIdx: AppContext['currentCommitIdx'];
   declare files: AppContext['files'];
   declare isInline: boolean;
   declare initFileHunks: AppContext['initFileHunks'];
@@ -28,6 +29,7 @@ export class FileLoadingMethods {
   declare fetchFilePair: AppContext['fetchFilePair'];
   declare fileCacheKey: AppContext['fileCacheKey'];
   declare fileCache: AppContext['fileCache'];
+  declare seriesInfo: AppContext['seriesInfo'];
   declare modifiedReviewNoteDecorations: AppContext['modifiedReviewNoteDecorations'];
   declare originalReviewNoteDecorations: AppContext['originalReviewNoteDecorations'];
   declare modifiedReviewNoteZoneIds: AppContext['modifiedReviewNoteZoneIds'];
@@ -46,6 +48,85 @@ export class FileLoadingMethods {
 
   private getCurrentFile(index: number) {
     return this.files[index]!;
+  }
+
+  private binaryPreviewUrl(file: DiffFile, side: 'old' | 'new') {
+    const params = new URLSearchParams({
+      path: side === 'old' ? file.old_path || file.path : file.path,
+      side,
+    });
+    if (this.seriesInfo?.is_series) {
+      params.set('commit', String(this.currentCommitIdx));
+    }
+    return `/api/file/preview?${params.toString()}`;
+  }
+
+  private renderBinaryPreview(container: HTMLElement, file: DiffFile) {
+    const status = file.status.toLowerCase();
+    const canShowOld = !['added', 'add', 'a', 'new'].includes(status);
+    const canShowNew = !['deleted', 'delete', 'd', 'removed'].includes(status);
+    const initialSide: 'old' | 'new' = canShowNew ? 'new' : 'old';
+
+    const previewFrame = el('iframe', {
+      className: 'binary-file-preview-frame',
+      attrs: {
+        title: `${file.path} binary preview`,
+        loading: 'lazy',
+      },
+    }) as HTMLIFrameElement;
+
+    const previewLink = el('a', {
+      className: 'binary-file-open-link',
+      text: 'Open in new tab',
+      attrs: { target: '_blank', rel: 'noopener noreferrer' },
+    }) as HTMLAnchorElement;
+
+    const setSide = (side: 'old' | 'new') => {
+      const url = this.binaryPreviewUrl(file, side);
+      previewFrame.src = url;
+      previewLink.href = url;
+      oldBtn?.classList.toggle('active', side === 'old');
+      newBtn?.classList.toggle('active', side === 'new');
+      label.textContent = side === 'old' ? 'Showing old side' : 'Showing new side';
+    };
+
+    const label = el('div', {
+      className: 'binary-file-side-label',
+      text: '',
+    });
+
+    let oldBtn: HTMLButtonElement | null = null;
+    let newBtn: HTMLButtonElement | null = null;
+    const controls = el('div', { className: 'binary-file-controls' });
+    if (canShowOld && canShowNew) {
+      oldBtn = el('button', {
+        className: 'btn-secondary binary-file-side-btn',
+        text: 'Old',
+        attrs: { type: 'button' },
+      }) as HTMLButtonElement;
+      newBtn = el('button', {
+        className: 'btn-secondary binary-file-side-btn',
+        text: 'New',
+        attrs: { type: 'button' },
+      }) as HTMLButtonElement;
+      oldBtn.onclick = () => setSide('old');
+      newBtn.onclick = () => setSide('new');
+      controls.append(oldBtn, newBtn);
+    }
+    controls.append(label, previewLink);
+
+    container.appendChild(
+      el('div', { className: 'binary-file-notice' }, [
+        el('div', { className: 'binary-file-title', text: 'Binary file' }),
+        el('div', {
+          className: 'binary-file-body',
+          text: `${file.path} changed. Previewing it with the browser instead of a text diff.`,
+        }),
+        controls,
+        previewFrame,
+      ]),
+    );
+    setSide(initialSide);
   }
 
   isAddedFile(file: DiffFile) {
@@ -119,15 +200,7 @@ export class FileLoadingMethods {
     }
     if (file.is_binary) {
       container.classList.add('binary-file-view');
-      container.appendChild(
-        el('div', { className: 'binary-file-notice' }, [
-          el('div', { className: 'binary-file-title', text: 'Binary file' }),
-          el('div', {
-            className: 'binary-file-body',
-            text: `${file.path} changed, but its contents cannot be rendered as text.`,
-          }),
-        ]),
-      );
+      this.renderBinaryPreview(container, file);
       markAppReady();
       return;
     }

@@ -85,8 +85,10 @@ export class DialogMethods {
   declare commentManager: AppContext['commentManager'];
   declare clearPersistedComments: () => Promise<void>;
   declare updateDecorations: () => void;
+  declare renderFileList: () => void;
   declare loadCommitView: () => void;
   declare currentFileIsCommit: boolean;
+  declare overallReviewComment: AppContext['overallReviewComment'];
   declare applyThemeToUI: (theme: string) => void;
   declare loadFile: (index: number) => Promise<void>;
   declare userThemes: AppContext['userThemes'];
@@ -363,6 +365,25 @@ export class DialogMethods {
 
   async showSubmitConfirmation() {
     const comments = this.commentManager.getComments();
+    const overallDraft = this.overallReviewComment.trim();
+    const submissionComments = [...comments];
+    if (
+      overallDraft &&
+      !submissionComments.some(
+        (comment) =>
+          comment.file === '(commit)' &&
+          comment.side === 'new' &&
+          comment.line === 1 &&
+          comment.body === overallDraft,
+      )
+    ) {
+      submissionComments.push({
+        file: '(commit)',
+        line: 1,
+        side: 'new',
+        body: overallDraft,
+      });
+    }
     let submit: () => void | Promise<void> = () => {};
 
     const footerContent = [
@@ -371,7 +392,10 @@ export class DialogMethods {
     ];
 
     const { overlay, modal, body, footer, close } = openModal({
-      title: comments.length === 0 ? 'Submit Review' : `Review Comments (${comments.length})`,
+      title:
+        submissionComments.length === 0
+          ? 'Submit Review'
+          : `Review Comments (${submissionComments.length})`,
       titleId: 'submit-title',
       modalClass: 'submit-review-modal',
       footerContent,
@@ -383,7 +407,7 @@ export class DialogMethods {
       },
     });
 
-    if (comments.length === 0) {
+    if (submissionComments.length === 0) {
       const noCommentsMsg = el('p', { text: 'No comments. Submit to approve this review.' });
       noCommentsMsg.style.padding = '20px';
       noCommentsMsg.style.textAlign = 'center';
@@ -391,19 +415,32 @@ export class DialogMethods {
       body.appendChild(noCommentsMsg);
     }
 
+    const summaryField = el('div', { className: 'submit-summary-field' }, [
+      el('label', { className: 'submit-summary-label', text: 'Overall feedback' }),
+    ]);
+    const summaryInput = el('textarea', {
+      className: 'submit-summary-input',
+      attrs: { placeholder: 'Final global comment before submit…' },
+    }) as HTMLTextAreaElement;
+    summaryInput.value = this.overallReviewComment;
+    summaryField.appendChild(summaryInput);
+    body.appendChild(summaryField);
+
     const commentsByFile: Record<string, ReviewComment[]> = {};
-    comments.forEach((comment) => {
+    submissionComments.forEach((comment) => {
       commentsByFile[comment.file] ??= [];
       commentsByFile[comment.file]!.push(comment);
     });
 
-    if (comments.length > 0) {
+    if (submissionComments.length > 0) {
       const fileCount = Object.keys(commentsByFile).length;
       body.appendChild(
         el('div', { className: 'submit-review-summary' }, [
           el('div', { className: 'submit-review-summary-item' }, [
-            el('strong', { text: comments.length }),
-            el('span', { text: comments.length === 1 ? 'queued comment' : 'queued comments' }),
+            el('strong', { text: submissionComments.length }),
+            el('span', {
+              text: submissionComments.length === 1 ? 'queued comment' : 'queued comments',
+            }),
           ]),
           el('div', { className: 'submit-review-summary-item' }, [
             el('strong', { text: fileCount }),
@@ -446,7 +483,7 @@ export class DialogMethods {
       }),
     );
 
-    comments.forEach((comment) => {
+    submissionComments.forEach((comment) => {
       const preview = el('div', { className: 'comment-preview' });
 
       const isCommitComment = comment.file === '(commit)';
@@ -496,6 +533,26 @@ export class DialogMethods {
       if (!submitBtn) {
         return;
       }
+      this.overallReviewComment = summaryInput.value.trim();
+      const finalComments = [...comments];
+      const finalOverall = this.overallReviewComment;
+      if (
+        finalOverall &&
+        !finalComments.some(
+          (comment) =>
+            comment.file === '(commit)' &&
+            comment.side === 'new' &&
+            comment.line === 1 &&
+            comment.body === finalOverall,
+        )
+      ) {
+        finalComments.push({
+          file: '(commit)',
+          line: 1,
+          side: 'new',
+          body: finalOverall,
+        });
+      }
       submitBtn.disabled = true;
       submitBtn.textContent = 'Submitting...';
 
@@ -503,7 +560,7 @@ export class DialogMethods {
         const resp = await fetch('/api/complete', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ comments }),
+          body: JSON.stringify({ comments: finalComments }),
         });
         if (!resp.ok) {
           throw new Error(`HTTP ${resp.status}`);
@@ -511,7 +568,9 @@ export class DialogMethods {
 
         await this.clearPersistedComments();
         this.commentManager.setComments([]);
+        this.overallReviewComment = '';
         this.updateDecorations();
+        this.renderFileList();
         if (this.currentFileIsCommit) {
           this.loadCommitView();
         }

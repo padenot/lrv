@@ -943,7 +943,7 @@ const MONACO_HIDE_UNCHANGED = {
 	enabled: true,
 	contextLineCount: 8,
 	minimumLineCount: 3,
-	revealLineCount: 20
+	revealLineCount: 30
 };
 function computeHunkRanges(hunks) {
 	const hunkRanges = [];
@@ -10441,6 +10441,9 @@ var FileListMethods = class {
 			localStorage.setItem(STORAGE_KEY, String(collapsed));
 		};
 		if (localStorage.getItem(STORAGE_KEY) === "true") setCollapsed(true);
+		collapseBtn?.addEventListener("mousedown", (e) => {
+			e.stopPropagation();
+		});
 		collapseBtn?.addEventListener("click", () => {
 			setCollapsed(!sidebar.classList.contains("collapsed"));
 		});
@@ -10546,12 +10549,14 @@ var FileListMethods = class {
 	}
 	renderFileList() {
 		const list = document.getElementById("file-list");
-		if (!list) return;
+		const summaryHost = document.getElementById("overall-review-summary");
+		if (!list || !summaryHost) return;
 		this.fileTree?.cleanUp();
 		this.fileTree = null;
 		clearEl(list);
+		clearEl(summaryHost);
 		list.classList.add("file-tree", "file-tree-root");
-		this.renderCommitRow(list);
+		this.renderCommitRow(summaryHost);
 		if (!this.files.length) {
 			list.appendChild(el("li", {
 				className: "file-list-empty",
@@ -10613,28 +10618,39 @@ var FileListMethods = class {
 			}
 		});
 	}
-	renderCommitRow(list) {
+	renderCommitRow(host) {
 		if (!(this.diff !== null)) return;
 		const li = el("li", {
-			className: `tree-row ${this.currentFileIsCommit ? "active" : ""}`,
+			className: `tree-row tree-row-summary ${this.currentFileIsCommit ? "active" : ""}`,
 			attrs: { "data-commit": "1" }
 		});
 		const reviewNoteCount = this.reviewNoteManager.getNotesForFile("(commit)").length;
+		const hasOverallDraft = this.overallReviewComment.trim().length > 0;
 		const left = el("span", { className: "file-left" }, [el("span", { className: "tree-toggle-spacer" }), el("span", {
-			className: "file-name",
+			className: "file-name summary-file-name",
 			text: "Review Summary"
 		})]);
-		const commentCount = this.commentManager.getCommentsForFile("(commit)").length + reviewNoteCount;
+		const commentCount = this.commentManager.getCommentsForFile("(commit)").length + reviewNoteCount + (hasOverallDraft ? 1 : 0);
 		if (commentCount > 0) left.appendChild(el("span", {
 			className: "file-comment-badge",
 			text: String(commentCount)
 		}));
 		const right = el("span", { className: "file-right" }, [el("span", {
 			className: "file-status",
-			text: reviewNoteCount > 0 ? "R" : "S"
+			text: hasOverallDraft ? "G" : reviewNoteCount > 0 ? "R" : "S"
 		})]);
-		li.appendChild(el("span", { className: "tree-row-content" }, [left, right]));
-		list.appendChild(li);
+		const rowButton = el("button", {
+			className: "tree-row-content tree-row-button summary-row-button",
+			attrs: {
+				type: "button",
+				"aria-label": "Open review summary"
+			}
+		}, [left, right]);
+		rowButton.onclick = () => {
+			this.loadCommitView();
+		};
+		li.appendChild(rowButton);
+		host.appendChild(li);
 	}
 	renderSummary(visibleFiles) {
 		const summary = document.getElementById("file-list-summary");
@@ -10671,27 +10687,36 @@ var FileListMethods = class {
         --trees-bg-override: transparent;
         --trees-fg-override: var(--text-primary);
         --trees-fg-muted-override: var(--text-secondary);
-        --trees-selected-bg-override: color-mix(in srgb, var(--accent-color) 28%, transparent);
+        --trees-selected-bg-override: var(--bg-elevated);
         --trees-selected-fg-override: var(--text-primary);
         --trees-selected-focused-border-color-override: var(--accent-color);
         --trees-focus-ring-color-override: var(--accent-color);
         --trees-border-color-override: var(--border-color);
+        --trees-border-radius-override: 1px;
+        --trees-item-padding-x-override: 3px;
+        --trees-item-margin-x-override: 0px;
+        --trees-padding-inline-override: 0px;
+        --trees-level-gap-override: 2px;
         font-family: var(--font-sans);
       }
       [data-file-tree-virtualized-root] {
         background: transparent;
       }
       [data-type="item"] {
-        border-radius: 6px;
-        margin: 1px 4px;
+        border-radius: 1px;
+        margin: 1px 0;
+        box-shadow: inset 0 0 0 1px transparent;
+      }
+      [data-type="item"]:hover {
+        background: var(--bg-elevated);
       }
       [data-item-selected="true"] {
-        background: color-mix(in srgb, var(--accent-color) 30%, transparent);
+        background: var(--bg-elevated);
+        box-shadow: inset 3px 0 0 var(--accent-color);
       }
       [data-item-focused="true"],
       [aria-selected="true"] {
-        outline: 1px solid color-mix(in srgb, var(--accent-color) 55%, transparent);
-        outline-offset: -1px;
+        outline: none;
       }
       [data-item-section="decoration"],
       [data-item-section="git"] {
@@ -10828,6 +10853,89 @@ var FileLoadingMethods = class {
 	getCurrentFile(index) {
 		return this.files[index];
 	}
+	binaryPreviewUrl(file, side) {
+		const params = new URLSearchParams({
+			path: side === "old" ? file.old_path || file.path : file.path,
+			side
+		});
+		if (this.seriesInfo?.is_series) params.set("commit", String(this.currentCommitIdx));
+		return `/api/file/preview?${params.toString()}`;
+	}
+	renderBinaryPreview(container, file) {
+		const status = file.status.toLowerCase();
+		const canShowOld = ![
+			"added",
+			"add",
+			"a",
+			"new"
+		].includes(status);
+		const canShowNew = ![
+			"deleted",
+			"delete",
+			"d",
+			"removed"
+		].includes(status);
+		const initialSide = canShowNew ? "new" : "old";
+		const previewFrame = el("iframe", {
+			className: "binary-file-preview-frame",
+			attrs: {
+				title: `${file.path} binary preview`,
+				loading: "lazy"
+			}
+		});
+		const previewLink = el("a", {
+			className: "binary-file-open-link",
+			text: "Open in new tab",
+			attrs: {
+				target: "_blank",
+				rel: "noopener noreferrer"
+			}
+		});
+		const setSide = (side) => {
+			const url = this.binaryPreviewUrl(file, side);
+			previewFrame.src = url;
+			previewLink.href = url;
+			oldBtn?.classList.toggle("active", side === "old");
+			newBtn?.classList.toggle("active", side === "new");
+			label.textContent = side === "old" ? "Showing old side" : "Showing new side";
+		};
+		const label = el("div", {
+			className: "binary-file-side-label",
+			text: ""
+		});
+		let oldBtn = null;
+		let newBtn = null;
+		const controls = el("div", { className: "binary-file-controls" });
+		if (canShowOld && canShowNew) {
+			oldBtn = el("button", {
+				className: "btn-secondary binary-file-side-btn",
+				text: "Old",
+				attrs: { type: "button" }
+			});
+			newBtn = el("button", {
+				className: "btn-secondary binary-file-side-btn",
+				text: "New",
+				attrs: { type: "button" }
+			});
+			oldBtn.onclick = () => setSide("old");
+			newBtn.onclick = () => setSide("new");
+			controls.append(oldBtn, newBtn);
+		}
+		controls.append(label, previewLink);
+		container.appendChild(el("div", { className: "binary-file-notice" }, [
+			el("div", {
+				className: "binary-file-title",
+				text: "Binary file"
+			}),
+			el("div", {
+				className: "binary-file-body",
+				text: `${file.path} changed. Previewing it with the browser instead of a text diff.`
+			}),
+			controls,
+			previewFrame
+		]));
+		setSide(initialSide);
+	}
 	isAddedFile(file) {
 		const rawStatus = file.status.toLowerCase();
 		if (rawStatus === "added" || rawStatus === "add" || rawStatus === "a" || rawStatus === "new") return true;
@@ -10877,13 +10985,7 @@ var FileLoadingMethods = class {
 		if (oldBanner) oldBanner.style.display = "none";
 		if (file.is_binary) {
 			container.classList.add("binary-file-view");
-			container.appendChild(el("div", { className: "binary-file-notice" }, [el("div", {
-				className: "binary-file-title",
-				text: "Binary file"
-			}), el("div", {
-				className: "binary-file-body",
-				text: `${file.path} changed, but its contents cannot be rendered as text.`
-			})]));
+			this.renderBinaryPreview(container, file);
 			markAppReady();
 			return;
 		}
@@ -11171,196 +11273,10 @@ const KEYBOARD_SHORTCUTS = [
 ];
 
 //#endregion
-//#region web/src/modal.ts
-function openModal({ title, titleId, modalClass = "", footerContent = [], onKeydown }) {
-	const overlay = el("div", { className: "submit-modal-overlay" });
-	const modal = el("div", { className: `submit-modal${modalClass ? " " + modalClass : ""}` });
-	const header = el("div", { className: "submit-modal-header" }, [el("h2", titleId ? {
-		text: title,
-		attrs: { id: titleId }
-	} : { text: title }), el("button", {
-		className: "submit-modal-close",
-		text: "×",
-		attrs: { "aria-label": "Close" }
-	})]);
-	const body = el("div", { className: "submit-modal-body" });
-	const footer = el("div", { className: "submit-modal-footer" });
-	(Array.isArray(footerContent) ? footerContent : [footerContent]).forEach((node) => {
-		if (node) footer.appendChild(node);
-	});
-	modal.appendChild(header);
-	modal.appendChild(body);
-	modal.appendChild(footer);
-	overlay.appendChild(modal);
-	document.body.appendChild(overlay);
-	const previouslyFocused = document.activeElement;
-	modal.setAttribute("role", "dialog");
-	modal.setAttribute("aria-modal", "true");
-	if (titleId) modal.setAttribute("aria-labelledby", titleId);
-	const focusable = () => Array.from(modal.querySelectorAll("button, [href], input, select, textarea, [tabindex]:not([tabindex=\"-1\"])")).filter((focusEl) => !focusEl.hasAttribute("disabled"));
-	const onTrap = (e) => {
-		if (e.key === "Tab") {
-			const nodes = focusable();
-			if (nodes.length === 0) return;
-			const first = nodes[0];
-			const last = nodes[nodes.length - 1];
-			if (e.shiftKey && document.activeElement === first) {
-				e.preventDefault();
-				last.focus();
-			} else if (!e.shiftKey && document.activeElement === last) {
-				e.preventDefault();
-				first.focus();
-			}
-		}
-	};
-	document.addEventListener("keydown", onTrap);
-	let handleEscape;
-	const close = () => {
-		overlay.remove();
-		document.removeEventListener("keydown", onTrap);
-		if (handleEscape) document.removeEventListener("keydown", handleEscape);
-		if (onKeydown) document.removeEventListener("keydown", onKeydown);
-		if (previouslyFocused && previouslyFocused.focus) previouslyFocused.focus();
-	};
-	handleEscape = (e) => {
-		if (e.key === "Escape") close();
-	};
-	document.addEventListener("keydown", handleEscape);
-	if (onKeydown) document.addEventListener("keydown", onKeydown);
-	const closeButton = header.querySelector(".submit-modal-close");
-	if (closeButton) closeButton.onclick = close;
-	overlay.addEventListener("click", (e) => {
-		if (e.target === overlay) close();
-	});
-	setTimeout(() => {
-		const f = focusable()[0];
-		if (f) f.focus();
-	}, 0);
-	return {
-		overlay,
-		modal,
-		body,
-		footer,
-		close
-	};
-}
-
-//#endregion
 //#region web/src/navigation-methods.ts
 var NavigationMethods = class {
 	getCurrentFile() {
 		return this.files[this.currentFileIndex];
-	}
-	showContextPeek() {
-		if (this.currentFileIsCommit) {
-			showNavIndicator("Context peek is for file diffs");
-			return;
-		}
-		const file = this.getCurrentFile();
-		if (!file) return;
-		if (file.is_binary) {
-			showNavIndicator("Binary file has no text context");
-			return;
-		}
-		const activeHunk = this.fileHunks[file.path]?.[this.currentHunkIndex[file.path] ?? 0];
-		const initialSide = this.currentFocusedLine?.side ?? activeHunk?.side ?? "new";
-		const initialLine = this.currentFocusedLine?.line ?? activeHunk?.start ?? 1;
-		let side = initialSide;
-		let centerLine = initialLine;
-		const pageSize = 20;
-		const { modal, body, footer, close } = openModal({
-			title: `Peek Context: ${file.path}`,
-			titleId: "peek-context-dialog",
-			footerContent: []
-		});
-		modal.classList.add("context-peek-modal");
-		body.classList.add("context-peek-body");
-		footer.classList.add("context-peek-footer");
-		const controls = el("div", { className: "context-peek-controls" });
-		const sideLabel = el("span", { className: "context-peek-side-label" });
-		const sideNew = el("button", {
-			className: "btn-secondary",
-			text: "New side"
-		});
-		const sideOld = el("button", {
-			className: "btn-secondary",
-			text: "Old side"
-		});
-		const prevBtn = el("button", {
-			className: "btn-secondary",
-			text: "Prev 20"
-		});
-		const nextBtn = el("button", {
-			className: "btn-secondary",
-			text: "Next 20"
-		});
-		const closeBtn = el("button", {
-			className: "btn-primary",
-			text: "Close"
-		});
-		const title = el("div", { className: "context-peek-title" });
-		const pre = el("pre", { className: "context-peek-code" });
-		const empty = el("div", { className: "context-peek-empty" });
-		controls.append(sideLabel, sideNew, sideOld, prevBtn, nextBtn);
-		body.append(controls, title, pre, empty);
-		footer.appendChild(closeBtn);
-		closeBtn.onclick = close;
-		empty.style.display = "none";
-		const render = async () => {
-			const pair = await this.fetchFilePair(file.path);
-			const text = side === "old" ? pair.old : pair.new;
-			const lines = text.split("\n");
-			const maxLine = Math.max(1, lines.length - (text.endsWith("\n") ? 1 : 0));
-			centerLine = Math.min(Math.max(centerLine, 1), maxLine);
-			const start = Math.max(1, centerLine - pageSize);
-			const end = Math.min(maxLine, centerLine + pageSize);
-			sideLabel.textContent = `${side === "old" ? "Old" : "New"} side`;
-			title.textContent = `${file.path}:${start}-${end}`;
-			sideNew.classList.toggle("active", side === "new");
-			sideOld.classList.toggle("active", side === "old");
-			sideNew.disabled = !pair.new;
-			sideOld.disabled = !pair.old;
-			prevBtn.disabled = start <= 1;
-			nextBtn.disabled = end >= maxLine;
-			if (maxLine === 0 || !text) {
-				clearEl(pre);
-				pre.style.display = "none";
-				empty.style.display = "";
-				empty.textContent = `No ${side} text is available for this file.`;
-				return;
-			}
-			pre.style.display = "";
-			empty.style.display = "none";
-			clearEl(pre);
-			for (let lineNo = start; lineNo <= end; lineNo++) {
-				const row = el("div", { className: `context-peek-line${lineNo === centerLine ? " active" : ""}` });
-				row.append(el("span", {
-					className: "context-peek-gutter",
-					text: String(lineNo)
-				}), el("span", {
-					className: "context-peek-text",
-					text: lines[lineNo - 1] ?? ""
-				}));
-				pre.appendChild(row);
-			}
-		};
-		sideNew.onclick = () => {
-			side = "new";
-			render();
-		};
-		sideOld.onclick = () => {
-			side = "old";
-			render();
-		};
-		prevBtn.onclick = () => {
-			centerLine = Math.max(1, centerLine - pageSize);
-			render();
-		};
-		nextBtn.onclick = () => {
-			centerLine += pageSize;
-			render();
-		};
-		render();
 	}
 	setupKeyboardShortcuts() {
 		document.addEventListener("keydown", (e) => {
@@ -11634,6 +11550,81 @@ var NavigationMethods = class {
 };
 
 //#endregion
+//#region web/src/modal.ts
+function openModal({ title, titleId, modalClass = "", footerContent = [], onKeydown }) {
+	const overlay = el("div", { className: "submit-modal-overlay" });
+	const modal = el("div", { className: `submit-modal${modalClass ? " " + modalClass : ""}` });
+	const header = el("div", { className: "submit-modal-header" }, [el("h2", titleId ? {
+		text: title,
+		attrs: { id: titleId }
+	} : { text: title }), el("button", {
+		className: "submit-modal-close",
+		text: "×",
+		attrs: { "aria-label": "Close" }
+	})]);
+	const body = el("div", { className: "submit-modal-body" });
+	const footer = el("div", { className: "submit-modal-footer" });
+	(Array.isArray(footerContent) ? footerContent : [footerContent]).forEach((node) => {
+		if (node) footer.appendChild(node);
+	});
+	modal.appendChild(header);
+	modal.appendChild(body);
+	modal.appendChild(footer);
+	overlay.appendChild(modal);
+	document.body.appendChild(overlay);
+	const previouslyFocused = document.activeElement;
+	modal.setAttribute("role", "dialog");
+	modal.setAttribute("aria-modal", "true");
+	if (titleId) modal.setAttribute("aria-labelledby", titleId);
+	const focusable = () => Array.from(modal.querySelectorAll("button, [href], input, select, textarea, [tabindex]:not([tabindex=\"-1\"])")).filter((focusEl) => !focusEl.hasAttribute("disabled"));
+	const onTrap = (e) => {
+		if (e.key === "Tab") {
+			const nodes = focusable();
+			if (nodes.length === 0) return;
+			const first = nodes[0];
+			const last = nodes[nodes.length - 1];
+			if (e.shiftKey && document.activeElement === first) {
+				e.preventDefault();
+				last.focus();
+			} else if (!e.shiftKey && document.activeElement === last) {
+				e.preventDefault();
+				first.focus();
+			}
+		}
+	};
+	document.addEventListener("keydown", onTrap);
+	let handleEscape;
+	const close = () => {
+		overlay.remove();
+		document.removeEventListener("keydown", onTrap);
+		if (handleEscape) document.removeEventListener("keydown", handleEscape);
+		if (onKeydown) document.removeEventListener("keydown", onKeydown);
+		if (previouslyFocused && previouslyFocused.focus) previouslyFocused.focus();
+	};
+	handleEscape = (e) => {
+		if (e.key === "Escape") close();
+	};
+	document.addEventListener("keydown", handleEscape);
+	if (onKeydown) document.addEventListener("keydown", onKeydown);
+	const closeButton = header.querySelector(".submit-modal-close");
+	if (closeButton) closeButton.onclick = close;
+	overlay.addEventListener("click", (e) => {
+		if (e.target === overlay) close();
+	});
+	setTimeout(() => {
+		const f = focusable()[0];
+		if (f) f.focus();
+	}, 0);
+	return {
+		overlay,
+		modal,
+		body,
+		footer,
+		close
+	};
+}
+
+//#endregion
 //#region web/src/commit-methods.ts
 var CommitMethods = class {
 	showCommitSummaryDialog() {
@@ -11674,18 +11665,11 @@ var CommitMethods = class {
 			ta.style.height = `${ta.scrollHeight}px`;
 		};
 		ta.addEventListener("input", autoResize);
+		ta.value = this.overallReviewComment;
 		const save = () => {
-			const bodyText = ta.value.trim();
-			if (!bodyText) {
-				ta.focus();
-				return;
-			}
-			this.commentManager.addComment({
-				file: "(commit)",
-				line: 1,
-				side: "new",
-				body: bodyText
-			});
+			this.overallReviewComment = ta.value.trim();
+			this.renderFileList();
+			if (this.currentFileIsCommit) this.loadCommitView();
 			close();
 		};
 		modal.querySelector(".cancel-btn").onclick = close;
@@ -11818,14 +11802,27 @@ var CommitMethods = class {
 		const summaryBox = el("div", { className: "commit-summary-box" }, [el("div", {
 			className: "commit-summary-copy",
 			text: "High-level review comments live here and are submitted as commit-level feedback."
-		}), el("button", {
-			className: "btn-primary",
-			text: "Add Summary Comment"
+		}), el("div", {
+			className: "commit-summary-hint",
+			text: "This is the global review note. It also appears in the final submit check."
 		})]);
-		summaryBox.querySelector("button").onclick = () => {
-			this.showCommitSummaryDialog();
+		const summaryEditor = el("textarea", {
+			className: "commit-summary-input",
+			attrs: { placeholder: "Add overall feedback for the agent…" }
+		});
+		summaryEditor.value = this.overallReviewComment;
+		const autoResizeSummary = () => {
+			summaryEditor.style.height = "auto";
+			summaryEditor.style.height = `${Math.max(summaryEditor.scrollHeight, 120)}px`;
 		};
+		summaryEditor.addEventListener("input", () => {
+			this.overallReviewComment = summaryEditor.value;
+			this.renderFileList();
+			autoResizeSummary();
+		});
+		summaryBox.appendChild(summaryEditor);
 		viewEl.appendChild(summaryBox);
+		setTimeout(autoResizeSummary, 0);
 		const msgLines = (this.diff?.commit_message ?? "(no message)").split("\n");
 		if (this.diff?.commit_message) {
 			const msgContainer = el("div");
@@ -12641,6 +12638,14 @@ var DialogMethods = class {
 	}
 	async showSubmitConfirmation() {
 		const comments = this.commentManager.getComments();
+		const overallDraft = this.overallReviewComment.trim();
+		const submissionComments = [...comments];
+		if (overallDraft && !submissionComments.some((comment) => comment.file === "(commit)" && comment.side === "new" && comment.line === 1 && comment.body === overallDraft)) submissionComments.push({
+			file: "(commit)",
+			line: 1,
+			side: "new",
+			body: overallDraft
+		});
 		let submit = () => {};
 		const footerContent = [el("button", {
 			className: "btn-secondary cancel-submit-btn",
@@ -12650,7 +12655,7 @@ var DialogMethods = class {
 			text: "Submit Review"
 		})];
 		const { overlay, modal, body, footer, close } = openModal({
-			title: comments.length === 0 ? "Submit Review" : `Review Comments (${comments.length})`,
+			title: submissionComments.length === 0 ? "Submit Review" : `Review Comments (${submissionComments.length})`,
 			titleId: "submit-title",
 			modalClass: "submit-review-modal",
 			footerContent,
@@ -12661,22 +12666,33 @@ var DialogMethods = class {
 				}
 			}
 		});
-		if (comments.length === 0) {
+		if (submissionComments.length === 0) {
 			const noCommentsMsg = el("p", { text: "No comments. Submit to approve this review." });
 			noCommentsMsg.style.padding = "20px";
 			noCommentsMsg.style.textAlign = "center";
 			noCommentsMsg.style.color = "var(--text-secondary)";
 			body.appendChild(noCommentsMsg);
 		}
+		const summaryField = el("div", { className: "submit-summary-field" }, [el("label", {
+			className: "submit-summary-label",
+			text: "Overall feedback"
+		})]);
+		const summaryInput = el("textarea", {
+			className: "submit-summary-input",
+			attrs: { placeholder: "Final global comment before submit…" }
+		});
+		summaryInput.value = this.overallReviewComment;
+		summaryField.appendChild(summaryInput);
+		body.appendChild(summaryField);
 		const commentsByFile = {};
-		comments.forEach((comment) => {
+		submissionComments.forEach((comment) => {
 			commentsByFile[comment.file] ??= [];
 			commentsByFile[comment.file].push(comment);
 		});
-		if (comments.length > 0) {
+		if (submissionComments.length > 0) {
 			const fileCount = Object.keys(commentsByFile).length;
 			body.appendChild(el("div", { className: "submit-review-summary" }, [
-				el("div", { className: "submit-review-summary-item" }, [el("strong", { text: comments.length }), el("span", { text: comments.length === 1 ? "queued comment" : "queued comments" })]),
+				el("div", { className: "submit-review-summary-item" }, [el("strong", { text: submissionComments.length }), el("span", { text: submissionComments.length === 1 ? "queued comment" : "queued comments" })]),
 				el("div", { className: "submit-review-summary-item" }, [el("strong", { text: fileCount }), el("span", { text: fileCount === 1 ? "location" : "locations" })]),
 				el("div", {
 					className: "submit-review-summary-hint",
@@ -12701,7 +12717,7 @@ var DialogMethods = class {
 				}
 			}
 		}));
-		comments.forEach((comment) => {
+		submissionComments.forEach((comment) => {
 			const preview = el("div", { className: "comment-preview" });
 			const isCommitComment = comment.file === "(commit)";
 			const locationText = isCommitComment ? "Review summary" : `${comment.file}:${commentLineLabel(comment)}`;
@@ -12742,18 +12758,29 @@ var DialogMethods = class {
 		submit = async () => {
 			const submitBtn = footer.querySelector(".confirm-submit-btn");
 			if (!submitBtn) return;
+			this.overallReviewComment = summaryInput.value.trim();
+			const finalComments = [...comments];
+			const finalOverall = this.overallReviewComment;
+			if (finalOverall && !finalComments.some((comment) => comment.file === "(commit)" && comment.side === "new" && comment.line === 1 && comment.body === finalOverall)) finalComments.push({
+				file: "(commit)",
+				line: 1,
+				side: "new",
+				body: finalOverall
+			});
 			submitBtn.disabled = true;
 			submitBtn.textContent = "Submitting...";
 			try {
 				const resp = await fetch("/api/complete", {
 					method: "POST",
 					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify({ comments })
+					body: JSON.stringify({ comments: finalComments })
 				});
 				if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
 				await this.clearPersistedComments();
 				this.commentManager.setComments([]);
+				this.overallReviewComment = "";
 				this.updateDecorations();
+				this.renderFileList();
 				if (this.currentFileIsCommit) this.loadCommitView();
 				submitBtn.textContent = "Submitted!";
 				const submitReviewBtn = document.getElementById("submit-review");
@@ -12984,11 +13011,26 @@ var StackedViewMethods = class {
 		if (this.isStacked) this.hideStackedView();
 		else this.showStackedView();
 	}
+	stackedTopForFile(file) {
+		if (file.is_binary) return document.getElementById(this.stackedSectionId(file.path))?.offsetTop ?? null;
+		return this.stackedCodeView?.getTopForItem(this.stackedItemId(file.path)) ?? null;
+	}
 	scrollToFileInStacked(index) {
 		if (!this.isStacked) return;
 		const file = this.files[index];
 		if (!file) return;
+		this.currentFileIndex = index;
+		this.currentFileIsCommit = false;
+		if (this._commitViewEl) this._commitViewEl.style.display = "none";
+		this.renderFileList();
 		const anchor = document.getElementById(this.stackedSectionId(file.path));
+		if (file.is_binary) {
+			anchor?.scrollIntoView({
+				behavior: "smooth",
+				block: "start"
+			});
+			return;
+		}
 		if (this.stackedCodeView) {
 			this.stackedCodeView.scrollTo({
 				type: "item",
@@ -13078,7 +13120,7 @@ var StackedViewMethods = class {
 			lineHoverHighlight: "both",
 			hunkSeparators: "line-info-basic",
 			collapsedContextThreshold: 1,
-			expansionLineCount: 20,
+			expansionLineCount: 30,
 			stickyHeaders: true,
 			enableLineSelection: true,
 			renderHeaderMetadata: (fileDiff) => this.buildHeaderMetadata(this.fileForPath(fileDiff.name)),
@@ -13405,11 +13447,11 @@ var StackedViewMethods = class {
 		return annotations;
 	}
 	syncCurrentFileFromStackedScroll(scrollTop) {
-		if (!this.stackedCodeView || !this.files.length) return;
+		if (!this.files.length) return;
 		let bestIdx = this.currentFileIndex;
 		let bestTop = Number.NEGATIVE_INFINITY;
 		this.files.forEach((file, index) => {
-			const top = this.stackedCodeView?.getTopForItem(this.stackedItemId(file.path));
+			const top = this.stackedTopForFile(file);
 			if (top == null || top > scrollTop + 32 || top < bestTop) return;
 			bestTop = top;
 			bestIdx = index;
@@ -13460,7 +13502,7 @@ var StackedViewMethods = class {
 		return side === "additions" ? "new" : "old";
 	}
 	stackedSectionId(path) {
-		return `stacked-file-${CSS.escape(path)}`;
+		return `stacked-file-${path.replace(/[^a-zA-Z0-9_-]+/g, "-")}`;
 	}
 	stackedItemId(path) {
 		return `file:${path}`;
@@ -13527,6 +13569,7 @@ var MonacoApp = class {
 	files;
 	stats;
 	fileCache;
+	overallReviewComment;
 	fileHunks;
 	currentHunkIndex;
 	config;
@@ -13569,6 +13612,7 @@ var MonacoApp = class {
 			deletions: 0
 		};
 		this.fileCache = {};
+		this.overallReviewComment = "";
 		this.userThemes = [];
 		this.fileHunks = {};
 		this.currentHunkIndex = {};
@@ -13892,12 +13936,6 @@ var MonacoApp = class {
 		});
 		$$2("#toggle-stacked")?.addEventListener("click", () => {
 			this.toggleStackedView();
-		});
-		$$2("#peek-context-btn")?.addEventListener("click", () => {
-			this.showContextPeek();
-		});
-		$$2("#summary-comment-btn")?.addEventListener("click", () => {
-			this.showCommitSummaryDialog();
 		});
 		const statsEl = $$2("#stats");
 		if (statsEl) statsEl.textContent = `${this.stats.files_changed} files, +${this.stats.additions} -${this.stats.deletions}`;

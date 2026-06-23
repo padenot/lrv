@@ -80,6 +80,7 @@ export class MonacoApp {
   files: DiffFile[];
   stats: DiffStats;
   fileCache: Record<string, FilePair>;
+  overallReviewComment: string;
   fileHunks: Record<string, HunkRange[]>;
   currentHunkIndex: Record<string, number>;
   config: AppConfig;
@@ -143,6 +144,7 @@ export class MonacoApp {
     this.files = [];
     this.stats = { files_changed: 0, additions: 0, deletions: 0 };
     this.fileCache = {};
+    this.overallReviewComment = '';
     this.userThemes = [];
     this.fileHunks = {}; // Track hunk start lines per file: { [path]: number[] }
     this.currentHunkIndex = {}; // Track current hunk index per file
@@ -604,14 +606,6 @@ export class MonacoApp {
 
     $('#toggle-stacked')?.addEventListener('click', () => {
       this.toggleStackedView();
-    });
-
-    $('#peek-context-btn')?.addEventListener('click', () => {
-      this.showContextPeek();
-    });
-
-    $('#summary-comment-btn')?.addEventListener('click', () => {
-      this.showCommitSummaryDialog();
     });
 
     // Stats

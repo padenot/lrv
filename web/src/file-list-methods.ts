@@ -5,7 +5,6 @@ import type { AppContext, DiffFile } from './types/app';
 
 export class FileListMethods {
   declare diff: AppContext['diff'];
-  declare currentFileIsCommit: boolean;
   declare commentManager: AppContext['commentManager'];
   declare reviewNoteManager: AppContext['reviewNoteManager'];
   declare files: AppContext['files'];
@@ -15,6 +14,9 @@ export class FileListMethods {
   declare isStacked: AppContext['isStacked'];
   declare scrollToFileInStacked: AppContext['scrollToFileInStacked'];
   declare loadFile: AppContext['loadFile'];
+  declare overallReviewComment: AppContext['overallReviewComment'];
+  declare currentFileIsCommit: AppContext['currentFileIsCommit'];
+  declare loadCommitView: AppContext['loadCommitView'];
 
   private fileTree: FileTree | null;
   private fileTreeExpansion: 'open' | 'closed';
@@ -40,6 +42,9 @@ export class FileListMethods {
       setCollapsed(true);
     }
 
+    collapseBtn?.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+    });
     collapseBtn?.addEventListener('click', () => {
       setCollapsed(!sidebar.classList.contains('collapsed'));
     });
@@ -183,16 +188,18 @@ export class FileListMethods {
 
   renderFileList() {
     const list = document.getElementById('file-list');
-    if (!list) {
+    const summaryHost = document.getElementById('overall-review-summary');
+    if (!list || !summaryHost) {
       return;
     }
 
     this.fileTree?.cleanUp();
     this.fileTree = null;
     clearEl(list);
+    clearEl(summaryHost);
     list.classList.add('file-tree', 'file-tree-root');
 
-    this.renderCommitRow(list);
+    this.renderCommitRow(summaryHost);
 
     if (!this.files.length) {
       list.appendChild(
@@ -266,36 +273,53 @@ export class FileListMethods {
     });
   }
 
-  private renderCommitRow(list: HTMLElement) {
+  private renderCommitRow(host: HTMLElement) {
     const hasCommit = this.diff !== null;
     if (!hasCommit) {
       return;
     }
 
     const li = el('li', {
-      className: `tree-row ${this.currentFileIsCommit ? 'active' : ''}`,
+      className: `tree-row tree-row-summary ${this.currentFileIsCommit ? 'active' : ''}`,
       attrs: { 'data-commit': '1' },
     });
 
     const reviewNoteCount = this.reviewNoteManager.getNotesForFile('(commit)').length;
+    const hasOverallDraft = this.overallReviewComment.trim().length > 0;
     const label = 'Review Summary';
 
     const left = el('span', { className: 'file-left' }, [
       el('span', { className: 'tree-toggle-spacer' }),
-      el('span', { className: 'file-name', text: label }),
+      el('span', { className: 'file-name summary-file-name', text: label }),
     ]);
     const commentCount =
-      this.commentManager.getCommentsForFile('(commit)').length + reviewNoteCount;
+      this.commentManager.getCommentsForFile('(commit)').length +
+      reviewNoteCount +
+      (hasOverallDraft ? 1 : 0);
     if (commentCount > 0) {
       left.appendChild(el('span', { className: 'file-comment-badge', text: String(commentCount) }));
     }
 
     const right = el('span', { className: 'file-right' }, [
-      el('span', { className: 'file-status', text: reviewNoteCount > 0 ? 'R' : 'S' }),
+      el('span', {
+        className: 'file-status',
+        text: hasOverallDraft ? 'G' : reviewNoteCount > 0 ? 'R' : 'S',
+      }),
     ]);
 
-    li.appendChild(el('span', { className: 'tree-row-content' }, [left, right]));
-    list.appendChild(li);
+    const rowButton = el(
+      'button',
+      {
+        className: 'tree-row-content tree-row-button summary-row-button',
+        attrs: { type: 'button', 'aria-label': 'Open review summary' },
+      },
+      [left, right],
+    );
+    rowButton.onclick = () => {
+      this.loadCommitView();
+    };
+    li.appendChild(rowButton);
+    host.appendChild(li);
   }
 
   private renderSummary(visibleFiles: number) {
@@ -360,27 +384,36 @@ export class FileListMethods {
         --trees-bg-override: transparent;
         --trees-fg-override: var(--text-primary);
         --trees-fg-muted-override: var(--text-secondary);
-        --trees-selected-bg-override: color-mix(in srgb, var(--accent-color) 28%, transparent);
+        --trees-selected-bg-override: var(--bg-elevated);
         --trees-selected-fg-override: var(--text-primary);
         --trees-selected-focused-border-color-override: var(--accent-color);
         --trees-focus-ring-color-override: var(--accent-color);
         --trees-border-color-override: var(--border-color);
+        --trees-border-radius-override: 1px;
+        --trees-item-padding-x-override: 3px;
+        --trees-item-margin-x-override: 0px;
+        --trees-padding-inline-override: 0px;
+        --trees-level-gap-override: 2px;
         font-family: var(--font-sans);
       }
       [data-file-tree-virtualized-root] {
         background: transparent;
       }
       [data-type="item"] {
-        border-radius: 6px;
-        margin: 1px 4px;
+        border-radius: 1px;
+        margin: 1px 0;
+        box-shadow: inset 0 0 0 1px transparent;
+      }
+      [data-type="item"]:hover {
+        background: var(--bg-elevated);
       }
       [data-item-selected="true"] {
-        background: color-mix(in srgb, var(--accent-color) 30%, transparent);
+        background: var(--bg-elevated);
+        box-shadow: inset 3px 0 0 var(--accent-color);
       }
       [data-item-focused="true"],
       [aria-selected="true"] {
-        outline: 1px solid color-mix(in srgb, var(--accent-color) 55%, transparent);
-        outline-offset: -1px;
+        outline: none;
       }
       [data-item-section="decoration"],
       [data-item-section="git"] {

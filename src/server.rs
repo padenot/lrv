@@ -90,6 +90,29 @@ fn is_null_oid(oid: &str) -> bool {
     oid.chars().all(|c| c == '0')
 }
 
+fn html_escape_text(input: &str) -> String {
+    input
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
+fn html_escape_attr(input: &str) -> String {
+    html_escape_text(input).replace('"', "&quot;")
+}
+
+fn percent_encode_component(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for byte in input.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
+            out.push(byte as char);
+        } else {
+            out.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    out
+}
+
 fn run_with_delayed_notice<T, F: FnOnce() -> T>(message: String, delay_ms: u64, op: F) -> T {
     let shown = Arc::new(AtomicBool::new(false));
     let done = Arc::new(AtomicBool::new(false));
@@ -639,6 +662,8 @@ pub fn create_router(state: AppState, enable_trace: bool) -> Router {
         .route("/api/themes", get(get_user_themes))
         .route("/api/install-skill", post(install_skill))
         .route("/api/file", get(get_file_content))
+        .route("/api/file/preview", get(get_file_preview))
+        .route("/api/file/raw", get(get_file_raw))
         .route("/api/comment", post(add_comment))
         .route(
             "/api/review-notes",
@@ -734,6 +759,8 @@ async fn security_headers(
 ) -> Response {
     // Default CSP for non-HTML routes (match index CSP)
     const DEFAULT_CSP: &str = "default-src 'self'; script-src 'self' 'unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'";
+    const RAW_FILE_CSP: &str = "default-src 'self'; img-src 'self' data: blob:; media-src 'self' data: blob:; object-src 'self' blob:; frame-ancestors 'self'; base-uri 'self'";
+    let is_raw_file = req.uri().path() == "/api/file/raw";
 
     let mut res = next.run(req).await;
     {
@@ -741,14 +768,21 @@ async fn security_headers(
         if !headers.contains_key(header::CONTENT_SECURITY_POLICY) {
             let _ = headers.insert(
                 header::CONTENT_SECURITY_POLICY,
-                HeaderValue::from_static(DEFAULT_CSP),
+                HeaderValue::from_static(if is_raw_file {
+                    RAW_FILE_CSP
+                } else {
+                    DEFAULT_CSP
+                }),
             );
         }
         let _ = headers.insert(
             header::X_CONTENT_TYPE_OPTIONS,
             HeaderValue::from_static("nosniff"),
         );
-        let _ = headers.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
+        let _ = headers.insert(
+            header::X_FRAME_OPTIONS,
+            HeaderValue::from_static(if is_raw_file { "SAMEORIGIN" } else { "DENY" }),
+        );
         let _ = headers.insert(
             header::REFERRER_POLICY,
             HeaderValue::from_static("no-referrer"),
@@ -938,6 +972,315 @@ async fn get_file_content(
     };
 
     Ok(Json(serde_json::json!({ "content": content })))
+}
+
+async fn get_file_raw(
+    State(state): State<AppState>,
+    Query(query): Query<FileQuery>,
+) -> Result<Response, StatusCode> {
+    let commit_idx = state.clamp_commit(query.commit.unwrap_or(0));
+    let diff = &state.diffs[commit_idx];
+    let repo = &state.context.working_directory;
+    let base_path = Path::new(repo);
+    let base_canon =
+        std::fs::canonicalize(base_path).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let rel_path = Path::new(&query.path);
+    if rel_path.is_absolute()
+        || rel_path
+            .components()
+            .any(|c| matches!(c, Component::ParentDir))
+    {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    let file_entry = diff
+        .files
+        .iter()
+        .find(|f| f.path == query.path || f.old_path.as_deref() == Some(query.path.as_str()));
+
+    let preview_name = match query.side.as_str() {
+        "old" => file_entry
+            .and_then(|file| file.old_path.as_deref())
+            .unwrap_or(query.path.as_str()),
+        "new" => query.path.as_str(),
+        _ => return Err(StatusCode::BAD_REQUEST),
+    };
+
+    let bytes = match query.side.as_str() {
+        "new" => {
+            if let Some(file) = file_entry {
+                if file.status == FileStatus::Deleted {
+                    return Err(StatusCode::NOT_FOUND);
+                }
+            }
+
+            if is_jj_repo(repo) {
+                if let Some(hash) = &diff.commit_hash {
+                    let out = std::process::Command::new("jj")
+                        .current_dir(repo)
+                        .args(["file", "show", "-r", hash, "--", query.path.as_str()])
+                        .output()
+                        .unwrap_or_else(|_| failed_output());
+                    if out.status.success() {
+                        out.stdout
+                    } else if let Some(file) = file_entry {
+                        if let Some(oid) = &file.new_blob {
+                            let output = std::process::Command::new("git")
+                                .current_dir(repo)
+                                .args(["cat-file", "-p", oid])
+                                .output()
+                                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+                            if output.status.success() {
+                                output.stdout
+                            } else {
+                                let joined = base_path.join(rel_path);
+                                let file_path = std::fs::canonicalize(&joined)
+                                    .map_err(|_| StatusCode::NOT_FOUND)?;
+                                if !file_path.starts_with(&base_canon) {
+                                    return Err(StatusCode::FORBIDDEN);
+                                }
+                                std::fs::read(&file_path).map_err(|_| StatusCode::NOT_FOUND)?
+                            }
+                        } else {
+                            let joined = base_path.join(rel_path);
+                            let file_path = std::fs::canonicalize(&joined)
+                                .map_err(|_| StatusCode::NOT_FOUND)?;
+                            if !file_path.starts_with(&base_canon) {
+                                return Err(StatusCode::FORBIDDEN);
+                            }
+                            std::fs::read(&file_path).map_err(|_| StatusCode::NOT_FOUND)?
+                        }
+                    } else {
+                        let joined = base_path.join(rel_path);
+                        let file_path =
+                            std::fs::canonicalize(&joined).map_err(|_| StatusCode::NOT_FOUND)?;
+                        if !file_path.starts_with(&base_canon) {
+                            return Err(StatusCode::FORBIDDEN);
+                        }
+                        std::fs::read(&file_path).map_err(|_| StatusCode::NOT_FOUND)?
+                    }
+                } else {
+                    let joined = base_path.join(rel_path);
+                    let file_path =
+                        std::fs::canonicalize(&joined).map_err(|_| StatusCode::NOT_FOUND)?;
+                    if !file_path.starts_with(&base_canon) {
+                        return Err(StatusCode::FORBIDDEN);
+                    }
+                    std::fs::read(&file_path).map_err(|_| StatusCode::NOT_FOUND)?
+                }
+            } else if let Some(file) = file_entry {
+                if let Some(oid) = &file.new_blob {
+                    let output = std::process::Command::new("git")
+                        .current_dir(repo)
+                        .args(["cat-file", "-p", oid])
+                        .output()
+                        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+                    if output.status.success() {
+                        output.stdout
+                    } else {
+                        let joined = base_path.join(rel_path);
+                        let file_path =
+                            std::fs::canonicalize(&joined).map_err(|_| StatusCode::NOT_FOUND)?;
+                        if !file_path.starts_with(&base_canon) {
+                            return Err(StatusCode::FORBIDDEN);
+                        }
+                        std::fs::read(&file_path).map_err(|_| StatusCode::NOT_FOUND)?
+                    }
+                } else {
+                    let joined = base_path.join(rel_path);
+                    let file_path =
+                        std::fs::canonicalize(&joined).map_err(|_| StatusCode::NOT_FOUND)?;
+                    if !file_path.starts_with(&base_canon) {
+                        return Err(StatusCode::FORBIDDEN);
+                    }
+                    std::fs::read(&file_path).map_err(|_| StatusCode::NOT_FOUND)?
+                }
+            } else {
+                let joined = base_path.join(rel_path);
+                let file_path =
+                    std::fs::canonicalize(&joined).map_err(|_| StatusCode::NOT_FOUND)?;
+                if !file_path.starts_with(&base_canon) {
+                    return Err(StatusCode::FORBIDDEN);
+                }
+                std::fs::read(&file_path).map_err(|_| StatusCode::NOT_FOUND)?
+            }
+        }
+        "old" => {
+            let file = file_entry.ok_or(StatusCode::NOT_FOUND)?;
+            if file.status == FileStatus::Added {
+                return Err(StatusCode::NOT_FOUND);
+            }
+
+            if let Some(oid) = &file.old_blob {
+                if !is_null_oid(oid) {
+                    let output = std::process::Command::new("git")
+                        .current_dir(repo)
+                        .args(["cat-file", "-p", oid])
+                        .output()
+                        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+                    if output.status.success() {
+                        output.stdout
+                    } else {
+                        return Err(StatusCode::NOT_FOUND);
+                    }
+                } else {
+                    Vec::new()
+                }
+            } else if is_jj_repo(repo) {
+                let old_key = file.old_path.clone().unwrap_or_else(|| file.path.clone());
+                let cmd_old = |rev: &str| -> std::process::Output {
+                    std::process::Command::new("jj")
+                        .current_dir(repo)
+                        .args([
+                            "file",
+                            "show",
+                            "-r",
+                            &format!("parents({})", rev),
+                            "--",
+                            &old_key,
+                        ])
+                        .output()
+                        .unwrap_or_else(|_| failed_output())
+                };
+                let revs: Vec<String> = if let Some(hash) = &diff.commit_hash {
+                    vec![hash.clone(), "@-".to_string(), "@".to_string()]
+                } else {
+                    vec!["@-".to_string(), "@".to_string()]
+                };
+                let mut result = None;
+                for rev in &revs {
+                    let out = cmd_old(rev);
+                    if out.status.success() {
+                        result = Some(out.stdout);
+                        break;
+                    }
+                }
+                result.ok_or(StatusCode::NOT_FOUND)?
+            } else if !file.is_binary {
+                resolve_old_content(diff, repo, &query.path).into_bytes()
+            } else {
+                return Err(StatusCode::NOT_FOUND);
+            }
+        }
+        _ => return Err(StatusCode::BAD_REQUEST),
+    };
+
+    let mime = mime_guess::from_path(preview_name).first_or_octet_stream();
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, mime.as_ref())
+        .header(header::CACHE_CONTROL, "no-store")
+        .header(header::CONTENT_DISPOSITION, "inline")
+        .body(axum::body::Body::from(bytes))
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+}
+
+async fn get_file_preview(Query(query): Query<FileQuery>) -> Result<Response, StatusCode> {
+    let preview_name = query.path.clone();
+    let mime = mime_guess::from_path(&preview_name).first_or_octet_stream();
+    let mime_str = mime.as_ref();
+    let mut raw_params = vec![
+        format!("path={}", percent_encode_component(&query.path)),
+        format!("side={}", percent_encode_component(&query.side)),
+    ];
+    if let Some(commit) = query.commit {
+        raw_params.push(format!("commit={}", commit));
+    }
+    let raw_url = format!("/api/file/raw?{}", raw_params.join("&"));
+    let escaped_name = html_escape_text(&preview_name);
+    let escaped_mime = html_escape_text(mime_str);
+    let escaped_url = html_escape_attr(&raw_url);
+    let escaped_side = html_escape_text(&query.side);
+
+    let media_markup = if mime_str.starts_with("image/") {
+        format!(r#"<img src="{escaped_url}" alt="{escaped_name}" />"#)
+    } else if mime_str.starts_with("video/") {
+        format!(r#"<video controls src="{escaped_url}"></video>"#)
+    } else if mime_str.starts_with("audio/") {
+        format!(r#"<audio controls src="{escaped_url}"></audio>"#)
+    } else if mime_str == "application/pdf" {
+        format!(r#"<object data="{escaped_url}" type="{escaped_mime}"></object>"#)
+    } else {
+        format!(
+            r#"<object data="{escaped_url}" type="{escaped_mime}">
+  <div class="fallback">
+    <p>Browser preview is unavailable for this file type.</p>
+    <a href="{escaped_url}" target="_blank" rel="noopener noreferrer">Open raw file</a>
+  </div>
+</object>"#
+        )
+    };
+
+    let html = format!(
+        r#"<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{escaped_name}</title>
+    <style>
+      :root {{
+        color-scheme: dark light;
+      }}
+      html, body {{
+        margin: 0;
+        min-height: 100%;
+        background: #0f141a;
+        color: #e6edf3;
+        font: 13px/1.5 system-ui, sans-serif;
+      }}
+      body {{
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 16px;
+        padding: 24px;
+        box-sizing: border-box;
+      }}
+      .meta {{
+        width: min(960px, 100%);
+        color: #9da7b3;
+        font-size: 12px;
+      }}
+      img, video, audio, object, embed, svg, canvas {{
+        display: block;
+        width: auto;
+        max-width: 50%;
+        max-height: 80vh;
+        margin: 0 auto;
+        border-radius: 8px;
+      }}
+      object {{
+        width: min(50%, 960px);
+        min-width: 320px;
+        height: 80vh;
+        background: #161b22;
+      }}
+      audio {{
+        width: min(50%, 560px);
+      }}
+      .fallback {{
+        padding: 24px;
+      }}
+      a {{
+        color: #58a6ff;
+      }}
+    </style>
+  </head>
+  <body>
+    <div class="meta">{escaped_name} • {escaped_mime} • {escaped_side} side</div>
+    {media_markup}
+  </body>
+</html>"#
+    );
+
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
+        .header(header::CONTENT_SECURITY_POLICY, "default-src 'self' 'unsafe-inline' data: blob:; img-src 'self' data: blob:; media-src 'self' data: blob:; object-src 'self' blob:; frame-ancestors 'self'; base-uri 'self'")
+        .body(axum::body::Body::from(html))
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }
 
 async fn add_comment(State(state): State<AppState>, Json(comment): Json<Comment>) -> StatusCode {
