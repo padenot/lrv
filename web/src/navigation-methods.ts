@@ -2,6 +2,8 @@ import { IS_MAC } from './platform';
 import { KEYBOARD_SHORTCUTS, type KeyboardAction } from './shortcuts';
 import { prefersReducedMotion } from './font';
 import { showNavIndicator } from './ui-signals';
+import { openModal } from './modal';
+import { clearEl, el } from './dom';
 import type { AppContext, Side } from './types/app';
 import type { editor } from 'monaco-editor';
 
@@ -25,9 +27,125 @@ export class NavigationMethods {
   declare showCommentDialog: AppContext['showCommentDialog'];
   declare nextCommit: () => void;
   declare previousCommit: () => void;
+  declare currentFileIsCommit: AppContext['currentFileIsCommit'];
+  declare fetchFilePair: AppContext['fetchFilePair'];
 
   private getCurrentFile() {
     return this.files[this.currentFileIndex]!;
+  }
+
+  showContextPeek() {
+    if (this.currentFileIsCommit) {
+      showNavIndicator('Context peek is for file diffs');
+      return;
+    }
+
+    const file = this.getCurrentFile();
+    if (!file) {
+      return;
+    }
+    if (file.is_binary) {
+      showNavIndicator('Binary file has no text context');
+      return;
+    }
+
+    const fileHunks = this.fileHunks[file.path];
+    const activeHunk = fileHunks?.[this.currentHunkIndex[file.path] ?? 0];
+    const initialSide: Side = this.currentFocusedLine?.side ?? activeHunk?.side ?? 'new';
+    const initialLine = this.currentFocusedLine?.line ?? activeHunk?.start ?? 1;
+    let side: Side = initialSide;
+    let centerLine = initialLine;
+    const pageSize = 20;
+
+    const { modal, body, footer, close } = openModal({
+      title: `Peek Context: ${file.path}`,
+      titleId: 'peek-context-dialog',
+      footerContent: [],
+    });
+    modal.classList.add('context-peek-modal');
+    body.classList.add('context-peek-body');
+    footer.classList.add('context-peek-footer');
+
+    const controls = el('div', { className: 'context-peek-controls' });
+    const sideLabel = el('span', { className: 'context-peek-side-label' });
+    const sideNew = el('button', { className: 'btn-secondary', text: 'New side' });
+    const sideOld = el('button', { className: 'btn-secondary', text: 'Old side' });
+    const prevBtn = el('button', { className: 'btn-secondary', text: 'Prev 20' });
+    const nextBtn = el('button', { className: 'btn-secondary', text: 'Next 20' });
+    const closeBtn = el('button', { className: 'btn-primary', text: 'Close' });
+    const title = el('div', { className: 'context-peek-title' });
+    const pre = el('pre', { className: 'context-peek-code' });
+    const empty = el('div', { className: 'context-peek-empty' });
+
+    controls.append(sideLabel, sideNew, sideOld, prevBtn, nextBtn);
+    body.append(controls, title, pre, empty);
+    footer.appendChild(closeBtn);
+
+    closeBtn.onclick = close;
+    empty.style.display = 'none';
+
+    const render = async () => {
+      const pair = await this.fetchFilePair(file.path);
+      const text = side === 'old' ? pair.old : pair.new;
+      const lines = text.split('\n');
+      const maxLine = Math.max(1, lines.length - (text.endsWith('\n') ? 1 : 0));
+      centerLine = Math.min(Math.max(centerLine, 1), maxLine);
+      const start = Math.max(1, centerLine - pageSize);
+      const end = Math.min(maxLine, centerLine + pageSize);
+
+      sideLabel.textContent = `${side === 'old' ? 'Old' : 'New'} side`;
+      title.textContent = `${file.path}:${start}-${end}`;
+      sideNew.classList.toggle('active', side === 'new');
+      sideOld.classList.toggle('active', side === 'old');
+      sideNew.disabled = !pair.new;
+      sideOld.disabled = !pair.old;
+      prevBtn.disabled = start <= 1;
+      nextBtn.disabled = end >= maxLine;
+
+      if (maxLine === 0 || !text) {
+        clearEl(pre);
+        pre.style.display = 'none';
+        empty.style.display = '';
+        empty.textContent = `No ${side} text is available for this file.`;
+        return;
+      }
+
+      pre.style.display = '';
+      empty.style.display = 'none';
+      clearEl(pre);
+      for (let lineNo = start; lineNo <= end; lineNo++) {
+        const row = el('div', {
+          className: `context-peek-line${lineNo === centerLine ? ' active' : ''}`,
+        });
+        row.append(
+          el('span', { className: 'context-peek-gutter', text: String(lineNo) }),
+          el('span', {
+            className: 'context-peek-text',
+            text: lines[lineNo - 1] ?? '',
+          }),
+        );
+        pre.appendChild(row);
+      }
+    };
+
+    sideNew.onclick = () => {
+      side = 'new';
+      void render();
+    };
+    sideOld.onclick = () => {
+      side = 'old';
+      void render();
+    };
+    prevBtn.onclick = () => {
+      centerLine = Math.max(1, centerLine - pageSize);
+      void render();
+    };
+    nextBtn.onclick = () => {
+      centerLine += pageSize;
+      void render();
+    };
+
+    void render();
   }
 
   setupKeyboardShortcuts() {

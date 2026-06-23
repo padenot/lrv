@@ -10614,16 +10614,15 @@ var FileListMethods = class {
 		});
 	}
 	renderCommitRow(list) {
-		if (!(this.diff !== null && (this.diff.commit_message || this.diff.commit_hash))) return;
+		if (!(this.diff !== null)) return;
 		const li = el("li", {
 			className: `tree-row ${this.currentFileIsCommit ? "active" : ""}`,
 			attrs: { "data-commit": "1" }
 		});
 		const reviewNoteCount = this.reviewNoteManager.getNotesForFile("(commit)").length;
-		const label = reviewNoteCount > 0 ? "Review Summary" : "Commit";
 		const left = el("span", { className: "file-left" }, [el("span", { className: "tree-toggle-spacer" }), el("span", {
 			className: "file-name",
-			text: label
+			text: "Review Summary"
 		})]);
 		const commentCount = this.commentManager.getCommentsForFile("(commit)").length + reviewNoteCount;
 		if (commentCount > 0) left.appendChild(el("span", {
@@ -10632,7 +10631,7 @@ var FileListMethods = class {
 		}));
 		const right = el("span", { className: "file-right" }, [el("span", {
 			className: "file-status",
-			text: reviewNoteCount > 0 ? "R" : "C"
+			text: reviewNoteCount > 0 ? "R" : "S"
 		})]);
 		li.appendChild(el("span", { className: "tree-row-content" }, [left, right]));
 		list.appendChild(li);
@@ -11172,10 +11171,196 @@ const KEYBOARD_SHORTCUTS = [
 ];
 
 //#endregion
+//#region web/src/modal.ts
+function openModal({ title, titleId, modalClass = "", footerContent = [], onKeydown }) {
+	const overlay = el("div", { className: "submit-modal-overlay" });
+	const modal = el("div", { className: `submit-modal${modalClass ? " " + modalClass : ""}` });
+	const header = el("div", { className: "submit-modal-header" }, [el("h2", titleId ? {
+		text: title,
+		attrs: { id: titleId }
+	} : { text: title }), el("button", {
+		className: "submit-modal-close",
+		text: "×",
+		attrs: { "aria-label": "Close" }
+	})]);
+	const body = el("div", { className: "submit-modal-body" });
+	const footer = el("div", { className: "submit-modal-footer" });
+	(Array.isArray(footerContent) ? footerContent : [footerContent]).forEach((node) => {
+		if (node) footer.appendChild(node);
+	});
+	modal.appendChild(header);
+	modal.appendChild(body);
+	modal.appendChild(footer);
+	overlay.appendChild(modal);
+	document.body.appendChild(overlay);
+	const previouslyFocused = document.activeElement;
+	modal.setAttribute("role", "dialog");
+	modal.setAttribute("aria-modal", "true");
+	if (titleId) modal.setAttribute("aria-labelledby", titleId);
+	const focusable = () => Array.from(modal.querySelectorAll("button, [href], input, select, textarea, [tabindex]:not([tabindex=\"-1\"])")).filter((focusEl) => !focusEl.hasAttribute("disabled"));
+	const onTrap = (e) => {
+		if (e.key === "Tab") {
+			const nodes = focusable();
+			if (nodes.length === 0) return;
+			const first = nodes[0];
+			const last = nodes[nodes.length - 1];
+			if (e.shiftKey && document.activeElement === first) {
+				e.preventDefault();
+				last.focus();
+			} else if (!e.shiftKey && document.activeElement === last) {
+				e.preventDefault();
+				first.focus();
+			}
+		}
+	};
+	document.addEventListener("keydown", onTrap);
+	let handleEscape;
+	const close = () => {
+		overlay.remove();
+		document.removeEventListener("keydown", onTrap);
+		if (handleEscape) document.removeEventListener("keydown", handleEscape);
+		if (onKeydown) document.removeEventListener("keydown", onKeydown);
+		if (previouslyFocused && previouslyFocused.focus) previouslyFocused.focus();
+	};
+	handleEscape = (e) => {
+		if (e.key === "Escape") close();
+	};
+	document.addEventListener("keydown", handleEscape);
+	if (onKeydown) document.addEventListener("keydown", onKeydown);
+	const closeButton = header.querySelector(".submit-modal-close");
+	if (closeButton) closeButton.onclick = close;
+	overlay.addEventListener("click", (e) => {
+		if (e.target === overlay) close();
+	});
+	setTimeout(() => {
+		const f = focusable()[0];
+		if (f) f.focus();
+	}, 0);
+	return {
+		overlay,
+		modal,
+		body,
+		footer,
+		close
+	};
+}
+
+//#endregion
 //#region web/src/navigation-methods.ts
 var NavigationMethods = class {
 	getCurrentFile() {
 		return this.files[this.currentFileIndex];
+	}
+	showContextPeek() {
+		if (this.currentFileIsCommit) {
+			showNavIndicator("Context peek is for file diffs");
+			return;
+		}
+		const file = this.getCurrentFile();
+		if (!file) return;
+		if (file.is_binary) {
+			showNavIndicator("Binary file has no text context");
+			return;
+		}
+		const activeHunk = this.fileHunks[file.path]?.[this.currentHunkIndex[file.path] ?? 0];
+		const initialSide = this.currentFocusedLine?.side ?? activeHunk?.side ?? "new";
+		const initialLine = this.currentFocusedLine?.line ?? activeHunk?.start ?? 1;
+		let side = initialSide;
+		let centerLine = initialLine;
+		const pageSize = 20;
+		const { modal, body, footer, close } = openModal({
+			title: `Peek Context: ${file.path}`,
+			titleId: "peek-context-dialog",
+			footerContent: []
+		});
+		modal.classList.add("context-peek-modal");
+		body.classList.add("context-peek-body");
+		footer.classList.add("context-peek-footer");
+		const controls = el("div", { className: "context-peek-controls" });
+		const sideLabel = el("span", { className: "context-peek-side-label" });
+		const sideNew = el("button", {
+			className: "btn-secondary",
+			text: "New side"
+		});
+		const sideOld = el("button", {
+			className: "btn-secondary",
+			text: "Old side"
+		});
+		const prevBtn = el("button", {
+			className: "btn-secondary",
+			text: "Prev 20"
+		});
+		const nextBtn = el("button", {
+			className: "btn-secondary",
+			text: "Next 20"
+		});
+		const closeBtn = el("button", {
+			className: "btn-primary",
+			text: "Close"
+		});
+		const title = el("div", { className: "context-peek-title" });
+		const pre = el("pre", { className: "context-peek-code" });
+		const empty = el("div", { className: "context-peek-empty" });
+		controls.append(sideLabel, sideNew, sideOld, prevBtn, nextBtn);
+		body.append(controls, title, pre, empty);
+		footer.appendChild(closeBtn);
+		closeBtn.onclick = close;
+		empty.style.display = "none";
+		const render = async () => {
+			const pair = await this.fetchFilePair(file.path);
+			const text = side === "old" ? pair.old : pair.new;
+			const lines = text.split("\n");
+			const maxLine = Math.max(1, lines.length - (text.endsWith("\n") ? 1 : 0));
+			centerLine = Math.min(Math.max(centerLine, 1), maxLine);
+			const start = Math.max(1, centerLine - pageSize);
+			const end = Math.min(maxLine, centerLine + pageSize);
+			sideLabel.textContent = `${side === "old" ? "Old" : "New"} side`;
+			title.textContent = `${file.path}:${start}-${end}`;
+			sideNew.classList.toggle("active", side === "new");
+			sideOld.classList.toggle("active", side === "old");
+			sideNew.disabled = !pair.new;
+			sideOld.disabled = !pair.old;
+			prevBtn.disabled = start <= 1;
+			nextBtn.disabled = end >= maxLine;
+			if (maxLine === 0 || !text) {
+				clearEl(pre);
+				pre.style.display = "none";
+				empty.style.display = "";
+				empty.textContent = `No ${side} text is available for this file.`;
+				return;
+			}
+			pre.style.display = "";
+			empty.style.display = "none";
+			clearEl(pre);
+			for (let lineNo = start; lineNo <= end; lineNo++) {
+				const row = el("div", { className: `context-peek-line${lineNo === centerLine ? " active" : ""}` });
+				row.append(el("span", {
+					className: "context-peek-gutter",
+					text: String(lineNo)
+				}), el("span", {
+					className: "context-peek-text",
+					text: lines[lineNo - 1] ?? ""
+				}));
+				pre.appendChild(row);
+			}
+		};
+		sideNew.onclick = () => {
+			side = "new";
+			render();
+		};
+		sideOld.onclick = () => {
+			side = "old";
+			render();
+		};
+		prevBtn.onclick = () => {
+			centerLine = Math.max(1, centerLine - pageSize);
+			render();
+		};
+		nextBtn.onclick = () => {
+			centerLine += pageSize;
+			render();
+		};
+		render();
 	}
 	setupKeyboardShortcuts() {
 		document.addEventListener("keydown", (e) => {
@@ -11449,83 +11634,67 @@ var NavigationMethods = class {
 };
 
 //#endregion
-//#region web/src/modal.ts
-function openModal({ title, titleId, modalClass = "", footerContent = [], onKeydown }) {
-	const overlay = el("div", { className: "submit-modal-overlay" });
-	const modal = el("div", { className: `submit-modal${modalClass ? " " + modalClass : ""}` });
-	const header = el("div", { className: "submit-modal-header" }, [el("h2", titleId ? {
-		text: title,
-		attrs: { id: titleId }
-	} : { text: title }), el("button", {
-		className: "submit-modal-close",
-		text: "×",
-		attrs: { "aria-label": "Close" }
-	})]);
-	const body = el("div", { className: "submit-modal-body" });
-	const footer = el("div", { className: "submit-modal-footer" });
-	(Array.isArray(footerContent) ? footerContent : [footerContent]).forEach((node) => {
-		if (node) footer.appendChild(node);
-	});
-	modal.appendChild(header);
-	modal.appendChild(body);
-	modal.appendChild(footer);
-	overlay.appendChild(modal);
-	document.body.appendChild(overlay);
-	const previouslyFocused = document.activeElement;
-	modal.setAttribute("role", "dialog");
-	modal.setAttribute("aria-modal", "true");
-	if (titleId) modal.setAttribute("aria-labelledby", titleId);
-	const focusable = () => Array.from(modal.querySelectorAll("button, [href], input, select, textarea, [tabindex]:not([tabindex=\"-1\"])")).filter((focusEl) => !focusEl.hasAttribute("disabled"));
-	const onTrap = (e) => {
-		if (e.key === "Tab") {
-			const nodes = focusable();
-			if (nodes.length === 0) return;
-			const first = nodes[0];
-			const last = nodes[nodes.length - 1];
-			if (e.shiftKey && document.activeElement === first) {
-				e.preventDefault();
-				last.focus();
-			} else if (!e.shiftKey && document.activeElement === last) {
-				e.preventDefault();
-				first.focus();
-			}
-		}
-	};
-	document.addEventListener("keydown", onTrap);
-	let handleEscape;
-	const close = () => {
-		overlay.remove();
-		document.removeEventListener("keydown", onTrap);
-		if (handleEscape) document.removeEventListener("keydown", handleEscape);
-		if (onKeydown) document.removeEventListener("keydown", onKeydown);
-		if (previouslyFocused && previouslyFocused.focus) previouslyFocused.focus();
-	};
-	handleEscape = (e) => {
-		if (e.key === "Escape") close();
-	};
-	document.addEventListener("keydown", handleEscape);
-	if (onKeydown) document.addEventListener("keydown", onKeydown);
-	const closeButton = header.querySelector(".submit-modal-close");
-	if (closeButton) closeButton.onclick = close;
-	overlay.addEventListener("click", (e) => {
-		if (e.target === overlay) close();
-	});
-	setTimeout(() => {
-		const f = focusable()[0];
-		if (f) f.focus();
-	}, 0);
-	return {
-		overlay,
-		modal,
-		body,
-		footer,
-		close
-	};
-}
-
-//#endregion
 //#region web/src/commit-methods.ts
 var CommitMethods = class {
+	showCommitSummaryDialog() {
+		const modKey = MOD_KEY_LABEL;
+		const { modal, body, close } = openModal({
+			title: "Add Review Summary",
+			titleId: "commit-summary-dialog",
+			footerContent: [el("button", {
+				className: "btn-secondary cancel-btn",
+				text: "Cancel"
+			}), el("button", {
+				className: "btn-primary save-btn",
+				text: "Add Summary Comment"
+			})],
+			onKeydown: (e) => {
+				if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+					e.preventDefault();
+					save();
+				}
+			}
+		});
+		modal.style.maxWidth = "600px";
+		body.style.padding = "20px";
+		const explainer = el("div", {
+			className: "commit-summary-help",
+			text: "Use this for high-level feedback that is not tied to a specific file or line."
+		});
+		const ta = el("textarea", {
+			className: "comment-textarea",
+			attrs: {
+				placeholder: `Add summary comment… (${modKey}+Enter to save)`,
+				autofocus: true
+			}
+		});
+		body.append(explainer, ta);
+		const autoResize = () => {
+			ta.style.height = "auto";
+			ta.style.height = `${ta.scrollHeight}px`;
+		};
+		ta.addEventListener("input", autoResize);
+		const save = () => {
+			const bodyText = ta.value.trim();
+			if (!bodyText) {
+				ta.focus();
+				return;
+			}
+			this.commentManager.addComment({
+				file: "(commit)",
+				line: 1,
+				side: "new",
+				body: bodyText
+			});
+			close();
+		};
+		modal.querySelector(".cancel-btn").onclick = close;
+		modal.querySelector(".save-btn").onclick = save;
+		setTimeout(() => {
+			ta.focus();
+			autoResize();
+		}, 0);
+	}
 	showCommitMessagePopover(anchorEl, message, rev) {
 		if (this._commitPopoverEl) {
 			this._commitPopoverEl.remove();
@@ -11637,57 +11806,73 @@ var CommitMethods = class {
 		const viewEl = this._commitViewEl;
 		clearEl(viewEl);
 		viewEl.style.display = "";
-		const meta = el("div");
-		meta.style.color = "var(--text-secondary)";
-		meta.style.fontSize = "11px";
-		meta.style.marginBottom = "12px";
-		meta.textContent = this.diff?.commit_hash ?? "";
-		viewEl.appendChild(meta);
+		const rev = this.diff?.commit_hash ?? "";
+		if (rev) {
+			const meta = el("div");
+			meta.style.color = "var(--text-secondary)";
+			meta.style.fontSize = "11px";
+			meta.style.marginBottom = "12px";
+			meta.textContent = rev;
+			viewEl.appendChild(meta);
+		}
+		const summaryBox = el("div", { className: "commit-summary-box" }, [el("div", {
+			className: "commit-summary-copy",
+			text: "High-level review comments live here and are submitted as commit-level feedback."
+		}), el("button", {
+			className: "btn-primary",
+			text: "Add Summary Comment"
+		})]);
+		summaryBox.querySelector("button").onclick = () => {
+			this.showCommitSummaryDialog();
+		};
+		viewEl.appendChild(summaryBox);
 		const msgLines = (this.diff?.commit_message ?? "(no message)").split("\n");
-		const msgContainer = el("div");
-		msgContainer.style.border = "1px solid var(--border-color)";
-		msgContainer.style.borderRadius = "4px";
-		msgContainer.style.background = "var(--bg-elevated)";
-		msgContainer.style.fontFamily = "var(--font-mono)";
-		msgContainer.style.fontSize = "13px";
-		msgLines.forEach((lineText, lineIndex) => {
-			const lineNum = lineIndex + 1;
-			const lineDiv = el("div");
-			lineDiv.style.display = "flex";
-			lineDiv.style.lineHeight = "1.6";
-			lineDiv.style.cursor = "pointer";
-			lineDiv.style.padding = "2px 0";
-			lineDiv.onmouseover = () => {
-				lineDiv.style.background = "var(--bg-secondary)";
-			};
-			lineDiv.onmouseout = () => {
-				lineDiv.style.background = "";
-			};
-			const lineNumSpan = el("span");
-			lineNumSpan.style.display = "inline-block";
-			lineNumSpan.style.width = "40px";
-			lineNumSpan.style.textAlign = "right";
-			lineNumSpan.style.paddingRight = "12px";
-			lineNumSpan.style.color = "var(--text-secondary)";
-			lineNumSpan.style.userSelect = "none";
-			lineNumSpan.style.flexShrink = "0";
-			lineNumSpan.textContent = String(lineNum);
-			const lineContent = el("span");
-			lineContent.style.paddingRight = "12px";
-			lineContent.style.whiteSpace = "pre-wrap";
-			lineContent.style.wordBreak = "break-word";
-			appendLinkifiedText(lineContent, lineText || " ");
-			lineContent.addEventListener("click", (event) => {
-				if (event.target?.closest("a")) event.stopPropagation();
+		if (this.diff?.commit_message) {
+			const msgContainer = el("div");
+			msgContainer.style.border = "1px solid var(--border-color)";
+			msgContainer.style.borderRadius = "4px";
+			msgContainer.style.background = "var(--bg-elevated)";
+			msgContainer.style.fontFamily = "var(--font-mono)";
+			msgContainer.style.fontSize = "13px";
+			msgLines.forEach((lineText, lineIndex) => {
+				const lineNum = lineIndex + 1;
+				const lineDiv = el("div");
+				lineDiv.style.display = "flex";
+				lineDiv.style.lineHeight = "1.6";
+				lineDiv.style.cursor = "pointer";
+				lineDiv.style.padding = "2px 0";
+				lineDiv.onmouseover = () => {
+					lineDiv.style.background = "var(--bg-secondary)";
+				};
+				lineDiv.onmouseout = () => {
+					lineDiv.style.background = "";
+				};
+				const lineNumSpan = el("span");
+				lineNumSpan.style.display = "inline-block";
+				lineNumSpan.style.width = "40px";
+				lineNumSpan.style.textAlign = "right";
+				lineNumSpan.style.paddingRight = "12px";
+				lineNumSpan.style.color = "var(--text-secondary)";
+				lineNumSpan.style.userSelect = "none";
+				lineNumSpan.style.flexShrink = "0";
+				lineNumSpan.textContent = String(lineNum);
+				const lineContent = el("span");
+				lineContent.style.paddingRight = "12px";
+				lineContent.style.whiteSpace = "pre-wrap";
+				lineContent.style.wordBreak = "break-word";
+				appendLinkifiedText(lineContent, lineText || " ");
+				lineContent.addEventListener("click", (event) => {
+					if (event.target?.closest("a")) event.stopPropagation();
+				});
+				lineDiv.appendChild(lineNumSpan);
+				lineDiv.appendChild(lineContent);
+				lineDiv.onclick = () => {
+					this.showCommitLineCommentDialog(lineNum);
+				};
+				msgContainer.appendChild(lineDiv);
 			});
-			lineDiv.appendChild(lineNumSpan);
-			lineDiv.appendChild(lineContent);
-			lineDiv.onclick = () => {
-				this.showCommitLineCommentDialog(lineNum);
-			};
-			msgContainer.appendChild(lineDiv);
-		});
-		viewEl.appendChild(msgContainer);
+			viewEl.appendChild(msgContainer);
+		}
 		const reviewNotes = this.reviewNoteManager.getNotesForFile("(commit)");
 		if (reviewNotes.length > 0) {
 			const reviewNotesHeader = el("h3", { text: "Review Notes" });
@@ -11714,7 +11899,7 @@ var CommitMethods = class {
 			empty.style.color = "var(--text-secondary)";
 			empty.style.fontSize = "12px";
 			empty.style.padding = "8px 0";
-			empty.textContent = "No comments yet. Click a line in the message above to add one.";
+			empty.textContent = this.diff?.commit_message ? "No comments yet. Add a summary comment above or click a commit-message line." : "No summary comments yet.";
 			list.appendChild(empty);
 		} else comments.forEach((c) => {
 			const row = el("div");
@@ -11729,7 +11914,7 @@ var CommitMethods = class {
 			const lineLabel = el("div");
 			lineLabel.style.fontSize = "11px";
 			lineLabel.style.color = "var(--text-secondary)";
-			lineLabel.textContent = `Line ${commentLineLabel(c)}`;
+			lineLabel.textContent = !this.diff?.commit_message && commentStartLine(c) === 1 ? "Summary" : `Line ${commentLineLabel(c)}`;
 			const bodyRow = el("div");
 			bodyRow.style.display = "flex";
 			bodyRow.style.justifyContent = "space-between";
@@ -12893,7 +13078,7 @@ var StackedViewMethods = class {
 			lineHoverHighlight: "both",
 			hunkSeparators: "line-info-basic",
 			collapsedContextThreshold: 1,
-			expansionLineCount: 40,
+			expansionLineCount: 20,
 			stickyHeaders: true,
 			enableLineSelection: true,
 			renderHeaderMetadata: (fileDiff) => this.buildHeaderMetadata(this.fileForPath(fileDiff.name)),
@@ -13707,6 +13892,12 @@ var MonacoApp = class {
 		});
 		$$2("#toggle-stacked")?.addEventListener("click", () => {
 			this.toggleStackedView();
+		});
+		$$2("#peek-context-btn")?.addEventListener("click", () => {
+			this.showContextPeek();
+		});
+		$$2("#summary-comment-btn")?.addEventListener("click", () => {
+			this.showCommitSummaryDialog();
 		});
 		const statsEl = $$2("#stats");
 		if (statsEl) statsEl.textContent = `${this.stats.files_changed} files, +${this.stats.additions} -${this.stats.deletions}`;

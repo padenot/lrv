@@ -267,7 +267,7 @@ export class FileListMethods {
   }
 
   private renderCommitRow(list: HTMLElement) {
-    const hasCommit = this.diff !== null && (this.diff.commit_message || this.diff.commit_hash);
+    const hasCommit = this.diff !== null;
     if (!hasCommit) {
       return;
     }
@@ -278,7 +278,7 @@ export class FileListMethods {
     });
 
     const reviewNoteCount = this.reviewNoteManager.getNotesForFile('(commit)').length;
-    const label = reviewNoteCount > 0 ? 'Review Summary' : 'Commit';
+    const label = 'Review Summary';
 
     const left = el('span', { className: 'file-left' }, [
       el('span', { className: 'tree-toggle-spacer' }),
@@ -291,7 +291,7 @@ export class FileListMethods {
     }
 
     const right = el('span', { className: 'file-right' }, [
-      el('span', { className: 'file-status', text: reviewNoteCount > 0 ? 'R' : 'C' }),
+      el('span', { className: 'file-status', text: reviewNoteCount > 0 ? 'R' : 'S' }),
     ]);
 
     li.appendChild(el('span', { className: 'tree-row-content' }, [left, right]));

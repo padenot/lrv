@@ -180,6 +180,8 @@ export interface AppContext {
   updateDecorations(): void;
   renderReviewNotes(): void;
   showCommentDialog(file: string, fileLine: CommentLine, monacoLine: number, side: Side): void;
+  showContextPeek(): void;
+  showCommitSummaryDialog(): void;
   initFileHunks(file: DiffFile): void;
   isAddedFile(file: DiffFile): boolean;
   fetchFilePair(filePath: string): Promise<FilePair>;

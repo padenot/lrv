@@ -268,7 +268,7 @@ export class StackedViewMethods {
         lineHoverHighlight: 'both',
         hunkSeparators: 'line-info-basic',
         collapsedContextThreshold: 1,
-        expansionLineCount: 40,
+        expansionLineCount: 20,
         stickyHeaders: true,
         enableLineSelection: true,
         renderHeaderMetadata: (fileDiff) =>

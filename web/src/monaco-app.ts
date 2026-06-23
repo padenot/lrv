@@ -606,6 +606,14 @@ export class MonacoApp {
       this.toggleStackedView();
     });
 
+    $('#peek-context-btn')?.addEventListener('click', () => {
+      this.showContextPeek();
+    });
+
+    $('#summary-comment-btn')?.addEventListener('click', () => {
+      this.showCommitSummaryDialog();
+    });
+
     // Stats
     const statsEl = $('#stats');
     if (statsEl) {

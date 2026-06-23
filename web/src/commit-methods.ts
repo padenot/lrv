@@ -17,6 +17,70 @@ export class CommitMethods {
   declare renderFileList: () => void;
   declare buildReviewNoteNode: (note: ReviewNote) => HTMLElement;
 
+  showCommitSummaryDialog() {
+    const modKey = MOD_KEY_LABEL;
+    const footerContent = [
+      el('button', { className: 'btn-secondary cancel-btn', text: 'Cancel' }),
+      el('button', { className: 'btn-primary save-btn', text: 'Add Summary Comment' }),
+    ];
+
+    const { modal, body, close } = openModal({
+      title: 'Add Review Summary',
+      titleId: 'commit-summary-dialog',
+      footerContent,
+      onKeydown: (e) => {
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+          e.preventDefault();
+          save();
+        }
+      },
+    });
+
+    modal.style.maxWidth = '600px';
+    body.style.padding = '20px';
+
+    const explainer = el('div', {
+      className: 'commit-summary-help',
+      text: 'Use this for high-level feedback that is not tied to a specific file or line.',
+    });
+    const ta = el('textarea', {
+      className: 'comment-textarea',
+      attrs: {
+        placeholder: `Add summary comment… (${modKey}+Enter to save)`,
+        autofocus: true,
+      },
+    });
+    body.append(explainer, ta);
+
+    const autoResize = () => {
+      ta.style.height = 'auto';
+      ta.style.height = `${ta.scrollHeight}px`;
+    };
+    ta.addEventListener('input', autoResize);
+
+    const save = () => {
+      const bodyText = ta.value.trim();
+      if (!bodyText) {
+        ta.focus();
+        return;
+      }
+      this.commentManager.addComment({
+        file: '(commit)',
+        line: 1,
+        side: 'new',
+        body: bodyText,
+      });
+      close();
+    };
+
+    modal.querySelector<HTMLButtonElement>('.cancel-btn')!.onclick = close;
+    modal.querySelector<HTMLButtonElement>('.save-btn')!.onclick = save;
+    setTimeout(() => {
+      ta.focus();
+      autoResize();
+    }, 0);
+  }
+
   showCommitMessagePopover(anchorEl: HTMLElement, message: string, rev: string) {
     // Toggle if already visible
     if (this._commitPopoverEl) {
@@ -145,71 +209,86 @@ export class CommitMethods {
     clearEl(viewEl);
     viewEl.style.display = '';
 
-    const meta = el('div');
-    meta.style.color = 'var(--text-secondary)';
-    meta.style.fontSize = '11px';
-    meta.style.marginBottom = '12px';
     const rev = this.diff?.commit_hash ?? '';
-    meta.textContent = rev;
-    viewEl.appendChild(meta);
+    if (rev) {
+      const meta = el('div');
+      meta.style.color = 'var(--text-secondary)';
+      meta.style.fontSize = '11px';
+      meta.style.marginBottom = '12px';
+      meta.textContent = rev;
+      viewEl.appendChild(meta);
+    }
+
+    const summaryBox = el('div', { className: 'commit-summary-box' }, [
+      el('div', {
+        className: 'commit-summary-copy',
+        text: 'High-level review comments live here and are submitted as commit-level feedback.',
+      }),
+      el('button', { className: 'btn-primary', text: 'Add Summary Comment' }),
+    ]);
+    summaryBox.querySelector<HTMLButtonElement>('button')!.onclick = () => {
+      this.showCommitSummaryDialog();
+    };
+    viewEl.appendChild(summaryBox);
 
     const msgText = this.diff?.commit_message ?? '(no message)';
     const msgLines = msgText.split('\n');
+    if (this.diff?.commit_message) {
+      const msgContainer = el('div');
+      msgContainer.style.border = '1px solid var(--border-color)';
+      msgContainer.style.borderRadius = '4px';
+      msgContainer.style.background = 'var(--bg-elevated)';
+      msgContainer.style.fontFamily = 'var(--font-mono)';
+      msgContainer.style.fontSize = '13px';
 
-    const msgContainer = el('div');
-    msgContainer.style.border = '1px solid var(--border-color)';
-    msgContainer.style.borderRadius = '4px';
-    msgContainer.style.background = 'var(--bg-elevated)';
-    msgContainer.style.fontFamily = 'var(--font-mono)';
-    msgContainer.style.fontSize = '13px';
+      msgLines.forEach((lineText, lineIndex) => {
+        const lineNum = lineIndex + 1;
+        const lineDiv = el('div');
+        lineDiv.style.display = 'flex';
+        lineDiv.style.lineHeight = '1.6';
+        lineDiv.style.cursor = 'pointer';
+        lineDiv.style.padding = '2px 0';
+        lineDiv.onmouseover = () => {
+          lineDiv.style.background = 'var(--bg-secondary)';
+        };
+        lineDiv.onmouseout = () => {
+          lineDiv.style.background = '';
+        };
 
-    msgLines.forEach((lineText, lineIndex) => {
-      const lineNum = lineIndex + 1;
-      const lineDiv = el('div');
-      lineDiv.style.display = 'flex';
-      lineDiv.style.lineHeight = '1.6';
-      lineDiv.style.cursor = 'pointer';
-      lineDiv.style.padding = '2px 0';
-      lineDiv.onmouseover = () => {
-        lineDiv.style.background = 'var(--bg-secondary)';
-      };
-      lineDiv.onmouseout = () => {
-        lineDiv.style.background = '';
-      };
+        const lineNumSpan = el('span');
+        lineNumSpan.style.display = 'inline-block';
+        lineNumSpan.style.width = '40px';
+        lineNumSpan.style.textAlign = 'right';
+        lineNumSpan.style.paddingRight = '12px';
+        lineNumSpan.style.color = 'var(--text-secondary)';
+        lineNumSpan.style.userSelect = 'none';
+        lineNumSpan.style.flexShrink = '0';
+        lineNumSpan.textContent = String(lineNum);
 
-      const lineNumSpan = el('span');
-      lineNumSpan.style.display = 'inline-block';
-      lineNumSpan.style.width = '40px';
-      lineNumSpan.style.textAlign = 'right';
-      lineNumSpan.style.paddingRight = '12px';
-      lineNumSpan.style.color = 'var(--text-secondary)';
-      lineNumSpan.style.userSelect = 'none';
-      lineNumSpan.style.flexShrink = '0';
-      lineNumSpan.textContent = String(lineNum);
+        const lineContent = el('span');
+        lineContent.style.paddingRight = '12px';
+        lineContent.style.whiteSpace = 'pre-wrap';
+        lineContent.style.wordBreak = 'break-word';
+        appendLinkifiedText(lineContent, lineText || ' ');
+        lineContent.addEventListener('click', (event) => {
+          const target = event.target as Element | null;
+          if (target?.closest('a')) {
+            event.stopPropagation();
+          }
+        });
 
-      const lineContent = el('span');
-      lineContent.style.paddingRight = '12px';
-      lineContent.style.whiteSpace = 'pre-wrap';
-      lineContent.style.wordBreak = 'break-word';
-      appendLinkifiedText(lineContent, lineText || ' ');
-      lineContent.addEventListener('click', (event) => {
-        const target = event.target as Element | null;
-        if (target?.closest('a')) {
-          event.stopPropagation();
-        }
+        lineDiv.appendChild(lineNumSpan);
+        lineDiv.appendChild(lineContent);
+
+        lineDiv.onclick = () => {
+          this.showCommitLineCommentDialog(lineNum);
+        };
+
+        msgContainer.appendChild(lineDiv);
       });
 
-      lineDiv.appendChild(lineNumSpan);
-      lineDiv.appendChild(lineContent);
-
-      lineDiv.onclick = () => {
-        this.showCommitLineCommentDialog(lineNum);
-      };
-
-      msgContainer.appendChild(lineDiv);
-    });
-
-    viewEl.appendChild(msgContainer);
+      viewEl.appendChild(msgContainer);
+    }
 
     const reviewNotes = this.reviewNoteManager.getNotesForFile('(commit)');
     if (reviewNotes.length > 0) {
@@ -240,7 +319,9 @@ export class CommitMethods {
       empty.style.color = 'var(--text-secondary)';
       empty.style.fontSize = '12px';
       empty.style.padding = '8px 0';
-      empty.textContent = 'No comments yet. Click a line in the message above to add one.';
+      empty.textContent = this.diff?.commit_message
+        ? 'No comments yet. Add a summary comment above or click a commit-message line.'
+        : 'No summary comments yet.';
       list.appendChild(empty);
     } else {
       comments.forEach((c) => {
@@ -257,7 +338,10 @@ export class CommitMethods {
         const lineLabel = el('div');
         lineLabel.style.fontSize = '11px';
         lineLabel.style.color = 'var(--text-secondary)';
-        lineLabel.textContent = `Line ${commentLineLabel(c)}`;
+        lineLabel.textContent =
+          !this.diff?.commit_message && commentStartLine(c) === 1
+            ? 'Summary'
+            : `Line ${commentLineLabel(c)}`;
 
         const bodyRow = el('div');
         bodyRow.style.display = 'flex';
