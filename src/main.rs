@@ -80,12 +80,13 @@ fn get_network_interfaces() -> Vec<String> {
             if let Ok(text) = String::from_utf8(output.stdout) {
                 let mut current_ip = None;
                 for line in text.lines() {
-                    if line.starts_with('\t') || line.starts_with(' ') {
-                        if line.contains("inet ") && !line.contains("inet6") {
-                            if let Some(ip) = line.split_whitespace().nth(1) {
-                                if ip != "127.0.0.1" {
-                                    current_ip = Some(ip.to_string());
-                                }
+                    if (line.starts_with('\t') || line.starts_with(' '))
+                        && line.contains("inet ")
+                        && !line.contains("inet6")
+                    {
+                        if let Some(ip) = line.split_whitespace().nth(1) {
+                            if ip != "127.0.0.1" {
+                                current_ip = Some(ip.to_string());
                             }
                         }
                     }
