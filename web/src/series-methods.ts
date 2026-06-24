@@ -51,7 +51,12 @@ export class SeriesMethods {
 
     commits.forEach((commit) => {
       const isActive = commit.idx === this.currentCommitIdx;
-      const row = el('div', { className: `series-commit${isActive ? ' active' : ''}` });
+      const hasComments = this.commentManager
+        .getComments()
+        .some((c) => c.commit_idx === commit.idx);
+      const row = el('div', {
+        className: `series-commit${isActive ? ' active' : ''}${hasComments ? ' has-comments' : ''}`,
+      });
 
       const num = el('span', { className: 'series-commit-num', text: String(commit.idx + 1) });
 

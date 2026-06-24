@@ -238,7 +238,7 @@ export class FileListMethods {
         const comments =
           this.commentManager.getCommentsForFile(file.path).length +
           this.reviewNoteManager.getNotesForFile(file.path).length;
-        const commentText = comments > 0 ? ` ${comments}` : '';
+        const commentText = comments > 0 ? ` ● ${comments}` : '';
         return {
           text: `+${added} -${deleted} ${file.status[0]?.toUpperCase() ?? '?'}${commentText}`,
           title: `${file.path}: +${added} -${deleted}${comments > 0 ? `, ${comments} comments` : ''}`,

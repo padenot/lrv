@@ -693,10 +693,10 @@ body {
   min-width: 16px;
   padding: 2px 6px;
   border-radius: 999px;
-  background: var(--bg-elevated);
-  color: var(--text-primary);
-  border: 1px solid var(--border-color);
+  background: var(--accent-color);
+  color: #fff;
   font-size: 10px;
+  font-weight: 700;
   line-height: 1;
   text-align: center;
 }
@@ -2056,6 +2056,11 @@ body {
   border-left-width: 4px;
   background: var(--bg-elevated);
   font-weight: 600;
+}
+
+.series-commit.has-comments {
+  border-left-color: var(--accent-color, #f97316);
+  border-left-width: 3px;
 }
 
 .series-commit-num {

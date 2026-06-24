@@ -10589,7 +10589,7 @@ var FileListMethods = class {
 				if (!file) return null;
 				const { added, deleted } = this.computeFileDelta(file);
 				const comments = this.commentManager.getCommentsForFile(file.path).length + this.reviewNoteManager.getNotesForFile(file.path).length;
-				const commentText = comments > 0 ? ` ${comments}` : "";
+				const commentText = comments > 0 ? ` ● ${comments}` : "";
 				return {
 					text: `+${added} -${deleted} ${file.status[0]?.toUpperCase() ?? "?"}${commentText}`,
 					title: `${file.path}: +${added} -${deleted}${comments > 0 ? `, ${comments} comments` : ""}`
@@ -12866,7 +12866,9 @@ var SeriesMethods = class {
 		const nav = el("div", { className: "series-nav" });
 		const mixedAuthors = new Set(commits.map((c) => c.commit_author).filter(Boolean)).size > 1;
 		commits.forEach((commit) => {
-			const row = el("div", { className: `series-commit${commit.idx === this.currentCommitIdx ? " active" : ""}` });
+			const isActive = commit.idx === this.currentCommitIdx;
+			const hasComments = this.commentManager.getComments().some((c) => c.commit_idx === commit.idx);
+			const row = el("div", { className: `series-commit${isActive ? " active" : ""}${hasComments ? " has-comments" : ""}` });
 			const num = el("span", {
 				className: "series-commit-num",
 				text: String(commit.idx + 1)
