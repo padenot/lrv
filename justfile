@@ -124,6 +124,9 @@ vendor-fonts inter_url="" geist_url="" jetbrains_url="":
 check-offline:
     bash scripts/check-offline.sh
 
+release version:
+    bash scripts/release.sh {{version}}
+
 clean:
     cargo clean
     rm -rf e2e/test-results e2e/playwright-report
