@@ -12867,8 +12867,8 @@ var SeriesMethods = class {
 		const mixedAuthors = new Set(commits.map((c) => c.commit_author).filter(Boolean)).size > 1;
 		commits.forEach((commit) => {
 			const isActive = commit.idx === this.currentCommitIdx;
-			const hasComments = this.commentManager.getComments().some((c) => c.commit_idx === commit.idx);
-			const row = el("div", { className: `series-commit${isActive ? " active" : ""}${hasComments ? " has-comments" : ""}` });
+			const commitCommentCount = this.commentManager.getComments().filter((c) => c.commit_idx === commit.idx).length + this.reviewNoteManager.getNotes().filter((n) => n.commit_idx === commit.idx).length;
+			const row = el("div", { className: `series-commit${isActive ? " active" : ""}${commitCommentCount > 0 ? " has-comments" : ""}` });
 			const num = el("span", {
 				className: "series-commit-num",
 				text: String(commit.idx + 1)
@@ -12881,7 +12881,6 @@ var SeriesMethods = class {
 				text: msg
 			});
 			titleRow.appendChild(title);
-			const commitCommentCount = this.commentManager.getComments().filter((c) => c.commit_idx === commit.idx).length;
 			if (commitCommentCount > 0) titleRow.appendChild(el("span", {
 				className: "series-comment-badge",
 				text: String(commitCommentCount)
