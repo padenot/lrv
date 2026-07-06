@@ -367,11 +367,19 @@ pub async fn prefetch_old_files(state: AppState, commit_idx: usize) {
         ) {
             let mut cache = state.old_caches[commit_idx].lock().await;
             for (path, old_path_opt, oid) in blob_items {
+                // Don't clobber an entry another path (e.g. the synchronous
+                // series precompute) already resolved correctly.
+                if cache.contains_key(&path) {
+                    prefilled.insert(path.clone());
+                    continue;
+                }
                 if let Some(content) = blob_map.get(&oid) {
                     cache.insert(path.clone(), content.clone());
                     prefilled.insert(path.clone());
                     if let Some(op) = old_path_opt {
-                        cache.insert(op.clone(), content.clone());
+                        if !cache.contains_key(&op) {
+                            cache.insert(op.clone(), content.clone());
+                        }
                         prefilled.insert(op);
                     }
                 }
