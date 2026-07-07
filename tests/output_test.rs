@@ -17,7 +17,8 @@ fn test_text_output_single_and_range_lines() {
         },
     ];
 
-    let text = lrv::output::format_output(comments, &lrv::output::OutputFormat::Text, &[], false);
+    let text =
+        lrv::output::format_output(comments, &lrv::output::OutputFormat::Text, &[], false, None);
     assert!(text.contains("a.rs:3 [new]"));
     assert!(text.contains("b.rs:10-12 [old]"));
 }
@@ -41,7 +42,8 @@ fn test_json_output_line_shape() {
         },
     ];
 
-    let json = lrv::output::format_output(comments, &lrv::output::OutputFormat::Json, &[], false);
+    let json =
+        lrv::output::format_output(comments, &lrv::output::OutputFormat::Json, &[], false, None);
     let value: serde_json::Value = serde_json::from_str(&json).expect("valid json");
     let arr = value["comments"].as_array().expect("comments array");
     assert_eq!(arr[0]["line"], serde_json::json!(7));
@@ -98,7 +100,13 @@ fn test_series_json_output_nested_by_commit() {
         },
     ];
 
-    let json = lrv::output::format_output(comments, &lrv::output::OutputFormat::Json, &diffs, true);
+    let json = lrv::output::format_output(
+        comments,
+        &lrv::output::OutputFormat::Json,
+        &diffs,
+        true,
+        None,
+    );
     let v: serde_json::Value = serde_json::from_str(&json).expect("valid json");
 
     // Top-level should have commits array, not comments
@@ -120,4 +128,60 @@ fn test_series_json_output_nested_by_commit() {
     assert_eq!(commits[1]["idx"], 1);
     let c1 = commits[1]["comments"].as_array().unwrap();
     assert_eq!(c1.len(), 1);
+}
+
+#[test]
+fn test_overall_comment_is_top_level_not_attached_to_a_commit() {
+    use lrv::types::{DiffResponse, DiffStats};
+
+    let diffs = vec![
+        DiffResponse {
+            files: vec![],
+            stats: DiffStats {
+                files_changed: 1,
+                additions: 1,
+                deletions: 0,
+            },
+            commit_hash: Some("abc123".to_string()),
+            commit_author: None,
+            commit_date: None,
+            commit_message: Some("First commit".to_string()),
+            jj_change_id: None,
+        },
+        DiffResponse {
+            files: vec![],
+            stats: DiffStats {
+                files_changed: 1,
+                additions: 1,
+                deletions: 0,
+            },
+            commit_hash: Some("def456".to_string()),
+            commit_author: None,
+            commit_date: None,
+            commit_message: Some("Second commit".to_string()),
+            jj_change_id: None,
+        },
+    ];
+
+    let json = lrv::output::format_output(
+        vec![],
+        &lrv::output::OutputFormat::Json,
+        &diffs,
+        true,
+        Some("Looks good overall".to_string()),
+    );
+    let v: serde_json::Value = serde_json::from_str(&json).expect("valid json");
+
+    assert_eq!(v["overall_comment"], "Looks good overall");
+    let commits = v["commits"].as_array().unwrap();
+    assert!(commits[0]["comments"].as_array().unwrap().is_empty());
+    assert!(commits[1]["comments"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn test_no_overall_comment_omits_field() {
+    let json =
+        lrv::output::format_output(vec![], &lrv::output::OutputFormat::Json, &[], false, None);
+    let v: serde_json::Value = serde_json::from_str(&json).expect("valid json");
+    assert!(v.get("overall_comment").is_none());
 }

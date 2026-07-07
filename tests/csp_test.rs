@@ -32,6 +32,7 @@ async fn test_csp_header_present() {
     let state = lrv::server::AppState {
         diffs: std::sync::Arc::new(vec![diff_data]),
         comments: std::sync::Arc::new(tokio::sync::Mutex::new(vec![])),
+        overall_comment: std::sync::Arc::new(tokio::sync::Mutex::new(None)),
         review_notes: std::sync::Arc::new(tokio::sync::Mutex::new(vec![])),
         shutdown_tx: std::sync::Arc::new(tokio::sync::Mutex::new(Some(shutdown_tx))),
         config: std::sync::Arc::new(tokio::sync::Mutex::new(config)),
@@ -88,6 +89,7 @@ async fn test_csp_on_assets_and_api() {
     let state = lrv::server::AppState {
         diffs: std::sync::Arc::new(vec![diff_data]),
         comments: std::sync::Arc::new(tokio::sync::Mutex::new(vec![])),
+        overall_comment: std::sync::Arc::new(tokio::sync::Mutex::new(None)),
         review_notes: std::sync::Arc::new(tokio::sync::Mutex::new(vec![])),
         shutdown_tx: std::sync::Arc::new(tokio::sync::Mutex::new(Some(shutdown_tx))),
         config: std::sync::Arc::new(tokio::sync::Mutex::new(config)),

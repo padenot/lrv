@@ -69,6 +69,7 @@ fn make_jj_state(
     lrv::server::AppState {
         diffs: Arc::new(vec![diff_data]),
         comments: Arc::new(tokio::sync::Mutex::new(vec![])),
+        overall_comment: Arc::new(tokio::sync::Mutex::new(None)),
         review_notes: Arc::new(tokio::sync::Mutex::new(vec![])),
         shutdown_tx: Arc::new(tokio::sync::Mutex::new(Some(shutdown_tx))),
         config: Arc::new(tokio::sync::Mutex::new(lrv::config::UserConfig::default())),

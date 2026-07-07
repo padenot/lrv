@@ -365,25 +365,7 @@ export class DialogMethods {
 
   async showSubmitConfirmation() {
     const comments = this.commentManager.getComments();
-    const overallDraft = this.overallReviewComment.trim();
     const submissionComments = [...comments];
-    if (
-      overallDraft &&
-      !submissionComments.some(
-        (comment) =>
-          comment.file === '(commit)' &&
-          comment.side === 'new' &&
-          comment.line === 1 &&
-          comment.body === overallDraft,
-      )
-    ) {
-      submissionComments.push({
-        file: '(commit)',
-        line: 1,
-        side: 'new',
-        body: overallDraft,
-      });
-    }
     let submit: () => void | Promise<void> = () => {};
 
     const footerContent = [
@@ -488,9 +470,9 @@ export class DialogMethods {
 
       const isCommitComment = comment.file === '(commit)';
       const locationText = isCommitComment
-        ? 'Review summary'
+        ? `Commit message line ${commentLineLabel(comment)}`
         : `${comment.file}:${commentLineLabel(comment)}`;
-      const sideText = isCommitComment ? ' (global)' : ` (${comment.side})`;
+      const sideText = isCommitComment ? '' : ` (${comment.side})`;
       const previewHeader = el('div', { className: 'comment-preview-header' }, [
         el('span', { className: 'comment-preview-location', text: locationText }),
         el('span', { className: 'comment-preview-side', text: sideText }),
@@ -534,25 +516,6 @@ export class DialogMethods {
         return;
       }
       this.overallReviewComment = summaryInput.value.trim();
-      const finalComments = [...comments];
-      const finalOverall = this.overallReviewComment;
-      if (
-        finalOverall &&
-        !finalComments.some(
-          (comment) =>
-            comment.file === '(commit)' &&
-            comment.side === 'new' &&
-            comment.line === 1 &&
-            comment.body === finalOverall,
-        )
-      ) {
-        finalComments.push({
-          file: '(commit)',
-          line: 1,
-          side: 'new',
-          body: finalOverall,
-        });
-      }
       submitBtn.disabled = true;
       submitBtn.textContent = 'Submitting...';
 
@@ -560,7 +523,10 @@ export class DialogMethods {
         const resp = await fetch('/api/complete', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ comments: finalComments }),
+          body: JSON.stringify({
+            comments,
+            overall_comment: this.overallReviewComment || undefined,
+          }),
         });
         if (!resp.ok) {
           throw new Error(`HTTP ${resp.status}`);

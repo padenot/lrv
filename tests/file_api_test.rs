@@ -47,6 +47,7 @@ fn make_state_with_root(root: &str) -> lrv::server::AppState {
     lrv::server::AppState {
         diffs: Arc::new(vec![diff_data]),
         comments: Arc::new(Mutex::new(vec![])),
+        overall_comment: Arc::new(Mutex::new(None)),
         review_notes: Arc::new(Mutex::new(vec![])),
         shutdown_tx: Arc::new(Mutex::new(Some(shutdown_tx))),
         config: Arc::new(Mutex::new(config)),

@@ -348,3 +348,258 @@ test.describe('Series: first commit has no file changes', () => {
     await expect(commits.first()).toHaveClass(/active/);
   });
 });
+
+test.describe('Series: stacked-mode comments stay scoped to their own commit', () => {
+  test.describe.configure({ mode: 'serial' });
+
+  // Own isolated server state — does not touch module-level serverProcess/testRepoPath
+  let repoDir: string | null = null;
+  let proc: import('child_process').ChildProcess | null = null;
+  let localUrl: string | null = null;
+
+  test.beforeAll(async () => {
+    const suffix = `${Date.now()}-${process.pid}`;
+    repoDir = path.join(os.tmpdir(), `lrv-stacked-scope-${suffix}`);
+    await execAsync(`
+      set -e
+      rm -rf "${repoDir}"
+      mkdir -p "${repoDir}"
+      cd "${repoDir}"
+      git init
+      git config user.name "Test User"
+      git config user.email "test@example.com"
+      printf 'line1\\nline2\\nline3\\nline4\\nline5\\n' > shared.txt
+      git add shared.txt && git commit -m "Base"
+      printf 'line1\\nline2 modified once\\nline3\\nline4\\nline5\\n' > shared.txt
+      git add shared.txt && git commit -m "First patch touches line2"
+      printf 'line1\\nline2 modified twice\\nline3\\nline4\\nline5\\n' > shared.txt
+      git add shared.txt && git commit -m "Second patch touches line2 again"
+    `);
+
+    const cargoPath = process.env.LRV_BIN || path.resolve(__dirname, '../../target/debug/lrv');
+    const cmd = `cd "${repoDir}" && "${cargoPath}" --series "HEAD~2..HEAD" --port 0 --no-open`;
+    await new Promise<void>((resolve, reject) => {
+      proc = spawn('bash', ['-c', cmd], {
+        stdio: ['inherit', 'pipe', 'pipe'],
+        env: {
+          ...process.env,
+          XDG_CONFIG_HOME: path.join(repoDir!, '.config'),
+        },
+      });
+      let settled = false;
+      let output = '';
+      const startupTimer = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          reject(new Error('startup timeout'));
+        }
+      }, 15000);
+      const check = (buf: Buffer) => {
+        const text = buf.toString();
+        output += text;
+        const m = output.match(/http:\/\/[^\s]+:\d+/);
+        if (m && !localUrl && !settled) {
+          localUrl = m[0];
+          settled = true;
+          clearTimeout(startupTimer);
+          setTimeout(resolve, 500);
+        }
+      };
+      proc!.stdout?.on('data', check);
+      proc!.stderr?.on('data', check);
+      proc!.on('error', (error) => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(startupTimer);
+          reject(error);
+        }
+      });
+    });
+  });
+
+  test.afterAll(async () => {
+    if (proc?.pid) {
+      try {
+        process.kill(-proc.pid, 'SIGTERM');
+      } catch {}
+    }
+    await new Promise((r) => setTimeout(r, 1500));
+    if (repoDir) {
+      await execAsync(`rm -rf "${repoDir}"`);
+      repoDir = null;
+    }
+    proc = null;
+    localUrl = null;
+  });
+
+  test('a comment on one commit does not leak onto another commit touching the same file/line', async ({
+    page,
+  }) => {
+    await page.goto((localUrl ?? 'http://localhost:9999') + '/');
+    await page.waitForFunction(() => (window as any).require !== undefined, { timeout: 10000 });
+    await page.locator('#commit-strip').waitFor({ state: 'visible', timeout: 10000 });
+
+    // Both series commits touch shared.txt at the same line number.
+    await page.locator('#toggle-stacked').click();
+    await expect(page.locator('#toggle-stacked')).toHaveText('Mode: Stacked');
+    await page.locator('.stacked-code-view diffs-container').first().waitFor({ timeout: 10000 });
+
+    const commits = page.locator('#commit-strip .series-commit');
+    await expect(commits).toHaveCount(2, { timeout: 5000 });
+    await expect(commits.first()).toHaveClass(/active/);
+
+    // Add a comment on the first commit's changed line.
+    const lineNumber = page
+      .locator('.stacked-code-view diffs-container [data-interactive-line-numbers]')
+      .first();
+    await lineNumber.waitFor({ state: 'visible', timeout: 10000 });
+    await lineNumber.click({ position: { x: 8, y: 8 } });
+    await expect(page.locator('.stacked-comment-form')).toBeVisible({ timeout: 3000 });
+    await page.locator('.stacked-comment-form .stacked-comment-ta').fill('Only for commit 1');
+    await page.locator('.stacked-comment-form .stacked-comment-save').click();
+    await expect(page.locator('.stacked-comment-box')).toContainText('Only for commit 1');
+
+    // Switch to the second commit, which touches the exact same file/line.
+    await commits.nth(1).click();
+    await expect(commits.nth(1)).toHaveClass(/active/, { timeout: 5000 });
+    await page.locator('.stacked-code-view diffs-container').first().waitFor({ timeout: 10000 });
+
+    // The comment must NOT leak onto the second commit's view of that line.
+    await expect(page.locator('.stacked-comment-box')).toHaveCount(0);
+
+    // Switching back to the first commit must still show the comment.
+    await commits.nth(0).click();
+    await expect(commits.nth(0)).toHaveClass(/active/, { timeout: 5000 });
+    await page.locator('.stacked-code-view diffs-container').first().waitFor({ timeout: 10000 });
+    await expect(page.locator('.stacked-comment-box')).toContainText('Only for commit 1');
+  });
+});
+
+test.describe('Series: overall feedback is series-wide, not attached to a single commit', () => {
+  test.describe.configure({ mode: 'serial' });
+
+  // Own isolated server state — does not touch module-level serverProcess/testRepoPath
+  let repoDir: string | null = null;
+  let proc: import('child_process').ChildProcess | null = null;
+  let localUrl: string | null = null;
+  let logPath: string | null = null;
+
+  test.beforeAll(async () => {
+    const suffix = `${Date.now()}-${process.pid}`;
+    repoDir = path.join(os.tmpdir(), `lrv-overall-comment-${suffix}`);
+    await makeSeriesRepo(repoDir);
+
+    const cargoPath = process.env.LRV_BIN || path.resolve(__dirname, '../../target/debug/lrv');
+    const cmd = `cd "${repoDir}" && "${cargoPath}" --series "HEAD~2..HEAD" --port 0 --no-open`;
+    const resultsDir = path.resolve(__dirname, '../test-results');
+    try {
+      fs.mkdirSync(resultsDir, { recursive: true });
+    } catch {}
+    logPath = path.join(resultsDir, `series-overall-comment-${Date.now()}.log`);
+
+    await new Promise<void>((resolve, reject) => {
+      proc = spawn('bash', ['-c', cmd], {
+        stdio: ['inherit', 'pipe', 'pipe'],
+        env: {
+          ...process.env,
+          XDG_CONFIG_HOME: path.join(repoDir!, '.config'),
+        },
+      });
+      let settled = false;
+      let output = '';
+      const appendLog = (chunk: string) => {
+        try {
+          if (logPath) {
+            fs.appendFileSync(logPath, chunk);
+          }
+        } catch {}
+      };
+      const startupTimer = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          reject(new Error('startup timeout'));
+        }
+      }, 15000);
+      const check = (buf: Buffer) => {
+        const text = buf.toString();
+        output += text;
+        appendLog(text);
+        const m = output.match(/http:\/\/[^\s]+:\d+/);
+        if (m && !localUrl && !settled) {
+          localUrl = m[0];
+          settled = true;
+          clearTimeout(startupTimer);
+          setTimeout(resolve, 500);
+        }
+      };
+      proc!.stdout?.on('data', check);
+      proc!.stderr?.on('data', check);
+      proc!.on('error', (error) => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(startupTimer);
+          reject(error);
+        }
+      });
+    });
+  });
+
+  test.afterAll(async () => {
+    if (proc?.pid) {
+      try {
+        process.kill(-proc.pid, 'SIGTERM');
+      } catch {}
+    }
+    await new Promise((r) => setTimeout(r, 1500));
+    if (repoDir) {
+      await execAsync(`rm -rf "${repoDir}"`);
+      repoDir = null;
+    }
+    proc = null;
+    localUrl = null;
+  });
+
+  test('submitting overall feedback produces a top-level overall_comment, not a per-commit comment', async ({
+    page,
+  }) => {
+    await page.goto((localUrl ?? 'http://localhost:9999') + '/');
+    await page.waitForFunction(() => (window as any).require !== undefined, { timeout: 10000 });
+    await page.locator('#commit-strip').waitFor({ state: 'visible', timeout: 10000 });
+
+    // Open the commit-message view via the "Review Summary" row and set the
+    // global feedback note (not tied to any single commit).
+    await page.locator('li[data-commit="1"] .summary-row-button').click();
+    await page.locator('.commit-summary-input').waitFor({ state: 'visible', timeout: 5000 });
+    await page.locator('.commit-summary-input').fill('Looks good across the whole series');
+
+    // Submit without adding any per-line comments.
+    await page.locator('#submit-review').click();
+    await expect(page.locator('.submit-summary-input')).toHaveValue(
+      'Looks good across the whole series',
+    );
+    await page.locator('.confirm-submit-btn').click();
+    await expect(page.locator('text=Review Submitted')).toBeVisible({ timeout: 3000 });
+
+    // Wait for the server process (which prints its JSON result to stdout on
+    // shutdown) to exit, then inspect what it actually printed.
+    await new Promise<void>((resolve) => {
+      if (!proc || proc.exitCode !== null) {
+        resolve();
+        return;
+      }
+      proc.once('exit', () => resolve());
+      setTimeout(resolve, 5000);
+    });
+
+    const log = logPath ? fs.readFileSync(logPath, 'utf-8') : '';
+    const jsonStart = log.lastIndexOf('{\n  "status"');
+    expect(jsonStart, `expected JSON output in log:\n${log}`).toBeGreaterThanOrEqual(0);
+    const result = JSON.parse(log.slice(jsonStart));
+
+    expect(result.overall_comment).toBe('Looks good across the whole series');
+    expect(Array.isArray(result.commits)).toBe(true);
+    for (const commit of result.commits) {
+      expect(commit.comments).toEqual([]);
+    }
+  });
+});

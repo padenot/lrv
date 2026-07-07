@@ -687,10 +687,7 @@ export class StackedViewMethods {
 
   private stackedAnnotationsForFile(path: string): DiffLineAnnotation<StackedAnnotation>[] {
     const annotations: DiffLineAnnotation<StackedAnnotation>[] = [];
-    this.commentManager.getComments().forEach((comment, index) => {
-      if (comment.file !== path) {
-        return;
-      }
+    this.commentManager.getCommentsForFileIndexed(path).forEach(({ comment, index }) => {
       annotations.push({
         side: this.toAnnotationSide(comment.side),
         lineNumber: commentEndLine(comment),

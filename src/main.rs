@@ -743,6 +743,7 @@ async fn main() -> Result<()> {
     let state = AppState {
         diffs: Arc::new(diffs),
         comments: Arc::new(Mutex::new(Vec::new())),
+        overall_comment: Arc::new(Mutex::new(None)),
         review_notes: Arc::new(Mutex::new(review_notes)),
         shutdown_tx: Arc::new(Mutex::new(Some(shutdown_tx))),
         config: Arc::new(Mutex::new(user_config)),
@@ -894,7 +895,14 @@ async fn main() -> Result<()> {
 
     // Output comments
     let comments = state.comments.lock().await;
-    let output = output::format_output(comments.clone(), &output_format, &state.diffs, is_series);
+    let overall_comment = state.overall_comment.lock().await.clone();
+    let output = output::format_output(
+        comments.clone(),
+        &output_format,
+        &state.diffs,
+        is_series,
+        overall_comment,
+    );
     println!("{}", output);
 
     Ok(())

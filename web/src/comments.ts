@@ -88,6 +88,16 @@ export class CommentManager {
     );
   }
 
+  getCommentsForFileIndexed(file: string): Array<{ comment: ReviewComment; index: number }> {
+    return this.comments
+      .map((comment, index) => ({ comment, index }))
+      .filter(
+        ({ comment: c }) =>
+          c.file === file &&
+          (this.currentCommitIdx === null || c.commit_idx === this.currentCommitIdx),
+      );
+  }
+
   onChange(listener: () => void): void {
     this.listeners.push(listener);
   }

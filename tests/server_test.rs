@@ -38,6 +38,7 @@ fn test_app_state_construction() {
     let _state = lrv::server::AppState {
         diffs: Arc::new(vec![diff_data]),
         comments: Arc::new(Mutex::new(vec![])),
+        overall_comment: Arc::new(Mutex::new(None)),
         review_notes: Arc::new(Mutex::new(vec![])),
         shutdown_tx: Arc::new(Mutex::new(Some(shutdown_tx))),
         config: Arc::new(Mutex::new(config)),
@@ -86,6 +87,7 @@ fn test_create_router() {
     let state = lrv::server::AppState {
         diffs: Arc::new(vec![diff_data]),
         comments: Arc::new(Mutex::new(vec![])),
+        overall_comment: Arc::new(Mutex::new(None)),
         review_notes: Arc::new(Mutex::new(vec![])),
         shutdown_tx: Arc::new(Mutex::new(Some(shutdown_tx))),
         config: Arc::new(Mutex::new(config)),
@@ -136,6 +138,7 @@ async fn test_review_note_api_round_trip() {
     let state = lrv::server::AppState {
         diffs: Arc::new(vec![diff_data]),
         comments: Arc::new(Mutex::new(vec![])),
+        overall_comment: Arc::new(Mutex::new(None)),
         review_notes: Arc::new(Mutex::new(vec![])),
         shutdown_tx: Arc::new(Mutex::new(Some(shutdown_tx))),
         config: Arc::new(Mutex::new(config)),

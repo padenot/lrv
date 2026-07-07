@@ -121,6 +121,8 @@ pub enum Side {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReviewComplete {
     pub comments: Vec<Comment>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overall_comment: Option<String>,
 }
 
 impl Comment {
@@ -140,6 +142,8 @@ pub struct ReviewOutput {
     pub status: String,
     pub comments: Vec<Comment>,
     pub summary: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overall_comment: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -157,6 +161,8 @@ pub struct SeriesReviewOutput {
     pub status: String,
     pub summary: String,
     pub commits: Vec<CommitReview>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overall_comment: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

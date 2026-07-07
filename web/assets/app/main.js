@@ -518,6 +518,12 @@ var CommentManager = class {
 	getCommentsForFile(file) {
 		return this.comments.filter((c) => c.file === file && (this.currentCommitIdx === null || c.commit_idx === this.currentCommitIdx));
 	}
+	getCommentsForFileIndexed(file) {
+		return this.comments.map((comment, index) => ({
+			comment,
+			index
+		})).filter(({ comment: c }) => c.file === file && (this.currentCommitIdx === null || c.commit_idx === this.currentCommitIdx));
+	}
 	onChange(listener) {
 		this.listeners.push(listener);
 	}
@@ -12638,14 +12644,7 @@ var DialogMethods = class {
 	}
 	async showSubmitConfirmation() {
 		const comments = this.commentManager.getComments();
-		const overallDraft = this.overallReviewComment.trim();
 		const submissionComments = [...comments];
-		if (overallDraft && !submissionComments.some((comment) => comment.file === "(commit)" && comment.side === "new" && comment.line === 1 && comment.body === overallDraft)) submissionComments.push({
-			file: "(commit)",
-			line: 1,
-			side: "new",
-			body: overallDraft
-		});
 		let submit = () => {};
 		const footerContent = [el("button", {
 			className: "btn-secondary cancel-submit-btn",
@@ -12720,8 +12719,8 @@ var DialogMethods = class {
 		submissionComments.forEach((comment) => {
 			const preview = el("div", { className: "comment-preview" });
 			const isCommitComment = comment.file === "(commit)";
-			const locationText = isCommitComment ? "Review summary" : `${comment.file}:${commentLineLabel(comment)}`;
-			const sideText = isCommitComment ? " (global)" : ` (${comment.side})`;
+			const locationText = isCommitComment ? `Commit message line ${commentLineLabel(comment)}` : `${comment.file}:${commentLineLabel(comment)}`;
+			const sideText = isCommitComment ? "" : ` (${comment.side})`;
 			const previewHeader = el("div", { className: "comment-preview-header" }, [el("span", {
 				className: "comment-preview-location",
 				text: locationText
@@ -12759,21 +12758,16 @@ var DialogMethods = class {
 			const submitBtn = footer.querySelector(".confirm-submit-btn");
 			if (!submitBtn) return;
 			this.overallReviewComment = summaryInput.value.trim();
-			const finalComments = [...comments];
-			const finalOverall = this.overallReviewComment;
-			if (finalOverall && !finalComments.some((comment) => comment.file === "(commit)" && comment.side === "new" && comment.line === 1 && comment.body === finalOverall)) finalComments.push({
-				file: "(commit)",
-				line: 1,
-				side: "new",
-				body: finalOverall
-			});
 			submitBtn.disabled = true;
 			submitBtn.textContent = "Submitting...";
 			try {
 				const resp = await fetch("/api/complete", {
 					method: "POST",
 					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify({ comments: finalComments })
+					body: JSON.stringify({
+						comments,
+						overall_comment: this.overallReviewComment || void 0
+					})
 				});
 				if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
 				await this.clearPersistedComments();
@@ -13415,8 +13409,7 @@ var StackedViewMethods = class {
 	}
 	stackedAnnotationsForFile(path) {
 		const annotations = [];
-		this.commentManager.getComments().forEach((comment, index) => {
-			if (comment.file !== path) return;
+		this.commentManager.getCommentsForFileIndexed(path).forEach(({ comment, index }) => {
 			annotations.push({
 				side: this.toAnnotationSide(comment.side),
 				lineNumber: commentEndLine(comment),

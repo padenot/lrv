@@ -48,6 +48,7 @@ struct CommitQuery {
 pub struct AppState {
     pub diffs: Arc<Vec<DiffResponse>>,
     pub comments: Arc<Mutex<Vec<Comment>>>,
+    pub overall_comment: Arc<Mutex<Option<String>>>,
     pub review_notes: Arc<Mutex<Vec<ReviewNote>>>,
     pub shutdown_tx: Arc<Mutex<Option<mpsc::Sender<()>>>>,
     pub config: Arc<Mutex<UserConfig>>,
@@ -1331,6 +1332,8 @@ async fn complete_review(
     }
     let mut comments = state.comments.lock().await;
     *comments = payload.comments;
+    let mut overall_comment = state.overall_comment.lock().await;
+    *overall_comment = payload.overall_comment;
 
     // Trigger shutdown
     if let Some(tx) = state.shutdown_tx.lock().await.take() {

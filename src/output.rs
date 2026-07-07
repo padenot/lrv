@@ -7,22 +7,28 @@ pub fn format_output(
     format: &OutputFormat,
     diffs: &[DiffResponse],
     is_series: bool,
+    overall_comment: Option<String>,
 ) -> String {
     match format {
-        OutputFormat::Json => format_json(&comments, diffs, is_series),
-        OutputFormat::Text => format_text(&comments, diffs, is_series),
+        OutputFormat::Json => format_json(&comments, diffs, is_series, overall_comment),
+        OutputFormat::Text => format_text(&comments, diffs, is_series, overall_comment.as_deref()),
     }
 }
 
-fn format_json(comments: &[Comment], diffs: &[DiffResponse], is_series: bool) -> String {
+fn format_json(
+    comments: &[Comment],
+    diffs: &[DiffResponse],
+    is_series: bool,
+    overall_comment: Option<String>,
+) -> String {
     if is_series {
-        format_json_series(comments, diffs)
+        format_json_series(comments, diffs, overall_comment)
     } else {
-        format_json_single(comments)
+        format_json_single(comments, overall_comment)
     }
 }
 
-fn format_json_single(comments: &[Comment]) -> String {
+fn format_json_single(comments: &[Comment], overall_comment: Option<String>) -> String {
     let n = comments.len();
     let f = count_unique_files(comments);
     let summary = format!(
@@ -36,11 +42,16 @@ fn format_json_single(comments: &[Comment]) -> String {
         status: "completed".to_string(),
         comments: comments.to_vec(),
         summary,
+        overall_comment,
     };
     serde_json::to_string_pretty(&output).unwrap_or_else(|_| "{}".to_string())
 }
 
-fn format_json_series(comments: &[Comment], diffs: &[DiffResponse]) -> String {
+fn format_json_series(
+    comments: &[Comment],
+    diffs: &[DiffResponse],
+    overall_comment: Option<String>,
+) -> String {
     let mut by_commit: std::collections::BTreeMap<usize, Vec<Comment>> =
         std::collections::BTreeMap::new();
     for comment in comments {
@@ -77,16 +88,26 @@ fn format_json_series(comments: &[Comment], diffs: &[DiffResponse]) -> String {
         status: "completed".to_string(),
         summary,
         commits,
+        overall_comment,
     };
     serde_json::to_string_pretty(&output).unwrap_or_else(|_| "{}".to_string())
 }
 
-fn format_text(comments: &[Comment], diffs: &[DiffResponse], is_series: bool) -> String {
+fn format_text(
+    comments: &[Comment],
+    diffs: &[DiffResponse],
+    is_series: bool,
+    overall_comment: Option<&str>,
+) -> String {
     let mut output = String::new();
     output.push_str(&format!(
         "Review completed with {} comments:\n\n",
         comments.len()
     ));
+
+    if let Some(overall) = overall_comment.filter(|s| !s.trim().is_empty()) {
+        output.push_str(&format!("=== Overall Feedback ===\n\n{}\n\n", overall));
+    }
 
     if is_series && !diffs.is_empty() {
         let mut by_commit: std::collections::BTreeMap<usize, Vec<&Comment>> =

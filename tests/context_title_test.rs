@@ -32,6 +32,7 @@ async fn test_context_includes_title_when_set() {
     let state = lrv::server::AppState {
         diffs: std::sync::Arc::new(vec![diff_data]),
         comments: std::sync::Arc::new(tokio::sync::Mutex::new(vec![])),
+        overall_comment: std::sync::Arc::new(tokio::sync::Mutex::new(None)),
         review_notes: std::sync::Arc::new(tokio::sync::Mutex::new(vec![])),
         shutdown_tx: std::sync::Arc::new(tokio::sync::Mutex::new(Some(shutdown_tx))),
         config: std::sync::Arc::new(tokio::sync::Mutex::new(config)),
@@ -99,6 +100,7 @@ async fn test_context_title_null_when_unset() {
     let state = lrv::server::AppState {
         diffs: std::sync::Arc::new(vec![diff_data]),
         comments: std::sync::Arc::new(tokio::sync::Mutex::new(vec![])),
+        overall_comment: std::sync::Arc::new(tokio::sync::Mutex::new(None)),
         review_notes: std::sync::Arc::new(tokio::sync::Mutex::new(vec![])),
         shutdown_tx: std::sync::Arc::new(tokio::sync::Mutex::new(Some(shutdown_tx))),
         config: std::sync::Arc::new(tokio::sync::Mutex::new(config)),
