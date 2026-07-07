@@ -650,6 +650,11 @@ pub async fn precompute_series_content(
 
             if file.status == FileStatus::Added {
                 current_state.remove(&file.path);
+            } else if let Some(ref op) = file.old_path {
+                // Renamed: earlier commits in the chain reference this file
+                // under its old name, not the name it has after this commit.
+                current_state.remove(&file.path);
+                current_state.insert(op.clone(), old_content);
             } else {
                 current_state.insert(file.path.clone(), old_content);
             }
@@ -1351,4 +1356,86 @@ async fn update_config(
     crate::config::save_config(&new_config).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(StatusCode::OK)
+}
+
+#[cfg(test)]
+mod precompute_tests {
+    use super::precompute_series_content;
+    use crate::types::{DiffLine, DiffResponse, DiffStats, FileDiff, FileStatus, Hunk, LineType};
+
+    fn line(line_type: LineType, content: &str) -> DiffLine {
+        DiffLine {
+            line_type,
+            content: content.to_string(),
+            old_line: None,
+            new_line: None,
+        }
+    }
+
+    fn empty_diff(files: Vec<FileDiff>) -> DiffResponse {
+        DiffResponse {
+            files,
+            stats: DiffStats {
+                additions: 0,
+                deletions: 0,
+                files_changed: 0,
+            },
+            commit_hash: None,
+            commit_author: None,
+            commit_date: None,
+            commit_message: None,
+            jj_change_id: None,
+        }
+    }
+
+    // A file is renamed in the newer of two commits; the older commit
+    // modifies it under its pre-rename name. Reconstructing the older
+    // commit's content must look up the file by its old name, since disk
+    // (and every commit above it) only ever knows the new name.
+    #[tokio::test]
+    async fn rename_across_commits_resolves_old_name() {
+        let dir = std::env::temp_dir().join(format!("lrv-test-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join(".jj")).unwrap();
+        std::fs::write(dir.join("new.txt"), "hello\n").unwrap();
+
+        let older_commit = empty_diff(vec![FileDiff {
+            path: "old.txt".to_string(),
+            old_path: None,
+            status: FileStatus::Modified,
+            hunks: vec![Hunk {
+                header: "@@ -1 +1 @@".to_string(),
+                old_start: 1,
+                new_start: 1,
+                lines: vec![line(LineType::Delete, "hi"), line(LineType::Add, "hello")],
+            }],
+            old_blob: None,
+            new_blob: None,
+            is_binary: false,
+        }]);
+
+        let rename_commit = empty_diff(vec![FileDiff {
+            path: "new.txt".to_string(),
+            old_path: Some("old.txt".to_string()),
+            status: FileStatus::Renamed,
+            hunks: vec![],
+            old_blob: None,
+            new_blob: None,
+            is_binary: false,
+        }]);
+
+        let diffs = vec![older_commit, rename_commit];
+        let (old_maps, new_maps) = precompute_series_content(&diffs, dir.to_str().unwrap()).await;
+
+        assert_eq!(old_maps[0].get("old.txt").map(String::as_str), Some("hi\n"));
+        assert_eq!(
+            new_maps[0].get("old.txt").map(String::as_str),
+            Some("hello\n")
+        );
+        assert_eq!(
+            old_maps[1].get("new.txt").map(String::as_str),
+            Some("hello\n")
+        );
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 }
