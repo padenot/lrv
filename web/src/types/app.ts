@@ -90,6 +90,7 @@ export interface AppContext {
     currentCommitIdx: number | null;
     getComments(): ReviewComment[];
     getCommentsForFile(file: string): ReviewComment[];
+    getCommentsForFileIndexed(file: string): Array<{ comment: ReviewComment; index: number }>;
     addComment(comment: ReviewComment): void;
     setComments(comments: ReviewComment[]): void;
     updateComment(index: number, body: string): void;
