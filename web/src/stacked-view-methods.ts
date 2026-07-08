@@ -178,6 +178,10 @@ export class StackedViewMethods {
     if (this._commitViewEl) {
       this._commitViewEl.style.display = 'none';
     }
+    const stackedContainer = document.getElementById('stacked-container');
+    if (stackedContainer) {
+      stackedContainer.style.display = '';
+    }
     this.renderFileList();
     const anchor = document.getElementById(this.stackedSectionId(file.path));
     if (file.is_binary) {
@@ -214,21 +218,6 @@ export class StackedViewMethods {
     this.stackedRenderToken = (this.stackedRenderToken ?? 0) + 1;
     const renderToken = this.stackedRenderToken;
     clearEl(container);
-
-    const msg = this.diff?.commit_message;
-    const hash = this.diff?.commit_hash;
-    if (msg || hash) {
-      const msgBox = el('div', { className: 'stacked-commit-message' });
-      if (hash) {
-        msgBox.appendChild(
-          el('div', { className: 'stacked-commit-hash', text: hash.slice(0, 12) }),
-        );
-      }
-      if (msg) {
-        msgBox.appendChild(el('pre', { className: 'stacked-commit-msg-body', text: msg }));
-      }
-      container.appendChild(msgBox);
-    }
 
     if (!this.files.length) {
       container.appendChild(el('div', { className: 'stacked-empty', text: 'No files changed.' }));

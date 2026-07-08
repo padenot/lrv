@@ -11783,6 +11783,8 @@ var CommitMethods = class {
 		const container = document.getElementById("editor-container");
 		if (!container) return;
 		container.style.display = "none";
+		const stackedContainer = document.getElementById("stacked-container");
+		if (stackedContainer) stackedContainer.style.display = "none";
 		if (!this._commitViewEl) {
 			const host = document.querySelector(".content");
 			if (!host) return;
@@ -11797,21 +11799,38 @@ var CommitMethods = class {
 		clearEl(viewEl);
 		viewEl.style.display = "";
 		const rev = this.diff?.commit_hash ?? "";
-		if (rev) {
-			const meta = el("div");
-			meta.style.color = "var(--text-secondary)";
-			meta.style.fontSize = "11px";
-			meta.style.marginBottom = "12px";
-			meta.textContent = rev;
-			viewEl.appendChild(meta);
-		}
-		const summaryBox = el("div", { className: "commit-summary-box" }, [el("div", {
-			className: "commit-summary-copy",
-			text: "High-level review comments live here and are submitted as commit-level feedback."
-		}), el("div", {
-			className: "commit-summary-hint",
-			text: "This is the global review note. It also appears in the final submit check."
-		})]);
+		if (rev) viewEl.appendChild(el("div", {
+			className: "commit-view-hash",
+			text: rev
+		}));
+		const card = el("div", { className: "commit-message-card" });
+		card.appendChild(el("div", {
+			className: "commit-message-card-header",
+			text: "Commit Message"
+		}));
+		const msgText = this.diff?.commit_message ?? "";
+		if (msgText) {
+			const msgContainer = el("div", { className: "commit-message-body" });
+			msgText.split("\n").forEach((lineText, lineIndex) => {
+				const lineNum = lineIndex + 1;
+				const lineDiv = el("div", { className: "commit-message-line" });
+				appendLinkifiedText(lineDiv, lineText || " ");
+				lineDiv.addEventListener("click", (event) => {
+					if (event.target?.closest("a")) {
+						event.stopPropagation();
+						return;
+					}
+					this.showCommitLineCommentDialog(lineNum);
+				});
+				msgContainer.appendChild(lineDiv);
+			});
+			card.appendChild(msgContainer);
+		} else card.appendChild(el("div", {
+			className: "commit-message-empty",
+			text: "(no message)"
+		}));
+		viewEl.appendChild(card);
+		const summaryBox = el("div", { className: "commit-summary-box" });
 		const summaryEditor = el("textarea", {
 			className: "commit-summary-input",
 			attrs: { placeholder: "Add overall feedback for the agent…" }
@@ -11829,53 +11848,6 @@ var CommitMethods = class {
 		summaryBox.appendChild(summaryEditor);
 		viewEl.appendChild(summaryBox);
 		setTimeout(autoResizeSummary, 0);
-		const msgLines = (this.diff?.commit_message ?? "(no message)").split("\n");
-		if (this.diff?.commit_message) {
-			const msgContainer = el("div");
-			msgContainer.style.border = "1px solid var(--border-color)";
-			msgContainer.style.borderRadius = "4px";
-			msgContainer.style.background = "var(--bg-elevated)";
-			msgContainer.style.fontFamily = "var(--font-mono)";
-			msgContainer.style.fontSize = "13px";
-			msgLines.forEach((lineText, lineIndex) => {
-				const lineNum = lineIndex + 1;
-				const lineDiv = el("div");
-				lineDiv.style.display = "flex";
-				lineDiv.style.lineHeight = "1.6";
-				lineDiv.style.cursor = "pointer";
-				lineDiv.style.padding = "2px 0";
-				lineDiv.onmouseover = () => {
-					lineDiv.style.background = "var(--bg-secondary)";
-				};
-				lineDiv.onmouseout = () => {
-					lineDiv.style.background = "";
-				};
-				const lineNumSpan = el("span");
-				lineNumSpan.style.display = "inline-block";
-				lineNumSpan.style.width = "40px";
-				lineNumSpan.style.textAlign = "right";
-				lineNumSpan.style.paddingRight = "12px";
-				lineNumSpan.style.color = "var(--text-secondary)";
-				lineNumSpan.style.userSelect = "none";
-				lineNumSpan.style.flexShrink = "0";
-				lineNumSpan.textContent = String(lineNum);
-				const lineContent = el("span");
-				lineContent.style.paddingRight = "12px";
-				lineContent.style.whiteSpace = "pre-wrap";
-				lineContent.style.wordBreak = "break-word";
-				appendLinkifiedText(lineContent, lineText || " ");
-				lineContent.addEventListener("click", (event) => {
-					if (event.target?.closest("a")) event.stopPropagation();
-				});
-				lineDiv.appendChild(lineNumSpan);
-				lineDiv.appendChild(lineContent);
-				lineDiv.onclick = () => {
-					this.showCommitLineCommentDialog(lineNum);
-				};
-				msgContainer.appendChild(lineDiv);
-			});
-			viewEl.appendChild(msgContainer);
-		}
 		const reviewNotes = this.reviewNoteManager.getNotesForFile("(commit)");
 		if (reviewNotes.length > 0) {
 			const reviewNotesHeader = el("h3", { text: "Review Notes" });
@@ -13017,6 +12989,8 @@ var StackedViewMethods = class {
 		this.currentFileIndex = index;
 		this.currentFileIsCommit = false;
 		if (this._commitViewEl) this._commitViewEl.style.display = "none";
+		const stackedContainer = document.getElementById("stacked-container");
+		if (stackedContainer) stackedContainer.style.display = "";
 		this.renderFileList();
 		const anchor = document.getElementById(this.stackedSectionId(file.path));
 		if (file.is_binary) {
@@ -13055,20 +13029,6 @@ var StackedViewMethods = class {
 		this.stackedRenderToken = (this.stackedRenderToken ?? 0) + 1;
 		const renderToken = this.stackedRenderToken;
 		clearEl(container);
-		const msg = this.diff?.commit_message;
-		const hash = this.diff?.commit_hash;
-		if (msg || hash) {
-			const msgBox = el("div", { className: "stacked-commit-message" });
-			if (hash) msgBox.appendChild(el("div", {
-				className: "stacked-commit-hash",
-				text: hash.slice(0, 12)
-			}));
-			if (msg) msgBox.appendChild(el("pre", {
-				className: "stacked-commit-msg-body",
-				text: msg
-			}));
-			container.appendChild(msgBox);
-		}
 		if (!this.files.length) {
 			container.appendChild(el("div", {
 				className: "stacked-empty",
