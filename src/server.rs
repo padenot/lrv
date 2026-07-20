@@ -492,26 +492,25 @@ fn batch_cat_file_blobs(working_dir: &str, oids: &[String]) -> Option<HashMap<St
     Some(result)
 }
 
-// Apply diff hunks in reverse: convert new file content back to old.
-fn apply_diff_reverse(new_content: &str, hunks: &[Hunk]) -> String {
+fn apply_diff_forward(old_content: &str, hunks: &[Hunk]) -> String {
     if hunks.is_empty() {
-        return new_content.to_string();
+        return old_content.to_string();
     }
-    let mut lines: Vec<String> = if new_content.is_empty() {
+    let mut lines: Vec<String> = if old_content.is_empty() {
         Vec::new()
     } else {
-        new_content
+        old_content
             .split_inclusive('\n')
             .map(|s| s.to_string())
             .collect()
     };
     let mut sorted_hunks = hunks.to_vec();
-    sorted_hunks.sort_by_key(|h| std::cmp::Reverse(h.new_start));
+    sorted_hunks.sort_by_key(|h| std::cmp::Reverse(h.old_start));
     for h in &sorted_hunks {
-        let mut pos = if h.new_start == 0 {
+        let mut pos = if h.old_start == 0 {
             0
         } else {
-            h.new_start.saturating_sub(1)
+            h.old_start.saturating_sub(1)
         };
         for dl in &h.lines {
             match dl.line_type {
@@ -519,18 +518,55 @@ fn apply_diff_reverse(new_content: &str, hunks: &[Hunk]) -> String {
                     pos += 1;
                 }
                 LineType::Add => {
+                    lines.insert(pos, dl.content.clone() + "\n");
+                    pos += 1;
+                }
+                LineType::Delete => {
                     if pos < lines.len() {
                         lines.remove(pos);
                     }
-                }
-                LineType::Delete => {
-                    lines.insert(pos, dl.content.clone() + "\n");
-                    pos += 1;
                 }
             }
         }
     }
     lines.into_iter().collect()
+}
+
+fn stack_series_content(
+    diffs: &[DiffResponse],
+    mut current_state: HashMap<String, String>,
+) -> ContentMaps {
+    let mut old_maps = vec![HashMap::new(); diffs.len()];
+    let mut new_maps = vec![HashMap::new(); diffs.len()];
+
+    for (i, diff) in diffs.iter().enumerate() {
+        for file in &diff.files {
+            let old_path = file.old_path.as_ref().unwrap_or(&file.path);
+            let old_content = if file.status == FileStatus::Added {
+                String::new()
+            } else {
+                current_state.get(old_path).cloned().unwrap_or_default()
+            };
+            let new_content = if file.status == FileStatus::Deleted {
+                String::new()
+            } else {
+                apply_diff_forward(&old_content, &file.hunks)
+            };
+
+            old_maps[i].insert(file.path.clone(), old_content.clone());
+            if let Some(path) = &file.old_path {
+                old_maps[i].insert(path.clone(), old_content.clone());
+            }
+            new_maps[i].insert(file.path.clone(), new_content.clone());
+
+            current_state.remove(old_path);
+            if file.status != FileStatus::Deleted {
+                current_state.insert(file.path.clone(), new_content);
+            }
+        }
+    }
+
+    (old_maps, new_maps)
 }
 
 type ContentMaps = (Vec<HashMap<String, String>>, Vec<HashMap<String, String>>);
@@ -596,8 +632,8 @@ fn precompute_via_blobs(diffs: &[DiffResponse], working_dir: &str) -> ContentMap
 
 // Pre-populate per-commit old and new content maps for all files in the series.
 // For git repos: batch-fetches all blob OIDs in one git process.
-// For jj repos: fetches base file content in parallel via `jj file show`,
-// then applies diff hunks forward through the commit chain.
+// For jj repos: fetches the parent state of the bottom commit, then applies
+// each commit's hunks forward.
 pub async fn precompute_series_content(
     diffs: &[DiffResponse],
     working_dir: &str,
@@ -606,63 +642,52 @@ pub async fn precompute_series_content(
         return precompute_via_blobs(diffs, working_dir);
     }
 
-    let n = diffs.len();
+    let Some(bottom_commit) = diffs.first().and_then(|diff| diff.commit_hash.clone()) else {
+        return (
+            vec![HashMap::new(); diffs.len()],
+            vec![HashMap::new(); diffs.len()],
+        );
+    };
+    let base_revision = format!("parents({bottom_commit})");
 
-    // In jj, @ is always the working copy: disk files == new[last_commit].
-    // Read all touched files from disk, then walk commits backwards applying
-    // reverse diffs — no subprocess calls needed.
     let mut all_paths: HashSet<String> = HashSet::new();
     for diff in diffs {
         for file in &diff.files {
             all_paths.insert(file.path.clone());
+            if let Some(path) = &file.old_path {
+                all_paths.insert(path.clone());
+            }
         }
     }
 
     let mut current_state: HashMap<String, String> = HashMap::new();
-    for path in &all_paths {
-        if let Ok(content) = fs::read_to_string(Path::new(working_dir).join(path)) {
-            current_state.insert(path.clone(), content);
+    let semaphore = Arc::new(Semaphore::new(64));
+    let mut tasks = JoinSet::new();
+    for path in all_paths {
+        let semaphore = semaphore.clone();
+        let working_dir = working_dir.to_string();
+        let revision = base_revision.clone();
+        tasks.spawn(async move {
+            let _permit = semaphore.acquire_owned().await.ok()?;
+            let output = tokio::process::Command::new("jj")
+                .current_dir(working_dir)
+                .args(["file", "show", "-r", &revision, "--", &path])
+                .output()
+                .await
+                .ok()?;
+            if !output.status.success() {
+                return None;
+            }
+            Some((path, String::from_utf8(output.stdout).ok()?))
+        });
+    }
+    while let Some(result) = tasks.join_next().await {
+        if let Ok(Some((path, content))) = result {
+            current_state.insert(path, content);
         }
     }
 
-    let mut old_maps: Vec<HashMap<String, String>> = (0..n).map(|_| HashMap::new()).collect();
-    let mut new_maps: Vec<HashMap<String, String>> = (0..n).map(|_| HashMap::new()).collect();
-
-    for i in (0..n).rev() {
-        let diff = &diffs[i];
-        for file in &diff.files {
-            let new_content = if file.status == FileStatus::Deleted {
-                String::new()
-            } else {
-                current_state.get(&file.path).cloned().unwrap_or_default()
-            };
-
-            let old_content = if file.status == FileStatus::Added {
-                String::new()
-            } else {
-                apply_diff_reverse(&new_content, &file.hunks)
-            };
-
-            new_maps[i].insert(file.path.clone(), new_content);
-            old_maps[i].insert(file.path.clone(), old_content.clone());
-            if let Some(ref op) = file.old_path {
-                old_maps[i].insert(op.clone(), old_content.clone());
-            }
-
-            if file.status == FileStatus::Added {
-                current_state.remove(&file.path);
-            } else if let Some(ref op) = file.old_path {
-                // Renamed: earlier commits in the chain reference this file
-                // under its old name, not the name it has after this commit.
-                current_state.remove(&file.path);
-                current_state.insert(op.clone(), old_content);
-            } else {
-                current_state.insert(file.path.clone(), old_content);
-            }
-        }
-    }
-
-    (old_maps, new_maps)
+    stack_series_content(diffs, current_state)
 }
 
 pub fn create_router(state: AppState, enable_trace: bool) -> Router {
@@ -1363,8 +1388,9 @@ async fn update_config(
 
 #[cfg(test)]
 mod precompute_tests {
-    use super::precompute_series_content;
+    use super::stack_series_content;
     use crate::types::{DiffLine, DiffResponse, DiffStats, FileDiff, FileStatus, Hunk, LineType};
+    use std::collections::HashMap;
 
     fn line(line_type: LineType, content: &str) -> DiffLine {
         DiffLine {
@@ -1391,16 +1417,59 @@ mod precompute_tests {
         }
     }
 
-    // A file is renamed in the newer of two commits; the older commit
-    // modifies it under its pre-rename name. Reconstructing the older
-    // commit's content must look up the file by its old name, since disk
-    // (and every commit above it) only ever knows the new name.
-    #[tokio::test]
-    async fn rename_across_commits_resolves_old_name() {
-        let dir = std::env::temp_dir().join(format!("lrv-test-{}", std::process::id()));
-        std::fs::create_dir_all(dir.join(".jj")).unwrap();
-        std::fs::write(dir.join("new.txt"), "hello\n").unwrap();
+    #[test]
+    fn stacks_series_forward_from_bottom_parent() {
+        let bottom = empty_diff(vec![FileDiff {
+            path: "file.txt".to_string(),
+            old_path: None,
+            status: FileStatus::Modified,
+            hunks: vec![Hunk {
+                header: "@@ -1 +1 @@".to_string(),
+                old_start: 1,
+                new_start: 1,
+                lines: vec![line(LineType::Delete, "old"), line(LineType::Add, "middle")],
+            }],
+            old_blob: None,
+            new_blob: None,
+            is_binary: false,
+        }]);
+        let top = empty_diff(vec![FileDiff {
+            path: "file.txt".to_string(),
+            old_path: None,
+            status: FileStatus::Modified,
+            hunks: vec![Hunk {
+                header: "@@ -1 +1 @@".to_string(),
+                old_start: 1,
+                new_start: 1,
+                lines: vec![
+                    line(LineType::Delete, "middle"),
+                    line(LineType::Add, "series"),
+                ],
+            }],
+            old_blob: None,
+            new_blob: None,
+            is_binary: false,
+        }]);
+        let base = HashMap::from([("file.txt".to_string(), "old\n".to_string())]);
 
+        let (old_maps, new_maps) = stack_series_content(&[bottom, top], base);
+
+        assert_eq!(
+            old_maps[0].get("file.txt").map(String::as_str),
+            Some("old\n")
+        );
+        assert_eq!(
+            old_maps[1].get("file.txt").map(String::as_str),
+            Some("middle\n")
+        );
+        assert_eq!(
+            new_maps[1].get("file.txt").map(String::as_str),
+            Some("series\n")
+        );
+    }
+
+    #[test]
+    fn rename_across_commits_carries_content_forward() {
         let older_commit = empty_diff(vec![FileDiff {
             path: "old.txt".to_string(),
             old_path: None,
@@ -1427,7 +1496,8 @@ mod precompute_tests {
         }]);
 
         let diffs = vec![older_commit, rename_commit];
-        let (old_maps, new_maps) = precompute_series_content(&diffs, dir.to_str().unwrap()).await;
+        let base = HashMap::from([("old.txt".to_string(), "hi\n".to_string())]);
+        let (old_maps, new_maps) = stack_series_content(&diffs, base);
 
         assert_eq!(old_maps[0].get("old.txt").map(String::as_str), Some("hi\n"));
         assert_eq!(
@@ -1438,7 +1508,5 @@ mod precompute_tests {
             old_maps[1].get("new.txt").map(String::as_str),
             Some("hello\n")
         );
-
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
