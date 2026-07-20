@@ -251,6 +251,51 @@ test.describe('Series mode E2E', () => {
     const firstMsg = strip.locator('.series-commit-msg').first();
     await expect(firstMsg).not.toBeEmpty({ timeout: 5000 });
   });
+
+  test('commit-message view follows the selected commit', async ({ page }) => {
+    await openApp(page);
+
+    const commitMessageRow = page.locator('li[data-commit="1"] .summary-row-button');
+    await expect(commitMessageRow).toContainText('Commit message');
+    await expect(commitMessageRow).toHaveAccessibleName('Review and comment on commit message');
+    await expect(commitMessageRow.locator('.tree-toggle-spacer')).toHaveCount(0);
+    expect(await commitMessageRow.evaluate((button) => getComputedStyle(button).alignItems)).toBe(
+      'center',
+    );
+    await commitMessageRow.click();
+
+    await expect(page.locator('.commit-message-card')).toContainText('Add beta');
+    await expect(page.locator('.commit-view textarea')).toHaveCount(0);
+    await expect(page.locator('.commit-message-comment-button').first()).toHaveAccessibleName(
+      'Comment on commit message line 1',
+    );
+
+    await page.locator('#commit-strip .series-commit').nth(1).click();
+
+    await expect(page.locator('.commit-view')).toBeVisible();
+    await expect(page.locator('.commit-message-card')).toContainText('Modify alpha');
+    await expect(page.locator('#project-info .commit-message')).toContainText('Modify alpha');
+    await expect(page.locator('li[data-commit="1"]')).toHaveClass(/active/);
+  });
+
+  test('collapsed sidebar hides its contents and can be reopened', async ({ page }) => {
+    await openApp(page);
+
+    const sidebar = page.locator('#sidebar');
+    const toggle = page.locator('#sidebar-collapse-btn');
+    await toggle.click();
+
+    await expect(sidebar).toHaveClass(/collapsed/);
+    await expect(page.locator('#overall-review-summary')).toBeHidden();
+    await expect(toggle).toBeVisible();
+    await expect(toggle).toHaveAccessibleName('Open sidebar');
+
+    await toggle.click();
+
+    await expect(sidebar).not.toHaveClass(/collapsed/);
+    await expect(page.locator('#overall-review-summary')).toBeVisible();
+    await expect(toggle).toHaveAccessibleName('Collapse sidebar');
+  });
 });
 
 test.describe('Series: first commit has no file changes', () => {
@@ -566,17 +611,9 @@ test.describe('Series: overall feedback is series-wide, not attached to a single
     await page.waitForFunction(() => (window as any).require !== undefined, { timeout: 10000 });
     await page.locator('#commit-strip').waitFor({ state: 'visible', timeout: 10000 });
 
-    // Open the commit-message view via the "Review Summary" row and set the
-    // global feedback note (not tied to any single commit).
-    await page.locator('li[data-commit="1"] .summary-row-button').click();
-    await page.locator('.commit-summary-input').waitFor({ state: 'visible', timeout: 5000 });
-    await page.locator('.commit-summary-input').fill('Looks good across the whole series');
-
-    // Submit without adding any per-line comments.
+    // Overall feedback is entered at submission, not in the per-commit message view.
     await page.locator('#submit-review').click();
-    await expect(page.locator('.submit-summary-input')).toHaveValue(
-      'Looks good across the whole series',
-    );
+    await page.locator('.submit-summary-input').fill('Looks good across the whole series');
     await page.locator('.confirm-submit-btn').click();
     await expect(page.locator('text=Review Submitted')).toBeVisible({ timeout: 3000 });
 

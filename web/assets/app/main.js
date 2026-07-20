@@ -10443,7 +10443,13 @@ var FileListMethods = class {
 		const STORAGE_KEY = "lrv-sidebar-collapsed";
 		const setCollapsed = (collapsed) => {
 			sidebar.classList.toggle("collapsed", collapsed);
-			if (collapseBtn) collapseBtn.textContent = collapsed ? "›" : "‹";
+			if (collapseBtn) {
+				collapseBtn.textContent = collapsed ? "›" : "‹";
+				const label = collapsed ? "Open sidebar" : "Collapse sidebar";
+				collapseBtn.setAttribute("aria-label", label);
+				collapseBtn.setAttribute("title", label);
+				collapseBtn.setAttribute("aria-expanded", String(!collapsed));
+			}
 			localStorage.setItem(STORAGE_KEY, String(collapsed));
 		};
 		if (localStorage.getItem(STORAGE_KEY) === "true") setCollapsed(true);
@@ -10631,27 +10637,22 @@ var FileListMethods = class {
 			attrs: { "data-commit": "1" }
 		});
 		const reviewNoteCount = this.reviewNoteManager.getNotesForFile("(commit)").length;
-		const hasOverallDraft = this.overallReviewComment.trim().length > 0;
-		const left = el("span", { className: "file-left" }, [el("span", { className: "tree-toggle-spacer" }), el("span", {
+		const left = el("span", { className: "file-left" }, [el("span", {
 			className: "file-name summary-file-name",
-			text: "Review Summary"
+			text: "Commit message"
 		})]);
-		const commentCount = this.commentManager.getCommentsForFile("(commit)").length + reviewNoteCount + (hasOverallDraft ? 1 : 0);
+		const commentCount = this.commentManager.getCommentsForFile("(commit)").length + reviewNoteCount;
 		if (commentCount > 0) left.appendChild(el("span", {
 			className: "file-comment-badge",
 			text: String(commentCount)
 		}));
-		const right = el("span", { className: "file-right" }, [el("span", {
-			className: "file-status",
-			text: hasOverallDraft ? "G" : reviewNoteCount > 0 ? "R" : "S"
-		})]);
 		const rowButton = el("button", {
 			className: "tree-row-content tree-row-button summary-row-button",
 			attrs: {
 				type: "button",
-				"aria-label": "Open review summary"
+				"aria-label": "Review and comment on commit message"
 			}
-		}, [left, right]);
+		}, [left]);
 		rowButton.onclick = () => {
 			this.loadCommitView();
 		};
@@ -11803,23 +11804,41 @@ var CommitMethods = class {
 			className: "commit-view-hash",
 			text: rev
 		}));
+		const reviewNotes = this.reviewNoteManager.getNotesForFile("(commit)");
+		const comments = this.commentManager.getCommentsForFile("(commit)");
 		const card = el("div", { className: "commit-message-card" });
-		card.appendChild(el("div", {
-			className: "commit-message-card-header",
-			text: "Commit Message"
-		}));
+		card.appendChild(el("div", { className: "commit-message-card-header" }, [el("span", {
+			className: "commit-message-card-title",
+			text: "Commit message"
+		}), el("span", {
+			className: "commit-message-card-hint",
+			text: "Click a line to comment"
+		})]));
 		const msgText = this.diff?.commit_message ?? "";
 		if (msgText) {
 			const msgContainer = el("div", { className: "commit-message-body" });
 			msgText.split("\n").forEach((lineText, lineIndex) => {
 				const lineNum = lineIndex + 1;
 				const lineDiv = el("div", { className: "commit-message-line" });
-				appendLinkifiedText(lineDiv, lineText || " ");
-				lineDiv.addEventListener("click", (event) => {
-					if (event.target?.closest("a")) {
-						event.stopPropagation();
-						return;
+				const lineNumber = el("span", {
+					className: "commit-message-line-number",
+					text: String(lineNum)
+				});
+				const lineContent = el("span", { className: "commit-message-line-text" });
+				appendLinkifiedText(lineContent, lineText || " ");
+				const lineCommentCount = comments.filter((comment) => commentContainsLine(comment, lineNum)).length;
+				const commentButton = el("button", {
+					className: `commit-message-comment-button${lineCommentCount > 0 ? " has-comments" : ""}`,
+					text: lineCommentCount > 0 ? `Comment · ${lineCommentCount}` : "Comment",
+					attrs: {
+						type: "button",
+						"aria-label": `Comment on commit message line ${lineNum}`
 					}
+				});
+				commentButton.onclick = () => this.showCommitLineCommentDialog(lineNum);
+				lineDiv.append(lineNumber, lineContent, commentButton);
+				lineDiv.addEventListener("click", (event) => {
+					if (event.target?.closest("a, button")) return;
 					this.showCommitLineCommentDialog(lineNum);
 				});
 				msgContainer.appendChild(lineDiv);
@@ -11830,25 +11849,6 @@ var CommitMethods = class {
 			text: "(no message)"
 		}));
 		viewEl.appendChild(card);
-		const summaryBox = el("div", { className: "commit-summary-box" });
-		const summaryEditor = el("textarea", {
-			className: "commit-summary-input",
-			attrs: { placeholder: "Add overall feedback for the agent…" }
-		});
-		summaryEditor.value = this.overallReviewComment;
-		const autoResizeSummary = () => {
-			summaryEditor.style.height = "auto";
-			summaryEditor.style.height = `${Math.max(summaryEditor.scrollHeight, 120)}px`;
-		};
-		summaryEditor.addEventListener("input", () => {
-			this.overallReviewComment = summaryEditor.value;
-			this.renderFileList();
-			autoResizeSummary();
-		});
-		summaryBox.appendChild(summaryEditor);
-		viewEl.appendChild(summaryBox);
-		setTimeout(autoResizeSummary, 0);
-		const reviewNotes = this.reviewNoteManager.getNotesForFile("(commit)");
 		if (reviewNotes.length > 0) {
 			const reviewNotesHeader = el("h3", { text: "Review Notes" });
 			reviewNotesHeader.style.marginTop = "24px";
@@ -11868,13 +11868,12 @@ var CommitMethods = class {
 		commentsHeader.style.fontSize = "14px";
 		viewEl.appendChild(commentsHeader);
 		const list = el("div");
-		const comments = this.commentManager.getCommentsForFile("(commit)");
 		if (comments.length === 0) {
 			const empty = el("div");
 			empty.style.color = "var(--text-secondary)";
 			empty.style.fontSize = "12px";
 			empty.style.padding = "8px 0";
-			empty.textContent = this.diff?.commit_message ? "No comments yet. Add a summary comment above or click a commit-message line." : "No summary comments yet.";
+			empty.textContent = this.diff?.commit_message ? "No comments yet. Click a commit-message line to add one." : "No commit-message comments yet.";
 			list.appendChild(empty);
 		} else comments.forEach((c) => {
 			const row = el("div");
@@ -12867,6 +12866,7 @@ var SeriesMethods = class {
 	async loadCommit(idx) {
 		const series = this.seriesInfo;
 		if (!series) return;
+		const showCommitMessage = this.currentFileIsCommit;
 		const clamped = Math.max(0, Math.min(idx, series.commits.length - 1));
 		this.currentCommitIdx = clamped;
 		this.commentManager.currentCommitIdx = clamped;
@@ -12878,11 +12878,13 @@ var SeriesMethods = class {
 		this.fileHunks = {};
 		this.currentHunkIndex = {};
 		this.currentFileIndex = 0;
-		this.currentFileIsCommit = false;
+		this.currentFileIsCommit = showCommitMessage;
 		this._eagerPrefetchStarted = false;
 		this.renderSeriesNav();
 		this.renderFileList();
-		if (this.isStacked) this.renderStackedView();
+		this.renderProjectInfo();
+		if (showCommitMessage) this.loadCommitView();
+		else if (this.isStacked) this.renderStackedView();
 		else if (this.files.length > 0) await this.loadFile(0);
 		else this.loadCommitView();
 		showNavIndicator(`Commit ${clamped + 1}/${series.commits.length}: ${series.commits[clamped]?.commit_message?.split("\n")[0] ?? ""}`);

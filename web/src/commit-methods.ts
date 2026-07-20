@@ -1,5 +1,5 @@
 import { clearEl, el } from './dom';
-import { commentLineLabel, commentStartLine } from './comments';
+import { commentContainsLine, commentLineLabel, commentStartLine } from './comments';
 import { appendLinkifiedText } from './linkify';
 import { openModal } from './modal';
 import { MOD_KEY_LABEL } from './platform';
@@ -215,8 +215,15 @@ export class CommitMethods {
       viewEl.appendChild(el('div', { className: 'commit-view-hash', text: rev }));
     }
 
+    const reviewNotes = this.reviewNoteManager.getNotesForFile('(commit)');
+    const comments = this.commentManager.getCommentsForFile('(commit)');
     const card = el('div', { className: 'commit-message-card' });
-    card.appendChild(el('div', { className: 'commit-message-card-header', text: 'Commit Message' }));
+    card.appendChild(
+      el('div', { className: 'commit-message-card-header' }, [
+        el('span', { className: 'commit-message-card-title', text: 'Commit message' }),
+        el('span', { className: 'commit-message-card-hint', text: 'Click a line to comment' }),
+      ]),
+    );
 
     const msgText = this.diff?.commit_message ?? '';
     if (msgText) {
@@ -224,11 +231,28 @@ export class CommitMethods {
       msgText.split('\n').forEach((lineText, lineIndex) => {
         const lineNum = lineIndex + 1;
         const lineDiv = el('div', { className: 'commit-message-line' });
-        appendLinkifiedText(lineDiv, lineText || ' ');
+        const lineNumber = el('span', {
+          className: 'commit-message-line-number',
+          text: String(lineNum),
+        });
+        const lineContent = el('span', { className: 'commit-message-line-text' });
+        appendLinkifiedText(lineContent, lineText || ' ');
+        const lineCommentCount = comments.filter((comment) =>
+          commentContainsLine(comment, lineNum),
+        ).length;
+        const commentButton = el('button', {
+          className: `commit-message-comment-button${lineCommentCount > 0 ? ' has-comments' : ''}`,
+          text: lineCommentCount > 0 ? `Comment · ${lineCommentCount}` : 'Comment',
+          attrs: {
+            type: 'button',
+            'aria-label': `Comment on commit message line ${lineNum}`,
+          },
+        });
+        commentButton.onclick = () => this.showCommitLineCommentDialog(lineNum);
+        lineDiv.append(lineNumber, lineContent, commentButton);
         lineDiv.addEventListener('click', (event) => {
           const target = event.target as Element | null;
-          if (target?.closest('a')) {
-            event.stopPropagation();
+          if (target?.closest('a, button')) {
             return;
           }
           this.showCommitLineCommentDialog(lineNum);
@@ -241,28 +265,6 @@ export class CommitMethods {
     }
     viewEl.appendChild(card);
 
-    const summaryBox = el('div', { className: 'commit-summary-box' });
-    const summaryEditor = el('textarea', {
-      className: 'commit-summary-input',
-      attrs: {
-        placeholder: 'Add overall feedback for the agent…',
-      },
-    }) as HTMLTextAreaElement;
-    summaryEditor.value = this.overallReviewComment;
-    const autoResizeSummary = () => {
-      summaryEditor.style.height = 'auto';
-      summaryEditor.style.height = `${Math.max(summaryEditor.scrollHeight, 120)}px`;
-    };
-    summaryEditor.addEventListener('input', () => {
-      this.overallReviewComment = summaryEditor.value;
-      this.renderFileList();
-      autoResizeSummary();
-    });
-    summaryBox.appendChild(summaryEditor);
-    viewEl.appendChild(summaryBox);
-    setTimeout(autoResizeSummary, 0);
-
-    const reviewNotes = this.reviewNoteManager.getNotesForFile('(commit)');
     if (reviewNotes.length > 0) {
       const reviewNotesHeader = el('h3', { text: 'Review Notes' });
       reviewNotesHeader.style.marginTop = '24px';
@@ -285,15 +287,14 @@ export class CommitMethods {
     viewEl.appendChild(commentsHeader);
 
     const list = el('div');
-    const comments = this.commentManager.getCommentsForFile('(commit)');
     if (comments.length === 0) {
       const empty = el('div');
       empty.style.color = 'var(--text-secondary)';
       empty.style.fontSize = '12px';
       empty.style.padding = '8px 0';
       empty.textContent = this.diff?.commit_message
-        ? 'No comments yet. Add a summary comment above or click a commit-message line.'
-        : 'No summary comments yet.';
+        ? 'No comments yet. Click a commit-message line to add one.'
+        : 'No commit-message comments yet.';
       list.appendChild(empty);
     } else {
       comments.forEach((c) => {

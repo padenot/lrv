@@ -14,7 +14,6 @@ export class FileListMethods {
   declare isStacked: AppContext['isStacked'];
   declare scrollToFileInStacked: AppContext['scrollToFileInStacked'];
   declare loadFile: AppContext['loadFile'];
-  declare overallReviewComment: AppContext['overallReviewComment'];
   declare currentFileIsCommit: AppContext['currentFileIsCommit'];
   declare loadCommitView: AppContext['loadCommitView'];
 
@@ -34,6 +33,10 @@ export class FileListMethods {
       sidebar.classList.toggle('collapsed', collapsed);
       if (collapseBtn) {
         collapseBtn.textContent = collapsed ? '›' : '‹';
+        const label = collapsed ? 'Open sidebar' : 'Collapse sidebar';
+        collapseBtn.setAttribute('aria-label', label);
+        collapseBtn.setAttribute('title', label);
+        collapseBtn.setAttribute('aria-expanded', String(!collapsed));
       }
       localStorage.setItem(STORAGE_KEY, String(collapsed));
     };
@@ -285,35 +288,24 @@ export class FileListMethods {
     });
 
     const reviewNoteCount = this.reviewNoteManager.getNotesForFile('(commit)').length;
-    const hasOverallDraft = this.overallReviewComment.trim().length > 0;
-    const label = 'Review Summary';
+    const label = 'Commit message';
 
     const left = el('span', { className: 'file-left' }, [
-      el('span', { className: 'tree-toggle-spacer' }),
       el('span', { className: 'file-name summary-file-name', text: label }),
     ]);
     const commentCount =
-      this.commentManager.getCommentsForFile('(commit)').length +
-      reviewNoteCount +
-      (hasOverallDraft ? 1 : 0);
+      this.commentManager.getCommentsForFile('(commit)').length + reviewNoteCount;
     if (commentCount > 0) {
       left.appendChild(el('span', { className: 'file-comment-badge', text: String(commentCount) }));
     }
-
-    const right = el('span', { className: 'file-right' }, [
-      el('span', {
-        className: 'file-status',
-        text: hasOverallDraft ? 'G' : reviewNoteCount > 0 ? 'R' : 'S',
-      }),
-    ]);
 
     const rowButton = el(
       'button',
       {
         className: 'tree-row-content tree-row-button summary-row-button',
-        attrs: { type: 'button', 'aria-label': 'Open review summary' },
+        attrs: { type: 'button', 'aria-label': 'Review and comment on commit message' },
       },
-      [left, right],
+      [left],
     );
     rowButton.onclick = () => {
       this.loadCommitView();

@@ -20,6 +20,7 @@ export class SeriesMethods {
   declare loadFile: (index: number) => Promise<void>;
   declare loadCommitView: () => void;
   declare renderFileList: () => void;
+  declare renderProjectInfo: () => void;
   declare eagerPrefetchAllFiles: () => Promise<void>;
   declare isStacked: boolean;
   declare renderStackedView: () => void;
@@ -105,6 +106,7 @@ export class SeriesMethods {
     if (!series) {
       return;
     }
+    const showCommitMessage = this.currentFileIsCommit;
     const clamped = Math.max(0, Math.min(idx, series.commits.length - 1));
     this.currentCommitIdx = clamped;
     this.commentManager.currentCommitIdx = clamped;
@@ -125,13 +127,16 @@ export class SeriesMethods {
     this.fileHunks = {};
     this.currentHunkIndex = {};
     this.currentFileIndex = 0;
-    this.currentFileIsCommit = false;
+    this.currentFileIsCommit = showCommitMessage;
     this._eagerPrefetchStarted = false;
 
     this.renderSeriesNav();
     this.renderFileList();
+    this.renderProjectInfo();
 
-    if (this.isStacked) {
+    if (showCommitMessage) {
+      this.loadCommitView();
+    } else if (this.isStacked) {
       this.renderStackedView();
     } else if (this.files.length > 0) {
       await this.loadFile(0);
