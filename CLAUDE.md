@@ -43,6 +43,9 @@ Any comment UX change (shortcuts, edit, delete, validation) must go in both.
 - **jj**: `diff.rs` parses `Change ID:` from `jj show --git` for stable draft keys.
 - **Added-file dimming**: `file-added-view` / `stacked-file-added` classes scope green reduction to entirely new files only (not individual added lines). Uses `color-mix()` so it works with any theme.
 - **Series**: commit strip shows per-commit comment counts; mixed-author series shows author names.
+- **jj series content**: fetch touched files at the parent of the bottom commit, then apply each commit's hunks forward; a selected revset need not end at `@`.
+- **Commit-message review**: switching commits preserves the commit-message view; comments there are per-commit, while overall feedback is entered in the submit dialog.
+- **Collapsed sidebar**: hide all sidebar content but keep the collapse button visible as the explicit reopen control.
 
 ## CLI Flags
 
