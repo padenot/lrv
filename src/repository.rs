@@ -3,11 +3,16 @@ use std::process::Command;
 
 /// Find the repository root containing `cwd`.
 ///
-/// Prefer jj because a jj-only repository has no `.git` directory. Git is the
-/// fallback for ordinary Git repositories.
+/// When both jj and Git find a repository, use the one nearest to `cwd`, so a
+/// stray `.jj` in a parent directory cannot shadow a Git repository. Prefer jj
+/// when both report the same root (a colocated repository).
 pub fn root(cwd: &Path) -> Option<PathBuf> {
-    command_root("jj", &["root"], cwd)
-        .or_else(|| command_root("git", &["rev-parse", "--show-toplevel"], cwd))
+    let jj = command_root("jj", &["root"], cwd);
+    let git = command_root("git", &["rev-parse", "--show-toplevel"], cwd);
+    match (jj, git) {
+        (Some(jj), Some(git)) if git != jj && git.starts_with(&jj) => Some(git),
+        (jj, git) => jj.or(git),
+    }
 }
 
 pub fn is_jj_repo(root: impl AsRef<Path>) -> bool {
@@ -32,39 +37,39 @@ fn command_root(program: &str, args: &[&str], cwd: &Path) -> Option<PathBuf> {
 mod tests {
     use super::{is_jj_repo, root};
     use std::fs;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::Mutex;
 
     static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
+    // Tests replace PATH with fake `jj`/`git` scripts, so they must not overlap.
+    static PATH_LOCK: Mutex<()> = Mutex::new(());
+
+    fn test_base() -> PathBuf {
+        let id = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!("lrv-repository-test-{}-{id}", std::process::id()))
+    }
 
     #[cfg(unix)]
-    #[test]
-    fn finds_a_jj_only_repository_from_a_subdirectory() {
+    fn write_fake_root_command(bin: &Path, name: &str, root: &Path) {
         use std::os::unix::fs::PermissionsExt;
 
-        let id = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
-        let base =
-            std::env::temp_dir().join(format!("lrv-repository-test-{}-{id}", std::process::id()));
-        let repo = base.join("repo");
-        let nested = repo.join("src");
-        let bin = base.join("bin");
-        fs::create_dir_all(&nested).unwrap();
-        fs::create_dir_all(&bin).unwrap();
-        fs::create_dir(repo.join(".jj")).unwrap();
-
-        let jj = bin.join("jj");
+        let script = bin.join(name);
         fs::write(
-            &jj,
+            &script,
             format!(
                 "#!/bin/sh\nprintf '%s\\n' '{}'\n",
-                repo.to_string_lossy().replace('\'', "'\\''")
+                root.to_string_lossy().replace('\'', "'\\''")
             ),
         )
         .unwrap();
-        let mut permissions = fs::metadata(&jj).unwrap().permissions();
+        let mut permissions = fs::metadata(&script).unwrap().permissions();
         permissions.set_mode(0o755);
-        fs::set_permissions(&jj, permissions).unwrap();
+        fs::set_permissions(&script, permissions).unwrap();
+    }
 
+    fn with_path_prefix<T>(bin: &Path, f: impl FnOnce() -> T) -> T {
+        let _guard = PATH_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let original_path = std::env::var_os("PATH");
         let path = match &original_path {
             Some(path) => format!("{}:{}", bin.display(), path.to_string_lossy()),
@@ -72,13 +77,75 @@ mod tests {
         };
         std::env::set_var("PATH", path);
 
-        assert_eq!(root(&nested), Some(PathBuf::from(&repo)));
-        assert!(is_jj_repo(&repo));
+        let result = f();
 
         match original_path {
             Some(path) => std::env::set_var("PATH", path),
             None => std::env::remove_var("PATH"),
         }
+        result
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn finds_a_jj_only_repository_from_a_subdirectory() {
+        let base = test_base();
+        let repo = base.join("repo");
+        let nested = repo.join("src");
+        let bin = base.join("bin");
+        fs::create_dir_all(&nested).unwrap();
+        fs::create_dir_all(&bin).unwrap();
+        fs::create_dir(repo.join(".jj")).unwrap();
+        write_fake_root_command(&bin, "jj", &repo);
+
+        with_path_prefix(&bin, || {
+            assert_eq!(root(&nested), Some(PathBuf::from(&repo)));
+        });
+        assert!(is_jj_repo(&repo));
+
+        let _ = fs::remove_dir_all(base);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn prefers_a_git_repository_nested_inside_a_jj_directory() {
+        let base = test_base();
+        let outer = base.join("home");
+        let repo = outer.join("repo");
+        let nested = repo.join("src");
+        let bin = base.join("bin");
+        fs::create_dir_all(&nested).unwrap();
+        fs::create_dir_all(&bin).unwrap();
+        fs::create_dir(outer.join(".jj")).unwrap();
+        write_fake_root_command(&bin, "jj", &outer);
+        write_fake_root_command(&bin, "git", &repo);
+
+        with_path_prefix(&bin, || {
+            assert_eq!(root(&nested), Some(PathBuf::from(&repo)));
+        });
+        assert!(!is_jj_repo(&repo));
+
+        let _ = fs::remove_dir_all(base);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn prefers_jj_in_a_colocated_repository() {
+        let base = test_base();
+        let repo = base.join("repo");
+        let nested = repo.join("src");
+        let bin = base.join("bin");
+        fs::create_dir_all(&nested).unwrap();
+        fs::create_dir_all(&bin).unwrap();
+        fs::create_dir(repo.join(".jj")).unwrap();
+        write_fake_root_command(&bin, "jj", &repo);
+        write_fake_root_command(&bin, "git", &repo);
+
+        with_path_prefix(&bin, || {
+            assert_eq!(root(&nested), Some(PathBuf::from(&repo)));
+        });
+        assert!(is_jj_repo(&repo));
+
         let _ = fs::remove_dir_all(base);
     }
 }
