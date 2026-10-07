@@ -11,14 +11,15 @@ export class FileDataMethods {
   declare fileHunks: AppContext['fileHunks'];
   declare currentHunkIndex: AppContext['currentHunkIndex'];
   declare currentCommitIdx: AppContext['currentCommitIdx'];
+  declare commitLoadGeneration: AppContext['commitLoadGeneration'];
   declare seriesInfo: AppContext['seriesInfo'];
 
-  private commitParam(): string {
-    return this.seriesInfo?.is_series ? `&commit=${this.currentCommitIdx}` : '';
+  private commitParam(commitIdx = this.currentCommitIdx): string {
+    return this.seriesInfo?.is_series ? `&commit=${commitIdx}` : '';
   }
 
-  fileCacheKey(filePath: string): string {
-    return this.seriesInfo?.is_series ? `${this.currentCommitIdx}:${filePath}` : filePath;
+  fileCacheKey(filePath: string, commitIdx = this.currentCommitIdx): string {
+    return this.seriesInfo?.is_series ? `${commitIdx}:${filePath}` : filePath;
   }
 
   async fetchFilePair(filePath: string): Promise<FilePair> {
@@ -63,6 +64,8 @@ export class FileDataMethods {
       return;
     }
     this._eagerPrefetchStarted = true;
+    const generation = this.commitLoadGeneration;
+    const commitIdx = this.currentCommitIdx;
     const paths = this.files.map((f) => f.path);
     const toFetch = paths.filter((p) => !this.fileCache[this.fileCacheKey(p)]);
     if (toFetch.length === 0) {
@@ -71,7 +74,7 @@ export class FileDataMethods {
     if (window.DEBUG) {
       console.info('[prefetch] warming', toFetch.length, 'files');
     }
-    const cp = this.commitParam();
+    const cp = this.commitParam(commitIdx);
     const concurrency = 8;
     let i = 0;
     const nextBatch = () => {
@@ -84,7 +87,7 @@ export class FileDataMethods {
             fetchJSON<FileContentResponse>(`/api/file?path=${encodeURIComponent(p)}&side=new${cp}`),
           ])
             .then(([oldData, newData]) => {
-              this.fileCache[this.fileCacheKey(p)] = {
+              this.fileCache[this.fileCacheKey(p, commitIdx)] = {
                 old: oldData.content ?? '',
                 new: newData.content ?? '',
               };
@@ -94,7 +97,7 @@ export class FileDataMethods {
       }
       return Promise.all(batch);
     };
-    while (i < toFetch.length) {
+    while (i < toFetch.length && generation === this.commitLoadGeneration) {
       await nextBatch();
     }
     if (window.DEBUG) {

@@ -100,6 +100,7 @@ export class MonacoApp {
   fileListFilter: string;
   seriesInfo: SeriesInfo | null;
   currentCommitIdx: number;
+  commitLoadGeneration: number;
   commentDraftKey: string | null;
   commentDraftWrite: Promise<void>;
   declare updateUI: () => void;
@@ -167,6 +168,7 @@ export class MonacoApp {
     this.fileListFilter = '';
     this.seriesInfo = null;
     this.currentCommitIdx = 0;
+    this.commitLoadGeneration = 0;
     this.commentDraftKey = null;
     this.commentDraftWrite = Promise.resolve();
     this.isStacked = false;

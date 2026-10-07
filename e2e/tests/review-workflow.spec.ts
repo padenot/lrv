@@ -1,4 +1,5 @@
 import { test, expect, Page } from '@playwright/test';
+import { isolateConfig } from '../test-config';
 import { spawn, ChildProcess } from 'child_process';
 import { promisify } from 'util';
 import { exec } from 'child_process';
@@ -7,6 +8,8 @@ import * as os from 'os';
 import * as fs from 'fs';
 
 const execAsync = promisify(exec);
+
+test.beforeEach(async ({ page }) => isolateConfig(page));
 
 let serverProcess: ChildProcess | null = null;
 let serverUrl: string | null = null;
@@ -134,7 +137,7 @@ async function openApp(page: Page, options: { requireEditor?: boolean } = {}) {
   if (!requireEditor) {
     return;
   }
-  if (!(await page.locator('.monaco-editor').first().isVisible())) {
+  if (!(await page.locator('.monaco-editor:visible').count())) {
     const firstItem = fileTreeRows(page).first();
     if (await firstItem.count()) {
       await firstItem.click({ force: true });
@@ -146,7 +149,7 @@ async function openApp(page: Page, options: { requireEditor?: boolean } = {}) {
     await page.waitForFunction(() => (window as any).monaco !== undefined, { timeout: 10000 });
     await page.evaluate(() => (window as any).__APP?.loadFile?.(0));
   }
-  await page.waitForSelector('.monaco-editor', { timeout: 20000 });
+  await page.waitForSelector('.monaco-editor:visible', { timeout: 20000 });
 }
 
 function fileTreeRows(page: Page) {

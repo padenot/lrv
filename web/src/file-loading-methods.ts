@@ -6,8 +6,7 @@ import { markAppReady } from './ui-signals';
 import type { AppContext, DiffFile } from './types/app';
 import type { editor } from 'monaco-editor';
 
-// Incremented on every loadFile call so stale onDidUpdateDiff callbacks
-// from a superseded load cannot uncover the editor prematurely.
+// Invalidate both fetch completions and deferred editor callbacks on navigation.
 let _loadSerial = 0;
 type EditorSelection = NonNullable<ReturnType<editor.IStandaloneCodeEditor['getSelection']>>;
 
@@ -15,6 +14,7 @@ export class FileLoadingMethods {
   declare currentFileIsCommit: boolean;
   declare currentFileIndex: number;
   declare currentCommitIdx: AppContext['currentCommitIdx'];
+  declare commitLoadGeneration: AppContext['commitLoadGeneration'];
   declare files: AppContext['files'];
   declare isInline: boolean;
   declare initFileHunks: AppContext['initFileHunks'];
@@ -23,6 +23,13 @@ export class FileLoadingMethods {
   declare modifiedModel: AppContext['modifiedModel'];
   declare currentWidget: AppContext['currentWidget'];
   declare currentWidgetEditor?: AppContext['currentWidgetEditor'];
+  declare currentFocusedLine: AppContext['currentFocusedLine'];
+  declare modifiedDecorations: AppContext['modifiedDecorations'];
+  declare originalDecorations: AppContext['originalDecorations'];
+  declare focusedHunkDecorationsNew: AppContext['focusedHunkDecorationsNew'];
+  declare focusedHunkDecorationsOld: AppContext['focusedHunkDecorationsOld'];
+  declare focusedLineDecorationsNew: AppContext['focusedLineDecorationsNew'];
+  declare focusedLineDecorationsOld: AppContext['focusedLineDecorationsOld'];
   declare config: AppContext['config'];
   declare _commitViewEl: HTMLElement | null;
   declare editor: AppContext['editor'];
@@ -48,6 +55,42 @@ export class FileLoadingMethods {
 
   private getCurrentFile(index: number) {
     return this.files[index]!;
+  }
+
+  resetFileView() {
+    ++_loadSerial;
+    this.editorClickDisposables?.forEach((disposable) => disposable.dispose());
+    this.editorClickDisposables = [];
+    if (this.currentWidget && this.currentWidgetEditor) {
+      this.currentWidgetEditor.removeContentWidget(this.currentWidget);
+    }
+    this.currentWidget = null;
+    this.currentWidgetEditor = null;
+    this.editor?.setModel(null);
+    this.originalModel?.dispose();
+    this.modifiedModel?.dispose();
+    this.originalModel = null;
+    this.modifiedModel = null;
+    this.currentFocusedLine = null;
+    this.lastModifiedRangeSelection = null;
+    this.lastOriginalRangeSelection = null;
+    this.modifiedDecorations = [];
+    this.originalDecorations = [];
+    this.focusedHunkDecorationsNew = [];
+    this.focusedHunkDecorationsOld = [];
+    this.focusedLineDecorationsNew = [];
+    this.focusedLineDecorationsOld = [];
+    this.modifiedReviewNoteZoneIds = [];
+    this.originalReviewNoteZoneIds = [];
+    this.modifiedReviewNoteDecorations = [];
+    this.originalReviewNoteDecorations = [];
+    const container = document.getElementById('editor-container');
+    container?.querySelector('.binary-file-notice')?.remove();
+    container?.classList.remove('binary-file-view', 'diff-loading', 'file-added-view');
+    const oldBanner = $<HTMLElement>('#old-missing-banner');
+    if (oldBanner) {
+      oldBanner.style.display = 'none';
+    }
   }
 
   private binaryPreviewUrl(file: DiffFile, side: 'old' | 'new') {
@@ -140,6 +183,14 @@ export class FileLoadingMethods {
   }
 
   async loadFile(index: number) {
+    if (!this.files[index]) {
+      return;
+    }
+    this.resetFileView();
+    const mySerial = _loadSerial;
+    const generation = this.commitLoadGeneration;
+    const isCurrentLoad = () =>
+      mySerial === _loadSerial && generation === this.commitLoadGeneration;
     this.currentFileIsCommit = false;
     if (window.DEBUG) {
       console.info('[app] loadFile: index', index);
@@ -157,25 +208,6 @@ export class FileLoadingMethods {
     this.initFileHunks(file);
     this.expandCurrentFileAncestors();
     this.renderFileList();
-
-    // Dispose old models and widget; keep editor instance
-    if (this.originalModel) {
-      this.originalModel.dispose();
-      this.originalModel = null;
-    }
-    if (this.modifiedModel) {
-      this.modifiedModel.dispose();
-      this.modifiedModel = null;
-    }
-    if (this.currentWidget && this.currentWidgetEditor) {
-      this.currentWidgetEditor.removeContentWidget(this.currentWidget);
-      this.currentWidget = null;
-      this.currentWidgetEditor = null;
-    }
-    this.modifiedReviewNoteZoneIds = [];
-    this.originalReviewNoteZoneIds = [];
-    this.modifiedReviewNoteDecorations = [];
-    this.originalReviewNoteDecorations = [];
 
     // Use the configured Monaco theme directly
     const theme = this.config.color_scheme;
@@ -233,10 +265,12 @@ export class FileLoadingMethods {
 
     // Fetch full content and let Monaco hide unchanged regions in-view
     window.Perf.mark('loadFile:fetch:start');
-    await this.fetchFilePair(file.path);
+    const filePair = await this.fetchFilePair(file.path);
+    if (!isCurrentLoad()) {
+      return;
+    }
     window.Perf.mark('loadFile:fetch:end');
     window.Perf.measure('loadFile:fetch', 'loadFile:fetch:start', 'loadFile:fetch:end');
-    const filePair = this.fileCache[this.fileCacheKey(file.path)]!;
     const oldContent = filePair.old;
     const newContent = filePair.new;
     const detectionPath = file.path || file.old_path || '';
@@ -268,9 +302,8 @@ export class FileLoadingMethods {
     const diffEditor = this.editor!;
     const editorContainer = document.getElementById('editor-container');
     editorContainer?.classList.add('diff-loading');
-    const mySerial = ++_loadSerial;
     const uncover = () => {
-      if (_loadSerial === mySerial) {
+      if (isCurrentLoad()) {
         editorContainer?.classList.remove('diff-loading');
       }
     };
@@ -288,6 +321,9 @@ export class FileLoadingMethods {
     scrollReset = diffEditor.onDidUpdateDiff(() => {
       scrollReset?.dispose();
       clearTimeout(fallback);
+      if (!isCurrentLoad()) {
+        return;
+      }
       diffEditor.getModifiedEditor().setScrollTop(0);
       diffEditor.getOriginalEditor().setScrollTop(0);
       // Two rAFs: one for Monaco to commit view zones, one for the browser to paint.
@@ -322,6 +358,9 @@ export class FileLoadingMethods {
     window.Perf.mark('loadFile:paint-wait:start');
     requestAnimationFrame(() =>
       requestAnimationFrame(() => {
+        if (!isCurrentLoad()) {
+          return;
+        }
         window.Perf.mark('loadFile:paint-wait:end');
         window.Perf.measure(
           'loadFile:paint-wait',
@@ -439,7 +478,11 @@ export class FileLoadingMethods {
     downLine: number,
     side: 'new' | 'old',
   ) {
+    const serial = _loadSerial;
     const handleMouseUp = (event: MouseEvent) => {
+      if (serial !== _loadSerial) {
+        return;
+      }
       const target = targetEditor.getTargetAtClientPoint(event.clientX, event.clientY);
       const upLine = target?.position?.lineNumber ?? downLine;
       const fallbackSelection =
@@ -527,10 +570,15 @@ export class FileLoadingMethods {
   }
 
   applyInitialHunkFocus(filePath: string) {
+    const serial = _loadSerial;
+    const generation = this.commitLoadGeneration;
     const hunks = this.fileHunks[filePath];
     if (hunks && hunks.length > 0) {
       const currentIdx = this.currentHunkIndex[filePath] ?? 0;
       setTimeout(() => {
+        if (serial !== _loadSerial || generation !== this.commitLoadGeneration) {
+          return;
+        }
         this.jumpToHunk(currentIdx);
         const hr = hunks[currentIdx]!;
         const side = hr.side === 'old' ? 'old' : 'new';

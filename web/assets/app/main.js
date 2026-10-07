@@ -1044,11 +1044,11 @@ function computeHunkRanges(hunks) {
 //#endregion
 //#region web/src/file-data-methods.ts
 var FileDataMethods = class {
-	commitParam() {
-		return this.seriesInfo?.is_series ? `&commit=${this.currentCommitIdx}` : "";
+	commitParam(commitIdx = this.currentCommitIdx) {
+		return this.seriesInfo?.is_series ? `&commit=${commitIdx}` : "";
 	}
-	fileCacheKey(filePath) {
-		return this.seriesInfo?.is_series ? `${this.currentCommitIdx}:${filePath}` : filePath;
+	fileCacheKey(filePath, commitIdx = this.currentCommitIdx) {
+		return this.seriesInfo?.is_series ? `${commitIdx}:${filePath}` : filePath;
 	}
 	async fetchFilePair(filePath) {
 		const cacheKey = this.fileCacheKey(filePath);
@@ -1070,10 +1070,12 @@ var FileDataMethods = class {
 	async eagerPrefetchAllFiles() {
 		if (this._eagerPrefetchStarted) return;
 		this._eagerPrefetchStarted = true;
+		const generation = this.commitLoadGeneration;
+		const commitIdx = this.currentCommitIdx;
 		const toFetch = this.files.map((f) => f.path).filter((p) => !this.fileCache[this.fileCacheKey(p)]);
 		if (toFetch.length === 0) return;
 		if (window.DEBUG) console.info("[prefetch] warming", toFetch.length, "files");
-		const cp = this.commitParam();
+		const cp = this.commitParam(commitIdx);
 		const concurrency = 8;
 		let i = 0;
 		const nextBatch = () => {
@@ -1081,7 +1083,7 @@ var FileDataMethods = class {
 			for (let k = 0; k < concurrency && i < toFetch.length; k++, i++) {
 				const p = toFetch[i];
 				batch.push(Promise.all([fetchJSON(`/api/file?path=${encodeURIComponent(p)}&side=old${cp}`), fetchJSON(`/api/file?path=${encodeURIComponent(p)}&side=new${cp}`)]).then(([oldData, newData]) => {
-					this.fileCache[this.fileCacheKey(p)] = {
+					this.fileCache[this.fileCacheKey(p, commitIdx)] = {
 						old: oldData.content ?? "",
 						new: newData.content ?? ""
 					};
@@ -1089,7 +1091,7 @@ var FileDataMethods = class {
 			}
 			return Promise.all(batch);
 		};
-		while (i < toFetch.length) await nextBatch();
+		while (i < toFetch.length && generation === this.commitLoadGeneration) await nextBatch();
 		if (window.DEBUG) console.info("[prefetch] done");
 	}
 	initFileHunks(file) {
@@ -10931,6 +10933,37 @@ var FileLoadingMethods = class {
 	getCurrentFile(index) {
 		return this.files[index];
 	}
+	resetFileView() {
+		++_loadSerial;
+		this.editorClickDisposables?.forEach((disposable) => disposable.dispose());
+		this.editorClickDisposables = [];
+		if (this.currentWidget && this.currentWidgetEditor) this.currentWidgetEditor.removeContentWidget(this.currentWidget);
+		this.currentWidget = null;
+		this.currentWidgetEditor = null;
+		this.editor?.setModel(null);
+		this.originalModel?.dispose();
+		this.modifiedModel?.dispose();
+		this.originalModel = null;
+		this.modifiedModel = null;
+		this.currentFocusedLine = null;
+		this.lastModifiedRangeSelection = null;
+		this.lastOriginalRangeSelection = null;
+		this.modifiedDecorations = [];
+		this.originalDecorations = [];
+		this.focusedHunkDecorationsNew = [];
+		this.focusedHunkDecorationsOld = [];
+		this.focusedLineDecorationsNew = [];
+		this.focusedLineDecorationsOld = [];
+		this.modifiedReviewNoteZoneIds = [];
+		this.originalReviewNoteZoneIds = [];
+		this.modifiedReviewNoteDecorations = [];
+		this.originalReviewNoteDecorations = [];
+		const container = document.getElementById("editor-container");
+		container?.querySelector(".binary-file-notice")?.remove();
+		container?.classList.remove("binary-file-view", "diff-loading", "file-added-view");
+		const oldBanner = $$2("#old-missing-banner");
+		if (oldBanner) oldBanner.style.display = "none";
+	}
 	binaryPreviewUrl(file, side) {
 		const params = new URLSearchParams({
 			path: side === "old" ? file.old_path || file.path : file.path,
@@ -11020,6 +11053,11 @@ var FileLoadingMethods = class {
 		return file.hunks.length > 0 && file.hunks.every((h) => (h.old_start ?? 0) === 0);
 	}
 	async loadFile(index) {
+		if (!this.files[index]) return;
+		this.resetFileView();
+		const mySerial = _loadSerial;
+		const generation = this.commitLoadGeneration;
+		const isCurrentLoad = () => mySerial === _loadSerial && generation === this.commitLoadGeneration;
 		this.currentFileIsCommit = false;
 		if (window.DEBUG) console.info("[app] loadFile: index", index);
 		window.Perf.mark("loadFile:start");
@@ -11032,23 +11070,6 @@ var FileLoadingMethods = class {
 		this.initFileHunks(file);
 		this.expandCurrentFileAncestors();
 		this.renderFileList();
-		if (this.originalModel) {
-			this.originalModel.dispose();
-			this.originalModel = null;
-		}
-		if (this.modifiedModel) {
-			this.modifiedModel.dispose();
-			this.modifiedModel = null;
-		}
-		if (this.currentWidget && this.currentWidgetEditor) {
-			this.currentWidgetEditor.removeContentWidget(this.currentWidget);
-			this.currentWidget = null;
-			this.currentWidgetEditor = null;
-		}
-		this.modifiedReviewNoteZoneIds = [];
-		this.originalReviewNoteZoneIds = [];
-		this.modifiedReviewNoteDecorations = [];
-		this.originalReviewNoteDecorations = [];
 		const theme = this.config.color_scheme;
 		const container = document.getElementById("editor-container");
 		if (!container) return;
@@ -11092,10 +11113,10 @@ var FileLoadingMethods = class {
 			}
 		});
 		window.Perf.mark("loadFile:fetch:start");
-		await this.fetchFilePair(file.path);
+		const filePair = await this.fetchFilePair(file.path);
+		if (!isCurrentLoad()) return;
 		window.Perf.mark("loadFile:fetch:end");
 		window.Perf.measure("loadFile:fetch", "loadFile:fetch:start", "loadFile:fetch:end");
-		const filePair = this.fileCache[this.fileCacheKey(file.path)];
 		const oldContent = filePair.old;
 		const newContent = filePair.new;
 		const language = detectLanguageFromPathAndContent(file.path || file.old_path || "", newContent || oldContent);
@@ -11113,9 +11134,8 @@ var FileLoadingMethods = class {
 		const diffEditor = this.editor;
 		const editorContainer = document.getElementById("editor-container");
 		editorContainer?.classList.add("diff-loading");
-		const mySerial = ++_loadSerial;
 		const uncover = () => {
-			if (_loadSerial === mySerial) editorContainer?.classList.remove("diff-loading");
+			if (isCurrentLoad()) editorContainer?.classList.remove("diff-loading");
 		};
 		const fallback = setTimeout(uncover, 1500);
 		diffEditor.setModel({
@@ -11128,6 +11148,7 @@ var FileLoadingMethods = class {
 		scrollReset = diffEditor.onDidUpdateDiff(() => {
 			scrollReset?.dispose();
 			clearTimeout(fallback);
+			if (!isCurrentLoad()) return;
 			diffEditor.getModifiedEditor().setScrollTop(0);
 			diffEditor.getOriginalEditor().setScrollTop(0);
 			requestAnimationFrame(() => requestAnimationFrame(uncover));
@@ -11155,6 +11176,7 @@ var FileLoadingMethods = class {
 		if (oe.getModel()) oe.updateOptions(opts);
 		window.Perf.mark("loadFile:paint-wait:start");
 		requestAnimationFrame(() => requestAnimationFrame(() => {
+			if (!isCurrentLoad()) return;
 			window.Perf.mark("loadFile:paint-wait:end");
 			window.Perf.measure("loadFile:paint-wait", "loadFile:paint-wait:start", "loadFile:paint-wait:end");
 			window.Perf.recordFileSwitchEnd();
@@ -11220,7 +11242,9 @@ var FileLoadingMethods = class {
 		}));
 	}
 	beginEditorGutterGesture(filePath, targetEditor, downLine, side) {
+		const serial = _loadSerial;
 		const handleMouseUp = (event) => {
+			if (serial !== _loadSerial) return;
 			const upLine = targetEditor.getTargetAtClientPoint(event.clientX, event.clientY)?.position?.lineNumber ?? downLine;
 			const fallbackSelection = side === "new" ? this.lastModifiedRangeSelection : this.lastOriginalRangeSelection;
 			this.showCommentDialog(filePath, this.commentLineFromGutterGesture(targetEditor, downLine, upLine, fallbackSelection), upLine, side);
@@ -11256,10 +11280,13 @@ var FileLoadingMethods = class {
 		return selection;
 	}
 	applyInitialHunkFocus(filePath) {
+		const serial = _loadSerial;
+		const generation = this.commitLoadGeneration;
 		const hunks = this.fileHunks[filePath];
 		if (hunks && hunks.length > 0) {
 			const currentIdx = this.currentHunkIndex[filePath] ?? 0;
 			setTimeout(() => {
+				if (serial !== _loadSerial || generation !== this.commitLoadGeneration) return;
 				this.jumpToHunk(currentIdx);
 				const hr = hunks[currentIdx];
 				const side = hr.side === "old" ? "old" : "new";
@@ -11840,6 +11867,7 @@ var CommitMethods = class {
 		};
 	}
 	loadCommitView() {
+		this.resetFileView();
 		this.currentFileIsCommit = true;
 		const container = document.getElementById("editor-container");
 		if (!container) return;
@@ -12890,6 +12918,7 @@ var DialogMethods = class {
 //#endregion
 //#region web/src/series-methods.ts
 var SeriesMethods = class {
+	commitLoadController;
 	renderSeriesNav() {
 		const container = document.getElementById("commit-strip");
 		const resizer = document.getElementById("commit-strip-resizer");
@@ -12943,26 +12972,54 @@ var SeriesMethods = class {
 		if (!series) return;
 		const showCommitMessage = this.currentFileIsCommit;
 		const clamped = Math.max(0, Math.min(idx, series.commits.length - 1));
+		const generation = ++this.commitLoadGeneration;
+		this.commitLoadController?.abort();
+		const controller = new AbortController();
+		this.commitLoadController = controller;
 		this.currentCommitIdx = clamped;
 		this.commentManager.currentCommitIdx = clamped;
 		this.reviewNoteManager.currentCommitIdx = clamped;
-		const diffData = await fetchJSON(`/api/diff?commit=${clamped}`);
+		this.resetFileView();
+		this.clearStackedView();
+		if (this._commitViewEl) {
+			clearEl(this._commitViewEl);
+			this._commitViewEl.style.display = "none";
+		}
+		this.files = [];
+		this.diff = null;
+		this.stats = {
+			files_changed: 0,
+			additions: 0,
+			deletions: 0
+		};
+		this.fileHunks = {};
+		this.currentHunkIndex = {};
+		this.currentFileIndex = 0;
+		this._eagerPrefetchStarted = false;
+		this.renderSeriesNav();
+		this.renderFileList();
+		this.renderProjectInfo();
+		let diffData;
+		try {
+			diffData = await fetchJSON(`/api/diff?commit=${clamped}`, { signal: controller.signal });
+		} catch (error) {
+			if (generation !== this.commitLoadGeneration || controller.signal.aborted) return;
+			throw error;
+		}
+		if (generation !== this.commitLoadGeneration) return;
 		this.files = sortDiffFiles(diffData.files);
 		this.diff = {
 			...diffData,
 			files: this.files
 		};
 		this.stats = diffData.stats;
-		this.fileHunks = {};
-		this.currentHunkIndex = {};
-		this.currentFileIndex = 0;
-		this.currentFileIsCommit = showCommitMessage;
 		this._eagerPrefetchStarted = false;
+		this.currentFileIsCommit = showCommitMessage;
 		this.renderSeriesNav();
 		this.renderFileList();
 		this.renderProjectInfo();
 		if (showCommitMessage) this.loadCommitView();
-		else if (this.isStacked) this.renderStackedView();
+		else if (this.isStacked) await this.renderStackedView();
 		else if (this.files.length > 0) await this.loadFile(0);
 		else this.loadCommitView();
 	}
@@ -13012,6 +13069,7 @@ var StackedViewMethods = class {
 	stackedParseDiffFromFile;
 	stackedLastRangeSelection;
 	showStackedView() {
+		this.resetFileView();
 		this.isStacked = true;
 		const editor = document.getElementById("editor-container");
 		const stacked = document.getElementById("stacked-container");
@@ -13027,7 +13085,7 @@ var StackedViewMethods = class {
 	}
 	hideStackedView() {
 		this.isStacked = false;
-		this.stackedRenderToken = (this.stackedRenderToken ?? 0) + 1;
+		this.clearStackedView();
 		const editor = document.getElementById("editor-container");
 		const stacked = document.getElementById("stacked-container");
 		if (editor) editor.style.display = "";
@@ -13036,7 +13094,7 @@ var StackedViewMethods = class {
 		const toggleView = document.getElementById("toggle-view");
 		if (toggleView) toggleView.style.display = "";
 		this.persistStackedPref(false);
-		if (!this.editor && this.files.length > 0) this.loadFile(this.currentFileIndex);
+		if (!this.currentFileIsCommit && this.files.length > 0) this.loadFile(this.currentFileIndex);
 	}
 	updateStackedToggleLabel() {
 		const toggle = document.getElementById("toggle-stacked");
@@ -13093,9 +13151,8 @@ var StackedViewMethods = class {
 			block: "start"
 		});
 	}
-	async renderStackedView() {
-		const container = document.getElementById("stacked-container");
-		if (!container) return;
+	clearStackedView() {
+		this.stackedItemVersion ??= 0;
 		this.stackedScrollUnsubscribe?.();
 		this.stackedScrollUnsubscribe = null;
 		this.stackedCodeView?.cleanUp();
@@ -13105,9 +13162,17 @@ var StackedViewMethods = class {
 		this.stackedHydratedFiles = /* @__PURE__ */ new Set();
 		this.stackedParseDiffFromFile = null;
 		this.stackedLastRangeSelection = null;
+		this.stackedDraft = null;
 		this.stackedRenderToken = (this.stackedRenderToken ?? 0) + 1;
+		const container = document.getElementById("stacked-container");
+		if (container) clearEl(container);
+	}
+	async renderStackedView() {
+		const container = document.getElementById("stacked-container");
+		if (!container) return;
+		this.clearStackedView();
 		const renderToken = this.stackedRenderToken;
-		clearEl(container);
+		const generation = this.commitLoadGeneration;
 		if (!this.files.length) {
 			container.appendChild(el("div", {
 				className: "stacked-empty",
@@ -13116,7 +13181,7 @@ var StackedViewMethods = class {
 			return;
 		}
 		const { CodeView, parsePatchFiles, parseDiffFromFile, getOrCreateWorkerPoolSingleton } = await loadDiffsRuntime();
-		if (!this.isStacked || !container.isConnected || renderToken !== this.stackedRenderToken) return;
+		if (!this.isStacked || !container.isConnected || renderToken !== this.stackedRenderToken || generation !== this.commitLoadGeneration) return;
 		this.stackedParseDiffFromFile = parseDiffFromFile;
 		const codeViewRoot = el("div", { className: "stacked-code-view" });
 		container.appendChild(codeViewRoot);
@@ -13193,8 +13258,11 @@ var StackedViewMethods = class {
 	async hydrateStackedFile(file, parseDiffFromFile) {
 		if (!file || file.is_binary || this.stackedHydratedFiles.has(file.path)) return;
 		this.stackedHydratedFiles.add(file.path);
+		const renderToken = this.stackedRenderToken;
+		const generation = this.commitLoadGeneration;
+		const view = this.stackedCodeView;
 		const metadata = await this.toFullFileDiffsMetadata(file, parseDiffFromFile);
-		if (!metadata || !this.isStacked || this.stackedParseDiffFromFile !== parseDiffFromFile) return;
+		if (!metadata || !this.isStacked || renderToken !== this.stackedRenderToken || generation !== this.commitLoadGeneration || view !== this.stackedCodeView) return;
 		const existing = this.stackedItems.get(file.path);
 		if (!existing) return;
 		const nextItem = {
@@ -13208,6 +13276,7 @@ var StackedViewMethods = class {
 		if (this.stackedCodeView?.updateItem(nextItem)) this.stackedCodeView.render(true);
 	}
 	async toFullFileDiffsMetadata(file, parseDiffFromFile) {
+		const cacheKey = this.fileCacheKey(file.path);
 		let pair;
 		try {
 			pair = await this.fetchFilePair(file.path);
@@ -13219,12 +13288,12 @@ var StackedViewMethods = class {
 		const oldFile = {
 			name: file.old_path ?? file.path,
 			contents: normalise(pair.old),
-			cacheKey: `${this.fileCacheKey(file.path)}:old`
+			cacheKey: `${cacheKey}:old`
 		};
 		const newFile = {
 			name: file.path,
 			contents: normalise(pair.new),
-			cacheKey: `${this.fileCacheKey(file.path)}:new`
+			cacheKey: `${cacheKey}:new`
 		};
 		try {
 			return parseDiffFromFile(oldFile, newFile);
@@ -13620,6 +13689,7 @@ var MonacoApp = class {
 	fileListFilter;
 	seriesInfo;
 	currentCommitIdx;
+	commitLoadGeneration;
 	commentDraftKey;
 	commentDraftWrite;
 	constructor() {
@@ -13664,6 +13734,7 @@ var MonacoApp = class {
 		this.fileListFilter = "";
 		this.seriesInfo = null;
 		this.currentCommitIdx = 0;
+		this.commitLoadGeneration = 0;
 		this.commentDraftKey = null;
 		this.commentDraftWrite = Promise.resolve();
 		this.isStacked = false;

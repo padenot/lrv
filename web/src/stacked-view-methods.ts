@@ -63,6 +63,7 @@ export class StackedViewMethods {
   declare reviewNoteManager: AppContext['reviewNoteManager'];
   declare isStacked: boolean;
   declare currentCommitIdx: AppContext['currentCommitIdx'];
+  declare commitLoadGeneration: AppContext['commitLoadGeneration'];
   declare seriesInfo: AppContext['seriesInfo'];
   declare config: AppContext['config'];
   declare diff: AppContext['diff'];
@@ -76,6 +77,7 @@ export class StackedViewMethods {
   declare loadFile: AppContext['loadFile'];
   declare fetchFilePair: AppContext['fetchFilePair'];
   declare fileCacheKey: AppContext['fileCacheKey'];
+  declare resetFileView: AppContext['resetFileView'];
 
   private stackedCodeView: CodeView<StackedAnnotation> | null;
   private stackedItems: Map<string, CodeViewDiffItem<StackedAnnotation>>;
@@ -89,6 +91,7 @@ export class StackedViewMethods {
   private stackedLastRangeSelection: CodeViewLineSelection | null;
 
   showStackedView() {
+    this.resetFileView();
     this.isStacked = true;
     const editor = document.getElementById('editor-container');
     const stacked = document.getElementById('stacked-container');
@@ -109,7 +112,7 @@ export class StackedViewMethods {
 
   hideStackedView() {
     this.isStacked = false;
-    this.stackedRenderToken = (this.stackedRenderToken ?? 0) + 1;
+    this.clearStackedView();
     const editor = document.getElementById('editor-container');
     const stacked = document.getElementById('stacked-container');
     if (editor) {
@@ -124,7 +127,7 @@ export class StackedViewMethods {
       toggleView.style.display = '';
     }
     this.persistStackedPref(false);
-    if (!this.editor && this.files.length > 0) {
+    if (!this.currentFileIsCommit && this.files.length > 0) {
       void this.loadFile(this.currentFileIndex);
     }
   }
@@ -200,12 +203,8 @@ export class StackedViewMethods {
     anchor?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
-  async renderStackedView() {
-    const container = document.getElementById('stacked-container');
-    if (!container) {
-      return;
-    }
-
+  clearStackedView() {
+    this.stackedItemVersion ??= 0;
     this.stackedScrollUnsubscribe?.();
     this.stackedScrollUnsubscribe = null;
     this.stackedCodeView?.cleanUp();
@@ -215,9 +214,22 @@ export class StackedViewMethods {
     this.stackedHydratedFiles = new Set();
     this.stackedParseDiffFromFile = null;
     this.stackedLastRangeSelection = null;
+    this.stackedDraft = null;
     this.stackedRenderToken = (this.stackedRenderToken ?? 0) + 1;
+    const container = document.getElementById('stacked-container');
+    if (container) {
+      clearEl(container);
+    }
+  }
+
+  async renderStackedView() {
+    const container = document.getElementById('stacked-container');
+    if (!container) {
+      return;
+    }
+    this.clearStackedView();
     const renderToken = this.stackedRenderToken;
-    clearEl(container);
+    const generation = this.commitLoadGeneration;
 
     if (!this.files.length) {
       container.appendChild(el('div', { className: 'stacked-empty', text: 'No files changed.' }));
@@ -226,7 +238,12 @@ export class StackedViewMethods {
 
     const { CodeView, parsePatchFiles, parseDiffFromFile, getOrCreateWorkerPoolSingleton } =
       await loadDiffsRuntime();
-    if (!this.isStacked || !container.isConnected || renderToken !== this.stackedRenderToken) {
+    if (
+      !this.isStacked ||
+      !container.isConnected ||
+      renderToken !== this.stackedRenderToken ||
+      generation !== this.commitLoadGeneration
+    ) {
       return;
     }
     this.stackedParseDiffFromFile = parseDiffFromFile;
@@ -337,9 +354,17 @@ export class StackedViewMethods {
       return;
     }
     this.stackedHydratedFiles.add(file.path);
-
+    const renderToken = this.stackedRenderToken;
+    const generation = this.commitLoadGeneration;
+    const view = this.stackedCodeView;
     const metadata = await this.toFullFileDiffsMetadata(file, parseDiffFromFile);
-    if (!metadata || !this.isStacked || this.stackedParseDiffFromFile !== parseDiffFromFile) {
+    if (
+      !metadata ||
+      !this.isStacked ||
+      renderToken !== this.stackedRenderToken ||
+      generation !== this.commitLoadGeneration ||
+      view !== this.stackedCodeView
+    ) {
       return;
     }
 
@@ -364,6 +389,7 @@ export class StackedViewMethods {
     file: DiffFile,
     parseDiffFromFile: ParseDiffFromFile,
   ): Promise<FileDiffMetadata | null> {
+    const cacheKey = this.fileCacheKey(file.path);
     let pair;
     try {
       pair = await this.fetchFilePair(file.path);
@@ -382,12 +408,12 @@ export class StackedViewMethods {
     const oldFile: FileContents = {
       name: file.old_path ?? file.path,
       contents: normalise(pair.old),
-      cacheKey: `${this.fileCacheKey(file.path)}:old`,
+      cacheKey: `${cacheKey}:old`,
     };
     const newFile: FileContents = {
       name: file.path,
       contents: normalise(pair.new),
-      cacheKey: `${this.fileCacheKey(file.path)}:new`,
+      cacheKey: `${cacheKey}:new`,
     };
 
     try {

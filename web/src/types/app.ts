@@ -139,7 +139,7 @@ export interface AppContext {
   overallReviewComment: string;
   reviewSubmitted: boolean;
   userThemes: UserTheme[];
-  fileCacheKey(filePath: string): string;
+  fileCacheKey(filePath: string, commitIdx?: number): string;
   fileHunks: Record<string, HunkRange[]>;
   currentHunkIndex: Record<string, number>;
   config: AppConfig;
@@ -154,6 +154,7 @@ export interface AppContext {
   fileListFilter: string;
   seriesInfo: SeriesInfo | null;
   currentCommitIdx: number;
+  commitLoadGeneration: number;
   isStacked: boolean;
 
   updateUI(): void;
@@ -174,6 +175,8 @@ export interface AppContext {
   setupKeyboardShortcuts(): void;
   setupUI(): void;
   loadFile(index: number): Promise<void>;
+  resetFileView(): void;
+  clearStackedView(): void;
   loadCommitView(): void;
   showCommitLineCommentDialog(lineNum: number): void;
   showCommitMessagePopover(anchorEl: HTMLElement, message: string, rev: string): void;

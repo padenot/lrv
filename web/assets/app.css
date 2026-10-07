@@ -2108,10 +2108,6 @@ body {
   font-weight: 600;
 }
 
-.series-commit.has-comments {
-  border-left-color: var(--accent-color, #f97316);
-}
-
 .series-commit-num {
   font-size: 10px;
   font-weight: 700;

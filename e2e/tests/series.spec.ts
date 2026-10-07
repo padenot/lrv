@@ -1,12 +1,15 @@
-import { test, expect, Page } from '@playwright/test';
+import { test, expect, Page, Route } from '@playwright/test';
 import { spawn, ChildProcess } from 'child_process';
 import { promisify } from 'util';
 import { exec } from 'child_process';
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
+import { isolateConfig } from '../test-config';
 
 const execAsync = promisify(exec);
+
+test.beforeEach(async ({ page }) => isolateConfig(page));
 
 let serverProcess: ChildProcess | null = null;
 let serverUrl: string | null = null;
@@ -126,10 +129,10 @@ async function openApp(page: Page) {
     () => document.querySelector('file-tree-container.lrv-file-tree') !== null,
     { timeout: 10000 },
   );
-  if (!(await page.locator('.monaco-editor').first().isVisible())) {
+  if (!(await page.locator('.monaco-editor:visible').count())) {
     await page.evaluate(() => (window as any).__APP?.loadFile?.(0));
   }
-  await page.waitForSelector('.monaco-editor', { timeout: 20000 });
+  await page.waitForSelector('.monaco-editor:visible', { timeout: 20000 });
 }
 
 function fileTreeRows(page: Page) {
@@ -144,6 +147,28 @@ function fileTreeRow(page: Page, pathOrName: string) {
     `file-tree-container.lrv-file-tree [data-type="item"][data-item-type="file"][data-item-path="${escaped}"], ` +
       `file-tree-container.lrv-file-tree [data-type="item"][data-item-type="file"][data-item-path$="/${escaped}"]`,
   );
+}
+
+// Fetch the actual response, then hold its delivery until the test releases it.
+// This controls ordering without relying on network speed or timing sleeps.
+async function holdResponses(page: Page, url: string, limit = Infinity) {
+  let release!: () => void;
+  let arrived!: () => void;
+  const released = new Promise<void>((resolve) => (release = resolve));
+  const requested = new Promise<void>((resolve) => (arrived = resolve));
+  let heldCount = 0;
+  const handler = async (route: Route) => {
+    if (heldCount++ >= limit) {
+      await route.continue();
+      return;
+    }
+    const response = await route.fetch();
+    arrived();
+    await released;
+    await route.fulfill({ response });
+  };
+  await page.route(url, handler);
+  return { requested, release };
 }
 
 async function makeSeriesRepo(dir: string): Promise<void> {
@@ -480,6 +505,167 @@ test.describe('Series: stacked-mode comments stay scoped to their own commit', (
     localUrl = null;
   });
 
+  async function openSharedSeries(page: Page) {
+    await page.goto(localUrl!);
+    await page.waitForFunction(() => (window as any).__APP?.files?.length > 0);
+    await page.waitForFunction(() => (window as any).monaco?.editor !== undefined);
+    await page.evaluate(async () => {
+      const app = (window as any).__APP;
+      app.showStackedView();
+      await app.renderStackedView();
+    });
+    await page.waitForFunction(
+      () => (window as any).__APP.stackedFileMetadata.get('shared.txt')?.cacheKey !== undefined,
+    );
+  }
+
+  test('late commit responses cannot replace the last selection, including switching back', async ({
+    page,
+  }) => {
+    await openSharedSeries(page);
+    // Ignore cancellation deliberately: the generation check must also protect
+    // against responses which have already arrived when the user switches.
+    await page.evaluate(() => {
+      const originalFetch = window.fetch;
+      window.fetch = (input, options) =>
+        originalFetch(input, String(input).startsWith('/api/diff?') ? undefined : options);
+      (window as any).__APP.loadCommitView();
+    });
+    const held = await holdResponses(page, '**/api/diff?commit=1');
+    await page.evaluate(() => {
+      (window as any).__pendingCommit = (window as any).__APP.loadCommit(1);
+    });
+    await held.requested;
+    await expect(page.locator('.commit-message-card')).toHaveCount(0);
+    await expect(fileTreeRows(page)).toHaveCount(0);
+    await expect(page.locator('#commit-strip .series-commit').nth(1)).toHaveClass(/active/);
+    await page.evaluate(() => (window as any).__APP.loadCommit(0));
+    held.release();
+    await page.evaluate(() => (window as any).__pendingCommit);
+    await expect(page.locator('.commit-message-card')).toContainText('First patch touches line2');
+    expect(
+      await page.evaluate(() => {
+        const app = (window as any).__APP;
+        return app.diff.commit_hash === app.seriesInfo.commits[app.currentCommitIdx].commit_hash;
+      }),
+    ).toBe(true);
+  });
+
+  test('background prefetch keeps the originating commit cache key', async ({ page }) => {
+    await openSharedSeries(page);
+    await page.evaluate(() => {
+      const app = (window as any).__APP;
+      app.loadCommitView();
+      app.fileCache = {};
+      app._eagerPrefetchStarted = false;
+    });
+    const held = await holdResponses(page, '**/api/file?**commit=0');
+    await page.evaluate(() => {
+      (window as any).__pendingPrefetch = (window as any).__APP.eagerPrefetchAllFiles();
+    });
+    await held.requested;
+    await page.evaluate(() => (window as any).__APP.loadCommit(1));
+    held.release();
+    await page.evaluate(() => (window as any).__pendingPrefetch);
+    expect(
+      await page.evaluate(() => (window as any).__APP.fileCache['1:shared.txt']),
+    ).toBeUndefined();
+    expect(
+      await page.evaluate(() => (window as any).__APP.fileCache['0:shared.txt'].new),
+    ).toContain('line2 modified once');
+    await page.evaluate(async () => {
+      const app = (window as any).__APP;
+      app.currentFileIsCommit = false;
+      await app.renderStackedView();
+    });
+    await expect(page.locator('.stacked-code-view')).toContainText('line2 modified twice');
+  });
+
+  test('switching away and back does not revive an earlier commit load', async ({ page }) => {
+    await openSharedSeries(page);
+    await page.evaluate(() => {
+      const originalFetch = window.fetch;
+      window.fetch = (input, options) =>
+        originalFetch(input, String(input).startsWith('/api/diff?') ? undefined : options);
+      (window as any).__APP.loadCommitView();
+    });
+    const held = await holdResponses(page, '**/api/diff?commit=0', 1);
+    await page.evaluate(() => {
+      (window as any).__pendingCommit = (window as any).__APP.loadCommit(0);
+    });
+    await held.requested;
+    await page.evaluate(async () => {
+      const app = (window as any).__APP;
+      await app.loadCommit(1);
+      await app.loadCommit(0);
+      await app.renderStackedView();
+      app.scrollToFileInStacked(0);
+    });
+    await expect(page.locator('.stacked-code-view')).toBeVisible();
+    held.release();
+    await page.evaluate(() => (window as any).__pendingCommit);
+    await expect(page.locator('.stacked-code-view')).toBeVisible();
+    await expect(page.locator('.commit-view')).toBeHidden();
+    await expect(page.locator('#commit-strip .series-commit').first()).toHaveClass(/active/);
+  });
+
+  test('old stacked hydration cannot overwrite a rebuilt view of the same path', async ({
+    page,
+  }) => {
+    await openSharedSeries(page);
+    const held = await holdResponses(page, '**/api/file?**commit=0');
+    await page.evaluate(() => {
+      const app = (window as any).__APP;
+      app.fileCache = {};
+      app.stackedHydratedFiles.clear();
+      (window as any).__pendingHydration = app.hydrateStackedFile(
+        app.files[0],
+        app.stackedParseDiffFromFile,
+      );
+    });
+    await held.requested;
+    await page.locator('#commit-strip .series-commit').nth(1).click();
+    await expect(page.locator('.stacked-code-view')).toContainText('line2 modified twice');
+    await page.waitForFunction(() => (window as any).__APP.fileCache['1:shared.txt'] !== undefined);
+    const currentMetadata = await page.evaluate(() =>
+      JSON.stringify((window as any).__APP.stackedFileMetadata.get('shared.txt')),
+    );
+    held.release();
+    await page.evaluate(() => (window as any).__pendingHydration);
+    expect(
+      await page.evaluate(() =>
+        JSON.stringify((window as any).__APP.stackedFileMetadata.get('shared.txt')),
+      ),
+    ).toBe(currentMetadata);
+    await expect(page.locator('.stacked-code-view')).toContainText('line2 modified twice');
+    await expect(page.locator('#commit-strip .series-commit').nth(1)).toHaveClass(/active/);
+  });
+
+  test('late Monaco file loads cannot overwrite the selected commit', async ({ page }) => {
+    await openSharedSeries(page);
+    await page.evaluate(() => {
+      const app = (window as any).__APP;
+      app.hideStackedView();
+    });
+    await page.waitForFunction(() => (window as any).__APP.modifiedModel !== null);
+    const held = await holdResponses(page, '**/api/file?**commit=0');
+    await page.evaluate(() => {
+      const app = (window as any).__APP;
+      app.fileCache = {};
+      (window as any).__pendingFile = app.loadFile(0);
+    });
+    await held.requested;
+    await page.evaluate(() => (window as any).__APP.loadCommit(1));
+    expect(await page.evaluate(() => (window as any).__APP.modifiedModel.getValue())).toContain(
+      'line2 modified twice',
+    );
+    held.release();
+    await page.evaluate(() => (window as any).__pendingFile);
+    expect(await page.evaluate(() => (window as any).__APP.modifiedModel.getValue())).toContain(
+      'line2 modified twice',
+    );
+  });
+
   test('a comment on one commit does not leak onto another commit touching the same file/line', async ({
     page,
   }) => {
@@ -514,6 +700,13 @@ test.describe('Series: stacked-mode comments stay scoped to their own commit', (
 
     // The comment must NOT leak onto the second commit's view of that line.
     await expect(page.locator('.stacked-comment-box')).toHaveCount(0);
+    await expect(commits.first().locator('.series-comment-badge')).toHaveText('1');
+    expect(await commits.first().evaluate((row) => getComputedStyle(row).borderLeftColor)).toBe(
+      'rgba(0, 0, 0, 0)',
+    );
+    expect(await commits.nth(1).evaluate((row) => getComputedStyle(row).borderLeftColor)).not.toBe(
+      'rgba(0, 0, 0, 0)',
+    );
 
     // Switching back to the first commit must still show the comment.
     await commits.nth(0).click();

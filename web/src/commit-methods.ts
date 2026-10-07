@@ -13,6 +13,7 @@ export class CommitMethods {
   declare currentFileIsCommit: boolean;
   declare _commitViewEl: HTMLElement | null;
   declare diff: AppContext['diff'];
+  declare resetFileView: AppContext['resetFileView'];
   declare renderFileList: () => void;
   declare buildReviewNoteNode: (note: ReviewNote) => HTMLElement;
   declare overallReviewComment: AppContext['overallReviewComment'];
@@ -182,6 +183,7 @@ export class CommitMethods {
   }
 
   loadCommitView() {
+    this.resetFileView();
     this.currentFileIsCommit = true;
     const container = document.getElementById('editor-container');
     if (!container) {

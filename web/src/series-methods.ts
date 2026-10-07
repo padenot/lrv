@@ -1,11 +1,12 @@
 import { clearEl, el } from './dom';
 import { fetchJSON } from './api';
-import type { AppContext, DiffFile, DiffStats, SeriesInfo } from './types/app';
+import type { AppContext, DiffFile, DiffStats } from './types/app';
 import { sortDiffFiles } from './file-order';
 
 export class SeriesMethods {
   declare seriesInfo: AppContext['seriesInfo'];
   declare currentCommitIdx: number;
+  declare commitLoadGeneration: number;
   declare diff: AppContext['diff'];
   declare files: AppContext['files'];
   declare stats: AppContext['stats'];
@@ -24,6 +25,10 @@ export class SeriesMethods {
   declare eagerPrefetchAllFiles: () => Promise<void>;
   declare isStacked: boolean;
   declare renderStackedView: () => void;
+  declare clearStackedView: AppContext['clearStackedView'];
+  declare resetFileView: AppContext['resetFileView'];
+  declare _commitViewEl: AppContext['_commitViewEl'];
+  private commitLoadController: AbortController | null;
 
   renderSeriesNav() {
     const container = document.getElementById('commit-strip');
@@ -108,27 +113,59 @@ export class SeriesMethods {
     }
     const showCommitMessage = this.currentFileIsCommit;
     const clamped = Math.max(0, Math.min(idx, series.commits.length - 1));
+    const generation = ++this.commitLoadGeneration;
+    this.commitLoadController?.abort();
+    const controller = new AbortController();
+    this.commitLoadController = controller;
     this.currentCommitIdx = clamped;
     this.commentManager.currentCommitIdx = clamped;
     this.reviewNoteManager.currentCommitIdx = clamped;
 
-    const diffData = await fetchJSON<{
+    // Invalidate the previous view before awaiting anything. Its outstanding
+    // file loads may finish, but cannot publish into this generation.
+    this.resetFileView();
+    this.clearStackedView();
+    if (this._commitViewEl) {
+      clearEl(this._commitViewEl);
+      this._commitViewEl.style.display = 'none';
+    }
+    this.files = [];
+    this.diff = null;
+    this.stats = { files_changed: 0, additions: 0, deletions: 0 };
+    this.fileHunks = {};
+    this.currentHunkIndex = {};
+    this.currentFileIndex = 0;
+    this._eagerPrefetchStarted = false;
+    this.renderSeriesNav();
+    this.renderFileList();
+    this.renderProjectInfo();
+
+    let diffData: {
       files: DiffFile[];
       stats: DiffStats;
       commit_message?: string;
       commit_hash?: string;
-    }>(`/api/diff?commit=${clamped}`);
+    };
+    try {
+      diffData = await fetchJSON<typeof diffData>(`/api/diff?commit=${clamped}`, {
+        signal: controller.signal,
+      });
+    } catch (error) {
+      if (generation !== this.commitLoadGeneration || controller.signal.aborted) {
+        return;
+      }
+      throw error;
+    }
+    if (generation !== this.commitLoadGeneration) {
+      return;
+    }
 
     this.files = sortDiffFiles(diffData.files);
     this.diff = { ...diffData, files: this.files };
     this.stats = diffData.stats;
-
-    // Reset per-commit navigation state (fileCache is keyed by commitIdx:path so no reset needed)
-    this.fileHunks = {};
-    this.currentHunkIndex = {};
-    this.currentFileIndex = 0;
-    this.currentFileIsCommit = showCommitMessage;
     this._eagerPrefetchStarted = false;
+
+    this.currentFileIsCommit = showCommitMessage;
 
     this.renderSeriesNav();
     this.renderFileList();
@@ -137,7 +174,7 @@ export class SeriesMethods {
     if (showCommitMessage) {
       this.loadCommitView();
     } else if (this.isStacked) {
-      this.renderStackedView();
+      await this.renderStackedView();
     } else if (this.files.length > 0) {
       await this.loadFile(0);
     } else {
