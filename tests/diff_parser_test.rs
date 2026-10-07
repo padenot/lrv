@@ -80,6 +80,41 @@ index abc123..0000000
 }
 
 #[test]
+fn test_parse_copied_file() {
+    let diff_text = r#"diff --git a/src.sh b/dst.sh
+copy from src.sh
+copy to dst.sh
+index abc123..def456 100755
+--- a/src.sh
++++ b/dst.sh
+@@ -1,2 +1,2 @@
+ line 1
+-line 2
++line two
+"#;
+
+    let diff = lrv::diff::parse_diff(diff_text).unwrap();
+    assert_eq!(diff.files.len(), 1);
+    assert_eq!(diff.files[0].path, "dst.sh");
+    assert_eq!(diff.files[0].old_path.as_deref(), Some("src.sh"));
+    assert_eq!(diff.files[0].status, lrv::types::FileStatus::Copied);
+}
+
+#[test]
+fn test_parse_pure_copy() {
+    let diff_text = r#"diff --git a/src.sh b/dst.sh
+copy from src.sh
+copy to dst.sh
+"#;
+
+    let diff = lrv::diff::parse_diff(diff_text).unwrap();
+    assert_eq!(diff.files.len(), 1);
+    assert_eq!(diff.files[0].path, "dst.sh");
+    assert_eq!(diff.files[0].old_path.as_deref(), Some("src.sh"));
+    assert_eq!(diff.files[0].status, lrv::types::FileStatus::Copied);
+}
+
+#[test]
 fn test_parse_binary_file_modification() {
     let diff_text = r#"diff --git a/logo.png b/logo.png
 index abc1234..def5678 100644

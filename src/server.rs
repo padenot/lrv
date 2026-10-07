@@ -168,10 +168,7 @@ fn resolve_old_content(diff: &DiffResponse, working_dir: &str, req_path: &str) -
     }
 
     // 1) Try reconstructing old content from diff hunks + new content
-    let file_entry = diff
-        .files
-        .iter()
-        .find(|f| f.path == req_path || f.old_path.as_deref() == Some(req_path));
+    let file_entry = find_file(&diff.files, req_path);
 
     if let Some(fe) = file_entry {
         // Added: no old content
@@ -239,11 +236,7 @@ fn resolve_old_content(diff: &DiffResponse, working_dir: &str, req_path: &str) -
     }
 
     // 2) Git blob OID (fast), then jj file show as fallback
-    if let Some(fe) = diff
-        .files
-        .iter()
-        .find(|f| f.path == req_path || f.old_path.as_deref() == Some(req_path))
-    {
+    if let Some(fe) = find_file(&diff.files, req_path) {
         let repo = working_dir;
         let old_key = fe.old_path.clone().unwrap_or_else(|| fe.path.clone());
 
@@ -504,6 +497,15 @@ fn batch_cat_file_blobs(working_dir: &str, oids: &[String]) -> Option<HashMap<St
     Some(result)
 }
 
+// Finds the diff entry for `path`, preferring an exact match over a rename or
+// copy source: a copied file's source can have its own entry in the same diff.
+fn find_file<'a>(files: &'a [FileDiff], path: &str) -> Option<&'a FileDiff> {
+    files
+        .iter()
+        .find(|f| f.path == path)
+        .or_else(|| files.iter().find(|f| f.old_path.as_deref() == Some(path)))
+}
+
 fn apply_diff_forward(old_content: &str, hunks: &[Hunk]) -> String {
     if hunks.is_empty() {
         return old_content.to_string();
@@ -552,12 +554,15 @@ fn stack_series_content(
     let mut new_maps = vec![HashMap::new(); diffs.len()];
 
     for (i, diff) in diffs.iter().enumerate() {
+        // A copy source can also be modified in the same commit, so old content
+        // is read from the state before this commit's changes.
+        let commit_base = current_state.clone();
         for file in &diff.files {
             let old_path = file.old_path.as_ref().unwrap_or(&file.path);
             let old_content = if file.status == FileStatus::Added {
                 String::new()
             } else {
-                current_state.get(old_path).cloned().unwrap_or_default()
+                commit_base.get(old_path).cloned().unwrap_or_default()
             };
             let new_content = if file.status == FileStatus::Deleted {
                 String::new()
@@ -571,7 +576,9 @@ fn stack_series_content(
             }
             new_maps[i].insert(file.path.clone(), new_content.clone());
 
-            current_state.remove(old_path);
+            if file.status != FileStatus::Copied {
+                current_state.remove(old_path);
+            }
             if file.status != FileStatus::Deleted {
                 current_state.insert(file.path.clone(), new_content);
             }
@@ -961,49 +968,46 @@ async fn get_file_content(
 
             if content_new.is_empty() {
                 // Try Git blob OID from diff if present, fallback to filesystem.
-                content_new =
-                    if let Some(fe) = diff.files.iter().find(|f| {
-                        f.path == query.path || f.old_path.as_deref() == Some(&query.path)
-                    }) {
-                        let mut content = String::new();
+                content_new = if let Some(fe) = find_file(&diff.files, &query.path) {
+                    let mut content = String::new();
 
-                        if !repository::is_jj_repo(repo) {
-                            if let Some(oid) = &fe.new_blob {
-                                if let Ok(output) = std::process::Command::new("git")
-                                    .current_dir(repo)
-                                    .args(["cat-file", "-p", oid])
-                                    .output()
-                                {
-                                    if output.status.success() {
-                                        if let Ok(s) = String::from_utf8(output.stdout) {
-                                            content = s;
-                                        }
+                    if !repository::is_jj_repo(repo) {
+                        if let Some(oid) = &fe.new_blob {
+                            if let Ok(output) = std::process::Command::new("git")
+                                .current_dir(repo)
+                                .args(["cat-file", "-p", oid])
+                                .output()
+                            {
+                                if output.status.success() {
+                                    if let Ok(s) = String::from_utf8(output.stdout) {
+                                        content = s;
                                     }
                                 }
                             }
                         }
+                    }
 
-                        if content.is_empty() {
-                            let joined = base_path.join(rel_path);
-                            let file_path = std::fs::canonicalize(&joined)
-                                .map_err(|_| StatusCode::NOT_FOUND)?;
-                            if !file_path.starts_with(&base_canon) {
-                                return Err(StatusCode::FORBIDDEN);
-                            }
-                            content = std::fs::read_to_string(&file_path)
-                                .map_err(|_| StatusCode::NOT_FOUND)?;
-                        }
-
-                        content
-                    } else {
+                    if content.is_empty() {
                         let joined = base_path.join(rel_path);
                         let file_path =
                             std::fs::canonicalize(&joined).map_err(|_| StatusCode::NOT_FOUND)?;
                         if !file_path.starts_with(&base_canon) {
                             return Err(StatusCode::FORBIDDEN);
                         }
-                        std::fs::read_to_string(&file_path).map_err(|_| StatusCode::NOT_FOUND)?
-                    };
+                        content = std::fs::read_to_string(&file_path)
+                            .map_err(|_| StatusCode::NOT_FOUND)?;
+                    }
+
+                    content
+                } else {
+                    let joined = base_path.join(rel_path);
+                    let file_path =
+                        std::fs::canonicalize(&joined).map_err(|_| StatusCode::NOT_FOUND)?;
+                    if !file_path.starts_with(&base_canon) {
+                        return Err(StatusCode::FORBIDDEN);
+                    }
+                    std::fs::read_to_string(&file_path).map_err(|_| StatusCode::NOT_FOUND)?
+                };
             }
 
             content_new
@@ -1049,10 +1053,7 @@ async fn get_file_raw(
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    let file_entry = diff
-        .files
-        .iter()
-        .find(|f| f.path == query.path || f.old_path.as_deref() == Some(query.path.as_str()));
+    let file_entry = find_file(&diff.files, &query.path);
 
     let preview_name = match query.side.as_str() {
         "old" => file_entry
@@ -1478,6 +1479,60 @@ mod precompute_tests {
         assert_eq!(
             new_maps[1].get("file.txt").map(String::as_str),
             Some("series\n")
+        );
+    }
+
+    #[test]
+    fn copy_reads_source_before_same_commit_changes() {
+        let commit = empty_diff(vec![
+            FileDiff {
+                path: "src.sh".to_string(),
+                old_path: None,
+                status: FileStatus::Modified,
+                hunks: vec![Hunk {
+                    header: "@@ -2 +2 @@".to_string(),
+                    old_start: 2,
+                    new_start: 2,
+                    lines: vec![line(LineType::Delete, "b"), line(LineType::Add, "B")],
+                }],
+                old_blob: None,
+                new_blob: None,
+                is_binary: false,
+            },
+            FileDiff {
+                path: "dst.sh".to_string(),
+                old_path: Some("src.sh".to_string()),
+                status: FileStatus::Copied,
+                hunks: vec![Hunk {
+                    header: "@@ -3 +3 @@".to_string(),
+                    old_start: 3,
+                    new_start: 3,
+                    lines: vec![line(LineType::Delete, "c"), line(LineType::Add, "C")],
+                }],
+                old_blob: None,
+                new_blob: None,
+                is_binary: false,
+            },
+        ]);
+        let base = HashMap::from([("src.sh".to_string(), "a\nb\nc\n".to_string())]);
+
+        let (old_maps, new_maps) = stack_series_content(&[commit], base);
+
+        assert_eq!(
+            old_maps[0].get("src.sh").map(String::as_str),
+            Some("a\nb\nc\n")
+        );
+        assert_eq!(
+            new_maps[0].get("src.sh").map(String::as_str),
+            Some("a\nB\nc\n")
+        );
+        assert_eq!(
+            old_maps[0].get("dst.sh").map(String::as_str),
+            Some("a\nb\nc\n")
+        );
+        assert_eq!(
+            new_maps[0].get("dst.sh").map(String::as_str),
+            Some("a\nb\nC\n")
         );
     }
 

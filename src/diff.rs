@@ -92,6 +92,7 @@ pub fn parse_diff(diff_text: &str) -> Result<DiffResponse> {
     let mut hunk_new_start = 0;
     let mut old_path_temp: Option<String> = None;
     let mut is_rename = false;
+    let mut is_copy = false;
     let mut rename_from: Option<String> = None;
     let mut current_old_blob: Option<String> = None;
     let mut current_new_blob: Option<String> = None;
@@ -111,8 +112,12 @@ pub fn parse_diff(diff_text: &str) -> Result<DiffResponse> {
                     });
                     current_lines = Vec::new();
                 }
-                // Include renames without hunks (100% similarity) and binary files
-                if !current_hunks.is_empty() || status == FileStatus::Renamed || is_binary_file {
+                // Include renames and copies without hunks (100% similarity) and binary files
+                if !current_hunks.is_empty()
+                    || status == FileStatus::Renamed
+                    || status == FileStatus::Copied
+                    || is_binary_file
+                {
                     files.push(FileDiff {
                         path,
                         old_path,
@@ -128,6 +133,7 @@ pub fn parse_diff(diff_text: &str) -> Result<DiffResponse> {
             // Reset state for new file
             old_path_temp = None;
             is_rename = false;
+            is_copy = false;
             rename_from = None;
             current_old_blob = None;
             current_new_blob = None;
@@ -154,6 +160,13 @@ pub fn parse_diff(diff_text: &str) -> Result<DiffResponse> {
             // So we need to create the file entry here
             let new_path = stripped.to_string();
             current_file = Some((new_path, rename_from.clone(), FileStatus::Renamed));
+        } else if let Some(stripped) = line.strip_prefix("copy from ") {
+            is_copy = true;
+            rename_from = Some(stripped.to_string());
+        } else if let Some(stripped) = line.strip_prefix("copy to ") {
+            // For pure copies (100% similarity), there's no +++ line
+            let new_path = stripped.to_string();
+            current_file = Some((new_path, rename_from.clone(), FileStatus::Copied));
         } else if line.starts_with("new file mode") {
             // Mark as new file
             old_path_temp = Some("/dev/null".to_string());
@@ -192,6 +205,8 @@ pub fn parse_diff(diff_text: &str) -> Result<DiffResponse> {
             let (final_path, final_old_path, status) = if is_rename {
                 // Renamed file
                 (new_path.clone(), rename_from.clone(), FileStatus::Renamed)
+            } else if is_copy {
+                (new_path.clone(), rename_from.clone(), FileStatus::Copied)
             } else if new_path == "/dev/null" {
                 // Deleted file
                 (
@@ -270,8 +285,12 @@ pub fn parse_diff(diff_text: &str) -> Result<DiffResponse> {
                 lines: current_lines,
             });
         }
-        // Include renames without hunks (100% similarity) and binary files
-        if !current_hunks.is_empty() || status == FileStatus::Renamed || is_binary_file {
+        // Include renames and copies without hunks (100% similarity) and binary files
+        if !current_hunks.is_empty()
+            || status == FileStatus::Renamed
+            || status == FileStatus::Copied
+            || is_binary_file
+        {
             files.push(FileDiff {
                 path,
                 old_path,

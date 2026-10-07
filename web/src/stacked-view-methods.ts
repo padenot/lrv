@@ -738,6 +738,8 @@ export class StackedViewMethods {
       lines.push('deleted file mode 100644');
     } else if (file.status === 'renamed' && file.old_path) {
       lines.push(`rename from ${file.old_path}`, `rename to ${file.path}`);
+    } else if (file.status === 'copied' && file.old_path) {
+      lines.push(`copy from ${file.old_path}`, `copy to ${file.path}`);
     }
     lines.push(`--- ${oldHeader}`, `+++ ${newHeader}`);
     for (const hunk of file.hunks) {

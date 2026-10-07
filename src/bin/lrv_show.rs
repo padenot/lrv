@@ -39,6 +39,7 @@ fn main() -> Result<()> {
             FileStatus::Deleted => "deleted",
             FileStatus::Modified => "modified",
             FileStatus::Renamed => "renamed",
+            FileStatus::Copied => "copied",
         };
         let label = match &file.old_path {
             Some(old) => format!("{} -> {} [{}]", old, file.path, status),

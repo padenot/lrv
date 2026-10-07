@@ -33,6 +33,7 @@ pub enum FileStatus {
     Added,
     Deleted,
     Renamed,
+    Copied,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

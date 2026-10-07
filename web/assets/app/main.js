@@ -10744,7 +10744,7 @@ var FileListMethods = class {
 		};
 	}
 	gitStatus(file) {
-		if (file.status === "added") return "added";
+		if (file.status === "added" || file.status === "copied") return "added";
 		if (file.status === "deleted") return "deleted";
 		if (file.status === "renamed") return "renamed";
 		return "modified";
@@ -13496,6 +13496,7 @@ var StackedViewMethods = class {
 		if (file.status === "added") lines.push("new file mode 100644");
 		else if (file.status === "deleted") lines.push("deleted file mode 100644");
 		else if (file.status === "renamed" && file.old_path) lines.push(`rename from ${file.old_path}`, `rename to ${file.path}`);
+		else if (file.status === "copied" && file.old_path) lines.push(`copy from ${file.old_path}`, `copy to ${file.path}`);
 		lines.push(`--- ${oldHeader}`, `+++ ${newHeader}`);
 		for (const hunk of file.hunks) {
 			const oldCount = hunk.lines.filter((line) => line.type !== "add").length;

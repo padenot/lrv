@@ -356,7 +356,7 @@ export class FileListMethods {
   }
 
   private gitStatus(file: DiffFile): GitStatus {
-    if (file.status === 'added') {
+    if (file.status === 'added' || file.status === 'copied') {
       return 'added';
     }
     if (file.status === 'deleted') {
