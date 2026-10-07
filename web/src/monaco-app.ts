@@ -8,6 +8,7 @@ import {
   clearCommentDraft,
   loadCommentDraft,
   saveCommentDraft,
+  showCommentStoreError,
   syncCommentDraftToServer,
 } from './comment-draft-storage';
 import { CUSTOM_THEMES } from './themes';
@@ -83,6 +84,8 @@ export class MonacoApp {
   stats: DiffStats;
   fileCache: Record<string, FilePair>;
   overallReviewComment: string;
+  // Set once the review is submitted: lrv exits then, so drafts stop syncing.
+  reviewSubmitted: boolean;
   fileHunks: Record<string, HunkRange[]>;
   currentHunkIndex: Record<string, number>;
   config: AppConfig;
@@ -149,6 +152,7 @@ export class MonacoApp {
     this.stats = { files_changed: 0, additions: 0, deletions: 0 };
     this.fileCache = {};
     this.overallReviewComment = '';
+    this.reviewSubmitted = false;
     this.userThemes = [];
     this.fileHunks = {}; // Track hunk start lines per file: { [path]: number[] }
     this.currentHunkIndex = {}; // Track current hunk index per file
@@ -358,7 +362,7 @@ export class MonacoApp {
     this.commentDraftWrite = this.commentDraftWrite
       .catch(() => undefined)
       .then(() => saveCommentDraft(key, comments))
-      .then(() => syncCommentDraftToServer(comments));
+      .then(() => (this.reviewSubmitted ? undefined : syncCommentDraftToServer(comments)));
   }
 
   private async restorePersistedComments() {
@@ -625,6 +629,10 @@ export class MonacoApp {
       if (b) {
         b.style.display = '';
       }
+    }
+
+    if (this.context.comment_store_error) {
+      showCommentStoreError(this.context.comment_store_error);
     }
 
     // Show skill install banner if the agent skill is not installed everywhere lrv supports.

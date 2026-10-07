@@ -92,14 +92,28 @@ export async function saveCommentDraft(key: string, comments: ReviewComment[]): 
 // survive losing the browser profile, the tab, or the terminal output.
 export async function syncCommentDraftToServer(comments: ReviewComment[]): Promise<void> {
   try {
-    await fetch('/api/comments/sync', {
+    const res = await fetch('/api/comments/sync', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ comments }),
     });
+    if (!res.ok) {
+      showCommentStoreError((await res.text()) || `lrv answered with HTTP ${res.status}.`);
+    }
   } catch (error) {
-    console.warn('Failed to sync review comments to lrv:', error);
+    showCommentStoreError(`Could not reach lrv, is it still running? (${error})`);
   }
+}
+
+// Losing comments is a critical failure: the banner stays up for the whole session.
+export function showCommentStoreError(message: string): void {
+  const banner = document.getElementById('store-error-banner');
+  const msg = document.getElementById('store-error-banner-msg');
+  if (!banner || !msg) {
+    return;
+  }
+  msg.textContent = message;
+  banner.style.display = '';
 }
 
 export async function clearCommentDraft(key: string): Promise<void> {

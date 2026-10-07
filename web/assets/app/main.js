@@ -715,14 +715,22 @@ async function saveCommentDraft(key, comments) {
 }
 async function syncCommentDraftToServer(comments) {
 	try {
-		await fetch("/api/comments/sync", {
+		const res = await fetch("/api/comments/sync", {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({ comments })
 		});
+		if (!res.ok) showCommentStoreError(await res.text() || `lrv answered with HTTP ${res.status}.`);
 	} catch (error) {
-		console.warn("Failed to sync review comments to lrv:", error);
+		showCommentStoreError(`Could not reach lrv, is it still running? (${error})`);
 	}
+}
+function showCommentStoreError(message) {
+	const banner = document.getElementById("store-error-banner");
+	const msg = document.getElementById("store-error-banner-msg");
+	if (!banner || !msg) return;
+	msg.textContent = message;
+	banner.style.display = "";
 }
 async function clearCommentDraft(key) {
 	const db = await openDraftDb();
@@ -12807,6 +12815,7 @@ var DialogMethods = class {
 					})
 				});
 				if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+				this.reviewSubmitted = true;
 				await this.clearPersistedComments();
 				this.commentManager.setComments([]);
 				this.overallReviewComment = "";
@@ -13596,6 +13605,7 @@ var MonacoApp = class {
 	stats;
 	fileCache;
 	overallReviewComment;
+	reviewSubmitted;
 	fileHunks;
 	currentHunkIndex;
 	config;
@@ -13639,6 +13649,7 @@ var MonacoApp = class {
 		};
 		this.fileCache = {};
 		this.overallReviewComment = "";
+		this.reviewSubmitted = false;
 		this.userThemes = [];
 		this.fileHunks = {};
 		this.currentHunkIndex = {};
@@ -13782,7 +13793,7 @@ var MonacoApp = class {
 		if (!this.commentDraftKey) return;
 		const key = this.commentDraftKey;
 		const comments = this.commentManager.getComments();
-		this.commentDraftWrite = this.commentDraftWrite.catch(() => void 0).then(() => saveCommentDraft(key, comments)).then(() => syncCommentDraftToServer(comments));
+		this.commentDraftWrite = this.commentDraftWrite.catch(() => void 0).then(() => saveCommentDraft(key, comments)).then(() => this.reviewSubmitted ? void 0 : syncCommentDraftToServer(comments));
 	}
 	async restorePersistedComments() {
 		if (!this.commentDraftKey) return;
@@ -13972,6 +13983,7 @@ var MonacoApp = class {
 			const b = $$2("#public-banner");
 			if (b) b.style.display = "";
 		}
+		if (this.context.comment_store_error) showCommentStoreError(this.context.comment_store_error);
 		if (this.context.claude_skill_installed === false) {
 			const banner = $$2("#skill-banner");
 			const installBtn = $$2("#skill-install-btn");

@@ -62,6 +62,7 @@ fn get_project_context() -> ProjectContext {
         title: None,
         is_public: false,
         claude_skill_installed: skill::all_skills_installed(),
+        comment_store_error: None,
     }
 }
 
@@ -530,8 +531,27 @@ fn line_exists_in_file(file: &crate::types::FileDiff, line: &CommentLine, side: 
     })
 }
 
+fn failure_lines(failures: &[store::OpenFailure]) -> Vec<String> {
+    failures
+        .iter()
+        .map(|(path, e)| format!("Cannot use {}: {e:#}", path.display()))
+        .collect()
+}
+
+/// Resolves the database to read stored reviews from, warning about any
+/// location that could not be read.
+fn readable_db_path() -> std::path::PathBuf {
+    let (path, failures) = store::readable_db_path();
+    if !failures.is_empty() {
+        let mut lines = failure_lines(&failures);
+        lines.push(format!("Reading {} instead.", path.display()));
+        store::print_critical_warning("Comment database unreadable", &lines);
+    }
+    path
+}
+
 fn list_stored_reviews() -> Result<()> {
-    let path = store::default_db_path()?;
+    let path = readable_db_path();
     let sessions = store::CommentStore::list_sessions(&path, 50)?;
     if sessions.is_empty() {
         eprintln!("No stored review sessions in {}", path.display());
@@ -577,9 +597,9 @@ fn recover_stored_review(selector: &str, format: &OutputFormat) -> Result<()> {
                 .with_context(|| format!("Invalid session id: {selector}"))?,
         )
     };
-    let path = store::default_db_path()?;
+    let path = readable_db_path();
     let Some((session, comments)) = store::CommentStore::load_session(&path, id)? else {
-        eprintln!("No stored review comments found");
+        eprintln!("No stored review comments found in {}", path.display());
         std::process::exit(1);
     };
     eprintln!(
@@ -819,10 +839,26 @@ async fn main() -> Result<()> {
         jj_change_id: diffs.first().and_then(|d| d.jj_change_id.clone()),
         is_series,
     };
-    let store = match store::CommentStore::open_default(store_meta) {
-        Ok(store) => Some(Arc::new(store)),
-        Err(e) => {
-            eprintln!("warning: comments will not be saved for recovery: {e:#}");
+    let (opened, failures) = store::CommentStore::open_default(store_meta);
+    let store = match opened {
+        Some((store, path)) => {
+            if !failures.is_empty() {
+                let mut lines = failure_lines(&failures);
+                lines.push(format!("Comments are saved to {} instead.", path.display()));
+                lines.push(format!(
+                    "Use LRV_COMMENT_DB={} to read them from elsewhere.",
+                    path.display()
+                ));
+                store::print_critical_warning("Comment database fallback", &lines);
+            }
+            Some(Arc::new(store))
+        }
+        None => {
+            let mut lines = failure_lines(&failures);
+            lines.push("Comments will NOT be saved for recovery.".to_string());
+            lines.push("If this process or its output is lost, the review is lost.".to_string());
+            store::print_critical_warning("Comment database unavailable", &lines);
+            project_context.comment_store_error = Some(lines.join("\n"));
             None
         }
     };

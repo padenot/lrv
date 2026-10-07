@@ -67,14 +67,66 @@ pub struct CommentStore {
     session_id: Mutex<Option<i64>>,
 }
 
-pub fn default_db_path() -> Result<PathBuf> {
+/// A database location that could not be used, with the reason.
+pub type OpenFailure = (PathBuf, anyhow::Error);
+
+/// Candidate database locations, most preferred first. `LRV_COMMENT_DB`
+/// overrides everything. Otherwise the platform data directory is used, with
+/// the temporary directory as a fallback for environments (e.g. sandboxes) in
+/// which the data directory is not accessible.
+pub fn db_paths() -> Vec<PathBuf> {
     if let Some(path) = std::env::var_os("LRV_COMMENT_DB") {
-        return Ok(PathBuf::from(path));
+        return vec![PathBuf::from(path)];
     }
-    let dir = dirs::data_dir()
-        .context("Could not determine data directory")?
-        .join("lrv");
-    Ok(dir.join("comments.db"))
+    let mut paths = Vec::new();
+    if let Some(dir) = dirs::data_dir() {
+        paths.push(dir.join("lrv").join("comments.db"));
+    }
+    paths.push(std::env::temp_dir().join("lrv").join("comments.db"));
+    paths
+}
+
+/// Picks the database to read stored sessions from: the first location in
+/// `db_paths()` holding a database that can be opened, or else the first
+/// location that did not fail. Also returns the error for each location
+/// skipped because its database could not be opened.
+pub fn readable_db_path() -> (PathBuf, Vec<OpenFailure>) {
+    let paths = db_paths();
+    let mut failures = Vec::new();
+    for path in &paths {
+        match open_existing(path) {
+            Ok(Some(_)) => return (path.clone(), failures),
+            Ok(None) => {}
+            Err(e) => failures.push((path.clone(), e)),
+        }
+    }
+    let fallback = paths
+        .iter()
+        .find(|path| !failures.iter().any(|(failed, _)| failed == *path))
+        .unwrap_or(&paths[0])
+        .clone();
+    (fallback, failures)
+}
+
+/// Prints a prominent banner on stderr, for failures that put the review at
+/// risk.
+pub fn print_critical_warning(title: &str, lines: &[String]) {
+    use std::io::IsTerminal;
+    let (start, end) = if std::io::stderr().is_terminal() {
+        ("\x1b[1;37;41m", "\x1b[0m")
+    } else {
+        ("", "")
+    };
+    let rule = "!".repeat(78);
+    eprintln!();
+    eprintln!("{start}{rule}{end}");
+    eprintln!("{start}!!! CRITICAL: {title}{end}");
+    eprintln!("{start}{rule}{end}");
+    for line in lines {
+        eprintln!("!!! {line}");
+    }
+    eprintln!("{start}{rule}{end}");
+    eprintln!();
 }
 
 impl CommentStore {
@@ -96,8 +148,18 @@ impl CommentStore {
         })
     }
 
-    pub fn open_default(meta: SessionMeta) -> Result<Self> {
-        Self::open(&default_db_path()?, meta)
+    /// Opens the first usable database in `db_paths()`. Returns the store and
+    /// its path, if any location worked, along with the error for each location
+    /// that could not be used.
+    pub fn open_default(meta: SessionMeta) -> (Option<(Self, PathBuf)>, Vec<OpenFailure>) {
+        let mut failures = Vec::new();
+        for path in db_paths() {
+            match Self::open(&path, meta.clone()) {
+                Ok(store) => return (Some((store, path)), failures),
+                Err(e) => failures.push((path, e)),
+            }
+        }
+        (None, failures)
     }
 
     /// Replace the comments recorded for this session. Called on every change

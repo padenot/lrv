@@ -173,6 +173,9 @@ pub struct ProjectContext {
     pub title: Option<String>,
     pub is_public: bool,
     pub claude_skill_installed: bool,
+    /// Set when no comment database could be opened, so comments are not
+    /// saved for recovery.
+    pub comment_store_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

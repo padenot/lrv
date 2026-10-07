@@ -79,6 +79,7 @@ fn make_jj_state(
             title: None,
             is_public: false,
             claude_skill_installed: false,
+            comment_store_error: None,
         }),
         old_caches: Arc::new(vec![tokio::sync::Mutex::new(
             std::collections::HashMap::new(),

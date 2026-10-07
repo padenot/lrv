@@ -1326,17 +1326,32 @@ struct CommentSync {
 async fn sync_comments(
     State(state): State<AppState>,
     Json(payload): Json<CommentSync>,
-) -> StatusCode {
+) -> (StatusCode, String) {
     if payload.comments.iter().any(|c| !c.is_valid()) {
-        return StatusCode::BAD_REQUEST;
+        return (StatusCode::BAD_REQUEST, String::new());
     }
+    // A missing store is reported once, at startup and in the page banner.
     let Some(store) = state.store.clone() else {
-        return StatusCode::OK;
+        return (StatusCode::OK, String::new());
     };
     if let Err(e) = store.replace_comments(&payload.comments) {
-        tracing::warn!("Failed to persist review comments: {e:#}");
+        // Comments are synced on every edit: warn once rather than per keystroke.
+        static WARNED: AtomicBool = AtomicBool::new(false);
+        if !WARNED.swap(true, Ordering::Relaxed) {
+            crate::store::print_critical_warning(
+                "Failed to save review comments",
+                &[
+                    format!("{e:#}"),
+                    "Comments made from now on may NOT be recoverable.".to_string(),
+                ],
+            );
+        }
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to save review comments: {e:#}"),
+        );
     }
-    StatusCode::OK
+    (StatusCode::OK, String::new())
 }
 
 async fn get_review_notes(State(state): State<AppState>) -> Json<Vec<ReviewNote>> {

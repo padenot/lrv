@@ -50,6 +50,7 @@ export type AppContextData = {
   git_branch?: string;
   is_public?: boolean;
   claude_skill_installed?: boolean;
+  comment_store_error?: string | null;
 };
 
 export type UserTheme = {
@@ -136,6 +137,7 @@ export interface AppContext {
   stats: DiffStats;
   fileCache: Record<string, FilePair>;
   overallReviewComment: string;
+  reviewSubmitted: boolean;
   userThemes: UserTheme[];
   fileCacheKey(filePath: string): string;
   fileHunks: Record<string, HunkRange[]>;

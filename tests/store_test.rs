@@ -133,3 +133,24 @@ fn sessions_are_loadable_by_id() {
         .unwrap();
     assert_eq!(oldest[0].body, "older");
 }
+
+// Both cases live in one test because they set the process-wide
+// LRV_COMMENT_DB.
+#[test]
+fn open_default_reports_unusable_locations() {
+    let blocker = db_path("blocker");
+    std::fs::write(&blocker, "").unwrap();
+    let unusable = blocker.join("sub").join("comments.db");
+    std::env::set_var("LRV_COMMENT_DB", &unusable);
+    let (opened, failures) = CommentStore::open_default(meta());
+    assert!(opened.is_none());
+    assert_eq!(failures.len(), 1);
+    assert_eq!(failures[0].0, unusable);
+
+    let usable = db_path("default-ok");
+    std::env::set_var("LRV_COMMENT_DB", &usable);
+    let (opened, failures) = CommentStore::open_default(meta());
+    std::env::remove_var("LRV_COMMENT_DB");
+    assert!(failures.is_empty());
+    assert_eq!(opened.map(|(_, path)| path), Some(usable));
+}

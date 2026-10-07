@@ -89,6 +89,7 @@ export class DialogMethods {
   declare loadCommitView: () => void;
   declare currentFileIsCommit: boolean;
   declare overallReviewComment: AppContext['overallReviewComment'];
+  declare reviewSubmitted: AppContext['reviewSubmitted'];
   declare applyThemeToUI: (theme: string) => void;
   declare loadFile: (index: number) => Promise<void>;
   declare userThemes: AppContext['userThemes'];
@@ -556,6 +557,7 @@ export class DialogMethods {
         if (!resp.ok) {
           throw new Error(`HTTP ${resp.status}`);
         }
+        this.reviewSubmitted = true;
 
         await this.clearPersistedComments();
         this.commentManager.setComments([]);

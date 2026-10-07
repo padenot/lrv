@@ -27,6 +27,7 @@ async fn test_csp_header_present() {
         title: None,
         is_public: false,
         claude_skill_installed: false,
+        comment_store_error: None,
     };
     let (shutdown_tx, _rx) = tokio::sync::mpsc::channel::<()>(1);
     let state = lrv::server::AppState {
@@ -85,6 +86,7 @@ async fn test_csp_on_assets_and_api() {
         title: None,
         is_public: false,
         claude_skill_installed: false,
+        comment_store_error: None,
     };
     let (shutdown_tx, _rx) = tokio::sync::mpsc::channel::<()>(1);
     let state = lrv::server::AppState {

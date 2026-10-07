@@ -30,6 +30,7 @@ fn test_app_state_construction() {
         title: None,
         is_public: false,
         claude_skill_installed: false,
+        comment_store_error: None,
     };
 
     let (shutdown_tx, _rx) = tokio::sync::mpsc::channel::<()>(1);
@@ -81,6 +82,7 @@ fn test_create_router() {
         title: None,
         is_public: false,
         claude_skill_installed: false,
+        comment_store_error: None,
     };
 
     let (shutdown_tx, _rx) = tokio::sync::mpsc::channel::<()>(1);
@@ -133,6 +135,7 @@ async fn test_review_note_api_round_trip() {
         title: None,
         is_public: false,
         claude_skill_installed: false,
+        comment_store_error: None,
     };
 
     let (shutdown_tx, _rx) = tokio::sync::mpsc::channel::<()>(1);

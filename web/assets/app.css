@@ -66,6 +66,21 @@ body {
   flex-direction: column;
 }
 
+.store-error-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 16px;
+  background: #c42b1c;
+  color: #fff;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+.store-error-banner span {
+  white-space: pre-wrap;
+  font-family: monospace;
+  font-size: 12px;
+}
 .restore-banner {
   display: flex;
   align-items: center;
