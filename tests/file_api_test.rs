@@ -60,6 +60,7 @@ fn make_state_with_root(root: &str) -> lrv::server::AppState {
             std::collections::HashMap::new(),
         )]),
         is_series: false,
+        pull_requests: Default::default(),
         store: None,
     }
 }

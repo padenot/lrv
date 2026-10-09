@@ -2061,6 +2061,50 @@ body {
 }
 
 /* Series navigation */
+.pr-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--bg-elevated);
+  border-top: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--border-color);
+  font-weight: 600;
+}
+
+.pr-row:first-child {
+  border-top: none;
+}
+
+.pr-row.no-pr {
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.pr-row-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pr-row-repo {
+  font-size: 10px;
+  color: var(--text-secondary);
+  font-weight: normal;
+}
+
+.pr-row-link {
+  color: var(--accent-color, #f97316);
+  text-decoration: none;
+}
+
+.pr-row-link:hover {
+  text-decoration: underline;
+}
+
 #commit-strip {
   background: var(--bg-secondary);
   overflow-y: auto;

@@ -59,6 +59,7 @@ pub struct AppState {
     pub old_caches: Arc<Vec<Mutex<HashMap<String, String>>>>,
     pub new_caches: Arc<Vec<Mutex<HashMap<String, String>>>>,
     pub is_series: bool,
+    pub pull_requests: Arc<PullRequests>,
     // Durable comment store. `None` when the database could not be opened;
     // reviewing still works, only crash recovery is unavailable.
     pub store: Option<Arc<CommentStore>>,
@@ -877,11 +878,13 @@ async fn get_series(State(state): State<AppState>) -> Json<SeriesInfo> {
             commit_message: d.commit_message.clone(),
             jj_change_id: d.jj_change_id.clone(),
             stats: d.stats.clone(),
+            pr: state.pull_requests.commit_prs.get(i).copied().flatten(),
         })
         .collect();
     Json(SeriesInfo {
         is_series: state.is_series,
         commits,
+        prs: state.pull_requests.prs.clone(),
     })
 }
 

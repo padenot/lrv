@@ -215,10 +215,33 @@ pub struct CommitSummary {
     pub commit_message: Option<String>,
     pub jj_change_id: Option<String>,
     pub stats: DiffStats,
+    /// Index into `SeriesInfo::prs` of the pull request this commit belongs to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pr: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SeriesInfo {
     pub is_series: bool,
     pub commits: Vec<CommitSummary>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub prs: Vec<PrInfo>,
+}
+
+/// A GitHub pull request the reviewed commits belong to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PrInfo {
+    pub owner: String,
+    pub repo: String,
+    pub number: u64,
+    pub title: Option<String>,
+    pub url: Option<String>,
+}
+
+/// Which pull request each commit of the series belongs to.
+#[derive(Debug, Clone, Default)]
+pub struct PullRequests {
+    pub prs: Vec<PrInfo>,
+    /// Per commit, an index into `prs`.
+    pub commit_prs: Vec<Option<usize>>,
 }

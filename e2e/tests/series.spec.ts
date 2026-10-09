@@ -20,6 +20,7 @@ async function startSeriesServer(
   port: number = 0,
   range: string = 'HEAD~2..HEAD',
   extraArgs: string = '',
+  extraEnv: Record<string, string> = {},
 ): Promise<void> {
   if (!testRepoPath) {
     throw new Error('Test repo not initialized');
@@ -40,6 +41,7 @@ async function startSeriesServer(
       stdio: ['inherit', 'pipe', 'pipe'],
       env: {
         ...process.env,
+        ...extraEnv,
         XDG_CONFIG_HOME: path.join(testRepoPath, '.config'),
         LRV_COMMENT_DB: path.join(testRepoPath, '.config', 'lrv-comments.db'),
       },
@@ -885,5 +887,124 @@ test.describe('Commit-message notes in a one-commit series', () => {
     const readOnly = page.locator('.review-note', { hasText: 'overall note' });
     await expect(readOnly).toBeVisible();
     await expect(readOnly.locator('.review-note-actions')).toHaveCount(0);
+  });
+});
+
+test.describe('Series spanning several GitHub PRs', () => {
+  test.describe.configure({ mode: 'serial' });
+
+  test.beforeAll(async () => {
+    const suffix = `${Date.now()}-${process.pid}-${Math.floor(Math.random() * 1e9)}`;
+    testRepoPath = path.join(os.tmpdir(), `lrv-series-prs-${suffix}`);
+    await execAsync(`
+      set -e
+      rm -rf "${testRepoPath}"
+      mkdir -p "${testRepoPath}"
+      cd "${testRepoPath}"
+      git init
+      git config user.name "Test User"
+      git config user.email "test@example.com"
+      git remote add origin https://github.com/o/r.git
+      for n in base one two three four; do
+        echo "$n" > "$n.txt"
+        git add "$n.txt"
+        git commit -m "Add $n"
+      done
+    `);
+    const { stdout } = await execAsync(
+      `cd "${testRepoPath}" && git rev-list --reverse HEAD~4..HEAD`,
+    );
+    const [one, two, three, four] = stdout.trim().split('\n');
+
+    // one -> PR 7; two is in PR 9 and PR 7 (7 wins); three is in no PR; four -> PR 9.
+    const fakeGh = path.join(testRepoPath, 'gh');
+    fs.writeFileSync(
+      fakeGh,
+      `#!/bin/bash
+case "$*" in
+  *"commits/${one}/pulls"*) echo '[["o/r",7,"First PR","https://github.com/o/r/pull/7"]]' ;;
+  *"commits/${two}/pulls"*) echo '[["o/r",9,"Second PR","https://github.com/o/r/pull/9"],["o/r",7,"First PR","https://github.com/o/r/pull/7"]]' ;;
+  *"commits/${three}/pulls"*) echo '[]' ;;
+  *"commits/${four}/pulls"*) echo '[["o/r",9,"Second PR","https://github.com/o/r/pull/9"]]' ;;
+  *"pulls/7/comments"*)
+    echo '{"id":1,"body":"note on first","path":"one.txt","line":1,"side":"RIGHT","commit_id":"${one}","user":{"login":"alice"}}' ;;
+  *"/comments"* | *"/reviews"*) ;;
+  *) exit 1 ;;
+esac
+`,
+      { mode: 0o755 },
+    );
+    await startSeriesServer(0, 'HEAD~4..HEAD', '--github-pr', { LRV_GH_BIN: fakeGh });
+  });
+
+  test.afterAll(async () => {
+    await stopServer();
+    await new Promise((r) => setTimeout(r, 2000));
+    if (testRepoPath) {
+      await execAsync(`rm -rf "${testRepoPath}"`);
+      testRepoPath = null;
+    }
+  });
+
+  test('commits are grouped under PR headers in commit order', async ({ page }) => {
+    await openApp(page);
+
+    const strip = page.locator('#commit-strip');
+    await expect(strip.locator('.series-commit')).toHaveCount(4);
+
+    // Headers and commits interleave: PR 7 (2 commits), No PR (1), PR 9 (1).
+    const rows = strip.locator('.pr-row, .series-commit');
+    await expect(rows).toHaveCount(7);
+    const kinds = await rows.evaluateAll((els) =>
+      els.map((e) => (e.classList.contains('pr-row') ? 'header' : 'commit')),
+    );
+    expect(kinds).toEqual(['header', 'commit', 'commit', 'header', 'commit', 'header', 'commit']);
+
+    const headers = strip.locator('.pr-row');
+    await expect(headers.nth(0)).toContainText('PR #7 First PR');
+    await expect(headers.nth(1)).toHaveText('No PR');
+    await expect(headers.nth(2)).toContainText('PR #9 Second PR');
+  });
+
+  test('the PR number links to the PR', async ({ page }) => {
+    await openApp(page);
+
+    const link = page.locator('#commit-strip .pr-row').first().locator('a');
+    await expect(link).toHaveText('#7');
+    await expect(link).toHaveAttribute('href', 'https://github.com/o/r/pull/7');
+    await expect(link).toHaveAttribute('target', '_blank');
+    await expect(page.locator('#commit-strip .pr-row.no-pr a')).toHaveCount(0);
+  });
+
+  test('all commits stay visible and the active PR header follows the current commit', async ({
+    page,
+  }) => {
+    await openApp(page);
+
+    const strip = page.locator('#commit-strip');
+    const headers = strip.locator('.pr-row');
+    await expect(headers.nth(0)).toHaveClass(/active/);
+
+    await strip.locator('.series-commit').nth(3).click();
+
+    await expect(strip.locator('.series-commit')).toHaveCount(4);
+    await expect(strip.locator('.series-commit').nth(3)).toHaveClass(/active/);
+    await expect(headers.nth(2)).toHaveClass(/active/);
+    await expect(headers.nth(0)).not.toHaveClass(/active/);
+  });
+
+  test("a PR's comments are shown on its own commit and counted in its header", async ({
+    page,
+  }) => {
+    await openApp(page);
+
+    const strip = page.locator('#commit-strip');
+    await expect(strip.locator('.pr-row').first().locator('.series-comment-badge')).toHaveText('1');
+    await expect(
+      strip.locator('.series-commit').first().locator('.series-comment-badge'),
+    ).toHaveText('1');
+    await expect(
+      strip.locator('.series-commit').nth(1).locator('.series-comment-badge'),
+    ).toHaveCount(0);
   });
 });

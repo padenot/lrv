@@ -12932,8 +12932,62 @@ var DialogMethods = class {
 
 //#endregion
 //#region web/src/series-methods.ts
+function prGroups(series) {
+	const groups = [];
+	let lastPr = null;
+	series.commits.forEach((commit, i) => {
+		const prIdx = commit.pr;
+		let group = groups[groups.length - 1];
+		if (!group || prIdx !== lastPr) {
+			group = {
+				pr: prIdx === void 0 ? null : series.prs?.[prIdx] ?? null,
+				commitIdxs: []
+			};
+			groups.push(group);
+			lastPr = prIdx;
+		}
+		group.commitIdxs.push(i);
+	});
+	return groups;
+}
 var SeriesMethods = class {
-	commitLoadController;
+        commitLoadController;
+	commentCountFor(commitIdx) {
+		return this.commentManager.getComments().filter((c) => c.commit_idx === commitIdx).length + this.reviewNoteManager.getNotes().filter((n) => n.commit_idx === commitIdx).length;
+	}
+	prHeader(group, repos) {
+		const { pr } = group;
+		const count = group.commitIdxs.reduce((n, idx) => n + this.commentCountFor(idx), 0);
+		const row = el("div", { className: `pr-row${group.commitIdxs.includes(this.currentCommitIdx) ? " active" : ""}${pr ? "" : " no-pr"}` });
+		const title = el("div", { className: "pr-row-title" });
+		if (!pr) title.textContent = "No PR";
+		else {
+			title.appendChild(document.createTextNode("PR "));
+			const num = `#${pr.number}`;
+			if (pr.url) {
+				const link = el("a", {
+					className: "pr-row-link",
+					text: num
+				});
+				link.href = pr.url;
+				link.target = "_blank";
+				link.rel = "noopener noreferrer";
+				link.title = `Open ${pr.owner}/${pr.repo}#${pr.number} on GitHub`;
+				title.appendChild(link);
+			} else title.appendChild(document.createTextNode(num));
+			if (pr.title) title.appendChild(document.createTextNode(` ${pr.title}`));
+			if (repos.size > 1) title.appendChild(el("span", {
+				className: "pr-row-repo",
+				text: ` ${pr.owner}/${pr.repo}`
+			}));
+		}
+		row.appendChild(title);
+		if (count > 0) row.appendChild(el("span", {
+			className: "series-comment-badge",
+			text: String(count)
+		}));
+		return row;
+	}
 	renderSeriesNav() {
 		const container = document.getElementById("commit-strip");
 		const resizer = document.getElementById("commit-strip-resizer");
@@ -12946,12 +13000,12 @@ var SeriesMethods = class {
 		container.style.display = "";
 		if (resizer) resizer.style.display = "";
 		clearEl(container);
-		const { commits } = this.seriesInfo;
+		const { commits, prs } = this.seriesInfo;
 		const nav = el("div", { className: "series-nav" });
 		const mixedAuthors = new Set(commits.map((c) => c.commit_author).filter(Boolean)).size > 1;
-		commits.forEach((commit) => {
+		const renderCommit = (commit) => {
 			const isActive = commit.idx === this.currentCommitIdx;
-			const commitCommentCount = this.commentManager.getComments().filter((c) => c.commit_idx === commit.idx).length + this.reviewNoteManager.getNotes().filter((n) => n.commit_idx === commit.idx).length;
+			const commitCommentCount = this.commentCountFor(commit.idx);
 			const row = el("div", { className: `series-commit${isActive ? " active" : ""}${commitCommentCount > 0 ? " has-comments" : ""}` });
 			const num = el("span", {
 				className: "series-commit-num",
@@ -12979,7 +13033,17 @@ var SeriesMethods = class {
 				if (commit.idx !== this.currentCommitIdx) this.loadCommit(commit.idx);
 			});
 			nav.appendChild(row);
-		});
+		};
+		if (prs?.length) {
+			const repos = new Set(prs.map((p) => `${p.owner}/${p.repo}`));
+			for (const group of prGroups(this.seriesInfo)) {
+				nav.appendChild(this.prHeader(group, repos));
+				group.commitIdxs.forEach((idx) => {
+					const commit = commits[idx];
+					if (commit) renderCommit(commit);
+				});
+			}
+		} else commits.forEach(renderCommit);
 		container.appendChild(nav);
 	}
 	async loadCommit(idx) {

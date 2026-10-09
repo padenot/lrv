@@ -74,11 +74,21 @@ export type CommitSummary = {
   commit_message?: string;
   jj_change_id?: string;
   stats: DiffStats;
+  pr?: number;
+};
+
+export type PrInfo = {
+  owner: string;
+  repo: string;
+  number: number;
+  title?: string;
+  url?: string;
 };
 
 export type SeriesInfo = {
   is_series: boolean;
   commits: CommitSummary[];
+  prs?: PrInfo[];
 };
 
 export type DiffStats = {

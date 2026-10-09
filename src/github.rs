@@ -1,10 +1,14 @@
 use crate::diff::{attribute_line, diff_shows_line};
-use crate::types::{CommentLine, DiffResponse, ReviewNote, Side};
+use crate::types::{CommentLine, DiffResponse, PrInfo, ReviewNote, Side};
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
+use std::ops::RangeInclusive;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::process::Command;
+use tokio::sync::Semaphore;
+use tokio::task::JoinSet;
 
 #[derive(Debug, Deserialize)]
 struct GhComment {
@@ -212,6 +216,16 @@ pub struct PrRef {
     pub number: u64,
 }
 
+impl From<&PrInfo> for PrRef {
+    fn from(pr: &PrInfo) -> Self {
+        PrRef {
+            owner: pr.owner.clone(),
+            repo: pr.repo.clone(),
+            number: pr.number,
+        }
+    }
+}
+
 /// `(owner, repo)` of a GitHub remote URL (`https://github.com/O/R(.git)`,
 /// `git@github.com:O/R.git`, `ssh://git@github.com/O/R`).
 pub fn parse_github_remote(url: &str) -> Option<(String, String)> {
@@ -292,44 +306,107 @@ async fn run_gh(args: &[&str], timeout: Duration) -> Option<Vec<u8>> {
     out.status.success().then_some(out.stdout)
 }
 
-/// Find the open GitHub PR the reviewed commits belong to: ask GitHub which PRs contain the top
-/// commit, in each GitHub remote of the working directory. Only an unambiguous answer counts.
-/// Silent when `gh` is missing, unauthenticated or slow, since most reviews aren't of a PR and
-/// must not be held up.
-pub async fn detect_pr(diffs: &[DiffResponse]) -> Option<PrRef> {
-    detect_pr_in(&github_remotes(), diffs).await
+/// Find the open GitHub PRs the reviewed commits belong to: ask GitHub which PRs contain each
+/// commit, in each GitHub remote of the working directory. A commit in several PRs belongs to the
+/// one with the lowest number. Returns each PR with the indices of its commits, ordered by first
+/// commit. Silent when `gh` is missing, unauthenticated or slow, since most reviews aren't of a PR
+/// and must not be held up.
+pub async fn detect_prs(diffs: &[DiffResponse]) -> Vec<(PrInfo, Vec<usize>)> {
+    detect_prs_in(&github_remotes(), diffs).await
 }
 
-/// `detect_pr` against an explicit list of `(owner, repo)` candidates.
-pub async fn detect_pr_in(remotes: &[(String, String)], diffs: &[DiffResponse]) -> Option<PrRef> {
-    let sha = diffs.last()?.commit_hash.as_deref()?;
+/// `detect_prs` against an explicit list of `(owner, repo)` candidates.
+pub async fn detect_prs_in(
+    remotes: &[(String, String)],
+    diffs: &[DiffResponse],
+) -> Vec<(PrInfo, Vec<usize>)> {
+    // Bound the number of concurrent `gh` processes.
+    let permits = Arc::new(Semaphore::new(8));
+    let mut tasks = JoinSet::new();
+    for (idx, diff) in diffs.iter().enumerate() {
+        let Some(sha) = diff.commit_hash.clone().filter(|h| !h.is_empty()) else {
+            continue;
+        };
+        let remotes = remotes.to_vec();
+        let permits = permits.clone();
+        tasks.spawn(async move {
+            let _permit = permits.acquire().await.ok()?;
+            Some((idx, detect_commit_pr(&remotes, &sha).await?))
+        });
+    }
+    let mut found: Vec<(usize, PrInfo)> = Vec::new();
+    while let Some(res) = tasks.join_next().await {
+        if let Ok(Some(hit)) = res {
+            found.push(hit);
+        }
+    }
+    found.sort_by_key(|(idx, _)| *idx);
+    let mut groups: Vec<(PrInfo, Vec<usize>)> = Vec::new();
+    for (idx, pr) in found {
+        let same = |g: &(PrInfo, Vec<usize>)| {
+            (&g.0.owner, &g.0.repo, g.0.number) == (&pr.owner, &pr.repo, pr.number)
+        };
+        match groups.iter_mut().find(|g| same(g)) {
+            Some(group) => group.1.push(idx),
+            None => groups.push((pr, vec![idx])),
+        }
+    }
+    groups
+}
+
+/// The open PR with the lowest number containing `sha`, from the first remote that lists any.
+async fn detect_commit_pr(remotes: &[(String, String)], sha: &str) -> Option<PrInfo> {
     for (owner, repo) in remotes {
         let path = format!("repos/{owner}/{repo}/commits/{sha}/pulls");
         let args = [
             "api",
             path.as_str(),
             "--jq",
-            r#"[.[] | select(.state == "open") | [.base.repo.full_name, .number]] | @json"#,
+            r#"[.[] | select(.state == "open") | [.base.repo.full_name, .number, .title, .html_url]] | @json"#,
         ];
         let Some(out) = run_gh(&args, Duration::from_secs(5)).await else {
             continue;
         };
-        let Ok(numbers) = serde_json::from_slice::<Vec<(String, u64)>>(&out) else {
+        let Ok(prs) =
+            serde_json::from_slice::<Vec<(String, u64, Option<String>, Option<String>)>>(&out)
+        else {
             continue;
         };
         // The PR may live in another repo than the remote asked (a fork's commit also lists the
         // upstream's PRs), so use the PR's base repo.
-        if let [(full_name, number)] = &numbers[..] {
+        let earliest = prs.into_iter().min_by_key(|(_, number, _, _)| *number);
+        if let Some((full_name, number, title, url)) = earliest {
             if let Some((owner, repo)) = full_name.split_once('/') {
-                return Some(PrRef {
+                return Some(PrInfo {
                     owner: owner.to_string(),
                     repo: repo.to_string(),
-                    number: *number,
+                    number,
+                    title,
+                    url,
                 });
             }
         }
     }
     None
+}
+
+/// Look up a PR's title and URL. Best effort: they only decorate the UI.
+pub async fn fetch_pr_info(pr: &PrRef) -> PrInfo {
+    let path = format!("repos/{}/{}/pulls/{}", pr.owner, pr.repo, pr.number);
+    let args = ["api", path.as_str(), "--jq", "[.title, .html_url] | @json"];
+    let (title, url) = match run_gh(&args, Duration::from_secs(5)).await {
+        Some(out) => {
+            serde_json::from_slice::<(Option<String>, Option<String>)>(&out).unwrap_or_default()
+        }
+        None => Default::default(),
+    };
+    PrInfo {
+        owner: pr.owner.clone(),
+        repo: pr.repo.clone(),
+        number: pr.number,
+        title,
+        url,
+    }
 }
 
 /// Parse `123`, `#123`, `OWNER/REPO#123` or a `github.com/OWNER/REPO/pull/123` URL. A bare number
@@ -382,17 +459,31 @@ async fn gh_api_list<T: serde::de::DeserializeOwned>(path: &str) -> Result<Vec<T
 }
 
 /// Fetch a PR's comments through the `gh` CLI, so lrv never handles a GitHub token: inline review
-/// comments, plus the PR conversation and review summaries as review-scoped notes.
-pub async fn fetch_pr_notes(pr: &PrRef, diffs: &[DiffResponse]) -> Result<Vec<ReviewNote>> {
+/// comments, plus the PR conversation and review summaries as review-scoped notes. `commits` are
+/// the indices of `diffs` the PR covers: its comments are attributed within that range only, and
+/// PR-level notes go on its last commit.
+pub async fn fetch_pr_notes(
+    pr: &PrRef,
+    diffs: &[DiffResponse],
+    commits: RangeInclusive<usize>,
+) -> Result<Vec<ReviewNote>> {
     let base = format!("repos/{}/{}", pr.owner, pr.repo);
     let n = pr.number;
+    let lo = *commits.start();
+    let hi = (*commits.end()).min(diffs.len().saturating_sub(1));
+    let in_series = diffs.len() > 1;
     let inline: Vec<GhComment> = gh_api_list(&format!("{base}/pulls/{n}/comments")).await?;
-    let mut notes = notes_from_comments(inline, diffs);
+    let mut notes = notes_from_comments(inline, &diffs[lo..=hi]);
+    for note in &mut notes {
+        note.commit_idx = match note.commit_idx {
+            Some(idx) => Some(idx + lo),
+            None => in_series.then_some(lo),
+        };
+    }
     let issue_comments: Vec<GhDiscussion> =
         gh_api_list(&format!("{base}/issues/{n}/comments")).await?;
     let reviews: Vec<GhDiscussion> = gh_api_list(&format!("{base}/pulls/{n}/reviews")).await?;
-    let last_commit = (diffs.len() > 1).then(|| diffs.len() - 1);
-    let discussion = discussion_notes(issue_comments, reviews, last_commit);
+    let discussion = discussion_notes(issue_comments, reviews, in_series.then_some(hi));
     eprintln!(
         "Loaded {} PR discussion note{} from GitHub PR",
         discussion.len(),

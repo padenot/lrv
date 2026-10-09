@@ -23,7 +23,7 @@ use tokio::sync::{mpsc, Mutex, Notify};
 use crate::output::OutputFormat;
 use crate::phabricator::PhabricatorClient;
 use crate::server::{create_router, AppState};
-use crate::types::{CommentLine, DiffResponse, LineType, ProjectContext, ReviewNote, Side};
+use crate::types::{CommentLine, DiffResponse, LineType, PrInfo, ProjectContext, ReviewNote, Side};
 use lrv::repository;
 
 fn get_project_context() -> ProjectContext {
@@ -603,21 +603,51 @@ async fn auto_fetch_phab(diffs: &[DiffResponse], include_done: bool) -> Option<V
     Some(notes)
 }
 
-/// Load the comments of the open GitHub PR containing the top commit. `None` when there isn't
-/// exactly one.
-async fn auto_fetch_github(diffs: &[DiffResponse]) -> Option<Vec<ReviewNote>> {
-    let pr = github::detect_pr(diffs).await?;
-    eprintln!(
-        "Loading review comments from GitHub {}/{}#{}...",
-        pr.owner, pr.repo, pr.number
-    );
-    Some(match github::fetch_pr_notes(&pr, diffs).await {
-        Ok(notes) => notes,
-        Err(e) => {
-            eprintln!("warning: failed to load comments from GitHub PR: {e:#}");
-            Vec::new()
+/// Assign each commit to the PR it belongs to; `commits` are the indices of each PR's commits.
+fn pull_requests(prs: Vec<(PrInfo, Vec<usize>)>, commit_count: usize) -> types::PullRequests {
+    let mut commit_prs = vec![None; commit_count];
+    for (i, (_, commits)) in prs.iter().enumerate() {
+        for &c in commits {
+            commit_prs[c] = Some(i);
         }
-    })
+    }
+    types::PullRequests {
+        prs: prs.into_iter().map(|(pr, _)| pr).collect(),
+        commit_prs,
+    }
+}
+
+/// A single PR covering every commit.
+fn pull_requests_for(pr: PrInfo, commit_count: usize) -> types::PullRequests {
+    pull_requests(vec![(pr, (0..commit_count).collect())], commit_count)
+}
+
+/// Load the comments of the open GitHub PRs containing the reviewed commits. `None` when no commit
+/// is in one.
+async fn auto_fetch_github(
+    diffs: &[DiffResponse],
+) -> Option<(Vec<ReviewNote>, types::PullRequests)> {
+    let detected = github::detect_prs(diffs).await;
+    if detected.is_empty() {
+        return None;
+    }
+    let mut notes = Vec::new();
+    for (pr, commits) in &detected {
+        eprintln!(
+            "Loading review comments from GitHub {}/{}#{}...",
+            pr.owner, pr.repo, pr.number
+        );
+        let range =
+            commits.iter().min().copied().unwrap_or(0)..=commits.iter().max().copied().unwrap_or(0);
+        match github::fetch_pr_notes(&github::PrRef::from(pr), diffs, range).await {
+            Ok(pr_notes) => notes.extend(pr_notes),
+            Err(e) => eprintln!(
+                "warning: failed to load comments from GitHub PR #{}: {e:#}",
+                pr.number
+            ),
+        }
+    }
+    Some((notes, pull_requests(detected, diffs.len())))
 }
 
 fn infer_review_note_side(
@@ -954,11 +984,15 @@ async fn main() -> Result<()> {
     if let Some(path) = &args.github_pr_comments {
         review_notes.extend(github::load_github_notes(path, &diffs)?);
     }
-    // A bare `--github-pr` is an empty string: detect the PR from the commits instead.
+    let mut pull_requests = types::PullRequests::default();
+    // A bare `--github-pr` is an empty string: detect the PRs from the commits instead.
     match args.github_pr.as_deref() {
         Some("") => match auto_fetch_github(&diffs).await {
-            Some(notes) => review_notes.extend(notes),
-            None => eprintln!("warning: no open GitHub PR found for the reviewed commit"),
+            Some((notes, prs)) => {
+                review_notes.extend(notes);
+                pull_requests = prs;
+            }
+            None => eprintln!("warning: no open GitHub PR found for the reviewed commits"),
         },
         Some(pr) => {
             let pr = github::parse_pr_ref(pr, &github::github_remotes())?;
@@ -966,7 +1000,9 @@ async fn main() -> Result<()> {
                 "Loading review comments from GitHub {}/{}#{}...",
                 pr.owner, pr.repo, pr.number
             );
-            review_notes.extend(github::fetch_pr_notes(&pr, &diffs).await?);
+            review_notes.extend(github::fetch_pr_notes(&pr, &diffs, 0..=diffs.len() - 1).await?);
+            // One PR covering the whole series.
+            pull_requests = pull_requests_for(github::fetch_pr_info(&pr).await, diffs.len());
         }
         None => {}
     }
@@ -976,11 +1012,15 @@ async fn main() -> Result<()> {
         || args.github_pr_comments.is_some()
         || args.github_pr.is_some();
     if user_config.auto_fetch_comments && !explicit_comments {
-        let notes = match auto_fetch_phab(&diffs, args.phab_include_done).await {
-            Some(notes) => Some(notes),
-            None => auto_fetch_github(&diffs).await,
-        };
-        review_notes.extend(notes.unwrap_or_default());
+        match auto_fetch_phab(&diffs, args.phab_include_done).await {
+            Some(notes) => review_notes.extend(notes),
+            None => {
+                if let Some((notes, prs)) = auto_fetch_github(&diffs).await {
+                    review_notes.extend(notes);
+                    pull_requests = prs;
+                }
+            }
+        }
     }
     tag_single_commit_notes(&mut review_notes, is_series, diffs.len());
 
@@ -1048,6 +1088,7 @@ async fn main() -> Result<()> {
         old_caches: Arc::new(old_caches),
         new_caches: Arc::new(new_caches),
         is_series,
+        pull_requests: Arc::new(pull_requests),
         store,
     };
 
