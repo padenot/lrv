@@ -653,7 +653,8 @@ const DEFAULT_APP_CONFIG = {
 	split_view: true,
 	auto_close_tab: true,
 	stacked_view: false,
-	word_wrap: false
+	word_wrap: false,
+	auto_fetch_comments: false
 };
 function resolveAppConfig(input) {
 	return {
@@ -662,7 +663,8 @@ function resolveAppConfig(input) {
 		split_view: input.split_view ?? DEFAULT_APP_CONFIG.split_view,
 		auto_close_tab: input.auto_close_tab ?? DEFAULT_APP_CONFIG.auto_close_tab,
 		stacked_view: input.stacked_view ?? DEFAULT_APP_CONFIG.stacked_view,
-		word_wrap: input.word_wrap ?? DEFAULT_APP_CONFIG.word_wrap
+		word_wrap: input.word_wrap ?? DEFAULT_APP_CONFIG.word_wrap,
+		auto_fetch_comments: input.auto_fetch_comments ?? DEFAULT_APP_CONFIG.auto_fetch_comments
 	};
 }
 
@@ -12581,6 +12583,7 @@ var DialogMethods = class {
 		const currentSplitView = this.config.split_view;
 		const currentAutoCloseTab = this.config.auto_close_tab;
 		const currentWordWrap = this.config.word_wrap;
+		const currentAutoFetch = this.config.auto_fetch_comments;
 		if (window.DEBUG) console.info("Settings modal - current values:", {
 			currentColorScheme,
 			currentFont,
@@ -12657,11 +12660,21 @@ var DialogMethods = class {
 			name: "word_wrap",
 			checked: currentWordWrap
 		} }), el("span", { text: "Wrap long lines instead of scrolling horizontally" })])]);
+		const autoFetchField = el("div", { className: "settings-field" }, [el("label", {
+			attrs: { for: "auto-fetch-comments" },
+			text: "Existing Comments"
+		}), el("div", { className: "checkbox-wrapper" }, [el("input", { attrs: {
+			type: "checkbox",
+			id: "auto-fetch-comments",
+			name: "auto_fetch_comments",
+			checked: currentAutoFetch
+		} }), el("span", { text: "Load comments from the commit’s Phabricator revision or GitHub PR (applies on next launch)" })])]);
 		form.appendChild(themeField);
 		form.appendChild(fontField);
 		form.appendChild(splitViewField);
 		form.appendChild(wordWrapField);
 		form.appendChild(autoCloseField);
+		form.appendChild(autoFetchField);
 		body.appendChild(form);
 		const colorField = form.querySelector("#color-scheme");
 		if (colorField) colorField.value = currentColorScheme;
@@ -12677,6 +12690,7 @@ var DialogMethods = class {
 				split_view: formData.get("split_view") === "on",
 				auto_close_tab: formData.get("auto_close_tab") === "on",
 				word_wrap: formData.get("word_wrap") === "on",
+				auto_fetch_comments: formData.get("auto_fetch_comments") === "on",
 				stacked_view: this.config.stacked_view
 			});
 			try {

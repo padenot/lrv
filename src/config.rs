@@ -17,6 +17,10 @@ pub struct UserConfig {
     pub stacked_view: bool,
     #[serde(default)]
     pub word_wrap: bool,
+    /// Detect the Phabricator revision or GitHub PR the reviewed commits belong to and load
+    /// its existing comments.
+    #[serde(default)]
+    pub auto_fetch_comments: bool,
 }
 
 fn default_color_scheme() -> String {
@@ -44,6 +48,7 @@ impl Default for UserConfig {
             auto_close_tab: default_auto_close_tab(),
             stacked_view: false,
             word_wrap: false,
+            auto_fetch_comments: false,
         }
     }
 }

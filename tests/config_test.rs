@@ -8,6 +8,7 @@ fn test_config_defaults() {
     assert!(config.split_view);
     assert!(config.auto_close_tab);
     assert!(!config.word_wrap);
+    assert!(!config.auto_fetch_comments);
 }
 
 /// Test config serialization/deserialization
@@ -20,6 +21,7 @@ fn test_config_serde() {
         auto_close_tab: false,
         stacked_view: false,
         word_wrap: true,
+        auto_fetch_comments: true,
     };
 
     // Serialize to TOML

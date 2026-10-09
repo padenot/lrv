@@ -319,6 +319,111 @@ pub fn parse_diff(diff_text: &str) -> Result<DiffResponse> {
     })
 }
 
+/// Where a line sits in one commit's view of a file.
+enum LineState {
+    /// Changed by this commit (added on the new side, deleted on the old side).
+    Changed,
+    /// Shown unchanged inside a hunk; carries the line number on the other side.
+    Context(usize),
+    /// Outside every hunk; carries the line number on the other side.
+    Outside(usize),
+}
+
+/// Locate `line` on `side` of `file` and translate it to the other side.
+fn locate_line(file: &FileDiff, line: usize, side: Side) -> LineState {
+    let mut offset: isize = 0;
+    for hunk in &file.hunks {
+        let (mine, other): (Vec<_>, Vec<_>) = match side {
+            Side::New => (
+                hunk.lines.iter().map(|l| l.new_line).collect(),
+                hunk.lines.iter().map(|l| l.old_line).collect(),
+            ),
+            Side::Old => (
+                hunk.lines.iter().map(|l| l.old_line).collect(),
+                hunk.lines.iter().map(|l| l.new_line).collect(),
+            ),
+        };
+        for (i, m) in mine.iter().enumerate() {
+            if *m == Some(line) {
+                return match other[i] {
+                    Some(o) => LineState::Context(o),
+                    None => LineState::Changed,
+                };
+            }
+        }
+        let last = mine.iter().flatten().max().copied();
+        let before = match last {
+            Some(last) => last < line,
+            None => match side {
+                Side::New => hunk.new_start < line,
+                Side::Old => hunk.old_start < line,
+            },
+        };
+        if !before {
+            break;
+        }
+        let mine_count = mine.iter().flatten().count() as isize;
+        let other_count = other.iter().flatten().count() as isize;
+        offset += other_count - mine_count;
+    }
+    LineState::Outside((line as isize + offset).max(1) as usize)
+}
+
+/// Trace a comment made on a combined diff (base..head) back to the series
+/// commit responsible for the line, like an in-memory blame.
+///
+/// `line` is a head-file line for `Side::New` and a base-file line for
+/// `Side::Old`. Returns `(commit_idx, line)` where `line` is the number on
+/// that same side within the commit's own diff. For a line no commit changed,
+/// falls back to the latest (new side) or earliest (old side) commit that
+/// shows it as context, then to any commit touching the file.
+pub fn attribute_line(
+    diffs: &[DiffResponse],
+    path: &str,
+    line: usize,
+    side: Side,
+) -> Option<(usize, usize)> {
+    let order: Vec<usize> = match side {
+        Side::New => (0..diffs.len()).rev().collect(),
+        Side::Old => (0..diffs.len()).collect(),
+    };
+    let mut cur_path = path.to_string();
+    let mut cur_line = line;
+    let mut shown: Option<(usize, usize)> = None;
+    let mut touched: Option<(usize, usize)> = None;
+
+    for i in order {
+        let file = diffs[i].files.iter().find(|f| match side {
+            Side::New => f.path == cur_path,
+            Side::Old => f.old_path.as_deref().unwrap_or(&f.path) == cur_path,
+        });
+        let Some(file) = file else { continue };
+        touched.get_or_insert((i, cur_line));
+        let next = match locate_line(file, cur_line, side) {
+            LineState::Changed => return Some((i, cur_line)),
+            LineState::Context(o) => {
+                shown.get_or_insert((i, cur_line));
+                o
+            }
+            LineState::Outside(o) => o,
+        };
+        cur_line = next;
+        cur_path = match side {
+            Side::New => file.old_path.clone().unwrap_or_else(|| file.path.clone()),
+            Side::Old => file.path.clone(),
+        };
+    }
+    shown.or(touched)
+}
+
+/// Whether `diff` itself shows `line` on `side` of `path` (changed or context).
+pub fn diff_shows_line(diff: &DiffResponse, path: &str, line: usize, side: Side) -> bool {
+    diff.files
+        .iter()
+        .find(|f| f.path == path)
+        .is_some_and(|f| !matches!(locate_line(f, line, side), LineState::Outside(_)))
+}
+
 fn parse_hunk_header(line: &str) -> Option<(usize, usize)> {
     // Parse: @@ -old_start,old_count +new_start,new_count @@
     let parts: Vec<&str> = line.split_whitespace().collect();

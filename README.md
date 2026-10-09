@@ -106,7 +106,7 @@ Notes:
   `lrv`, write its findings as review notes JSON, and pass that file with
   `--review-notes-file`. The author can then Address, Reply, or Ignore those
   local reviewer comments in the UI before submitting.
-- Phabricator notes use `PHABRICATOR_API_KEY` or `PHABRICATOR_TOKEN`; set
+- Phabricator notes use `PHABRICATOR_API_KEY` or `PHABRICATOR_TOKEN`, falling back to the token in `~/.arcrc` (written by `moz-phab install-certificate`); set
   `PHABRICATOR_BASE_URL` or pass `--phab-base-url` for non-Mozilla instances.
 - `lrv --version` prints the current version and can warn if a newer release exists.
 

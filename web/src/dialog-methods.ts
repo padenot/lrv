@@ -188,6 +188,7 @@ export class DialogMethods {
     const currentSplitView = this.config.split_view;
     const currentAutoCloseTab = this.config.auto_close_tab;
     const currentWordWrap = this.config.word_wrap;
+    const currentAutoFetch = this.config.auto_fetch_comments;
 
     if (window.DEBUG) {
       console.info('Settings modal - current values:', {
@@ -308,11 +309,29 @@ export class DialogMethods {
       ]),
     ]);
 
+    const autoFetchField = el('div', { className: 'settings-field' }, [
+      el('label', { attrs: { for: 'auto-fetch-comments' }, text: 'Existing Comments' }),
+      el('div', { className: 'checkbox-wrapper' }, [
+        el('input', {
+          attrs: {
+            type: 'checkbox',
+            id: 'auto-fetch-comments',
+            name: 'auto_fetch_comments',
+            checked: currentAutoFetch,
+          },
+        }),
+        el('span', {
+          text: 'Load comments from the commit’s Phabricator revision or GitHub PR (applies on next launch)',
+        }),
+      ]),
+    ]);
+
     form.appendChild(themeField);
     form.appendChild(fontField);
     form.appendChild(splitViewField);
     form.appendChild(wordWrapField);
     form.appendChild(autoCloseField);
+    form.appendChild(autoFetchField);
 
     body.appendChild(form);
     const colorField = form.querySelector<HTMLSelectElement>('#color-scheme');
@@ -335,6 +354,7 @@ export class DialogMethods {
         split_view: formData.get('split_view') === 'on',
         auto_close_tab: formData.get('auto_close_tab') === 'on',
         word_wrap: formData.get('word_wrap') === 'on',
+        auto_fetch_comments: formData.get('auto_fetch_comments') === 'on',
         stacked_view: this.config.stacked_view,
       });
 

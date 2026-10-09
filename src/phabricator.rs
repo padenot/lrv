@@ -287,6 +287,11 @@ impl PhabricatorClient {
             .and_then(|value| value.as_u64())
             .unwrap_or(1)
             .max(1);
+        let side = if fields.get("isNewFile").and_then(|v| v.as_bool()) == Some(false) {
+            Side::Old
+        } else {
+            Side::New
+        };
         let line = line as usize;
         let line = if length > 1 {
             CommentLine::Range((line, line + length as usize - 1))
@@ -310,7 +315,7 @@ impl PhabricatorClient {
                 id: Some(comment.id.to_string()),
                 file: file_path.to_string(),
                 line: line.clone(),
-                side: Side::New,
+                side,
                 body: body.to_string(),
                 author: author_phid.and_then(|phid| users.get(phid).cloned()),
                 date: None,
@@ -354,6 +359,21 @@ impl PhabricatorClient {
     }
 }
 
+/// Find the `Differential Revision: <url>` trailer that moz-phab and arc add to
+/// commit messages. Returns the Phabricator base URL and the revision id, so the
+/// host comes from the commit itself rather than from configuration.
+pub fn detect_revision(commit_message: &str) -> Option<(String, u32)> {
+    const TRAILER: &str = "differential revision:";
+    let url = commit_message.lines().rev().find_map(|line| {
+        let line = line.trim();
+        let head = line.get(..TRAILER.len())?;
+        head.eq_ignore_ascii_case(TRAILER)
+            .then(|| line[TRAILER.len()..].trim())
+    })?;
+    let (base, _) = url.rsplit_once("/D")?;
+    Some((base.to_string(), parse_revision_id(url)?))
+}
+
 fn parse_revision_id(input: &str) -> Option<u32> {
     let trimmed = input.trim();
     if let Some((_, tail)) = trimmed.rsplit_once("/D") {
@@ -391,7 +411,24 @@ fn note_line_start(line: &CommentLine) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_revision_id;
+    use super::{detect_revision, parse_revision_id};
+
+    #[test]
+    fn detects_revision_trailer() {
+        let msg = "Bug 1 - Fix it r=reviewer\n\nDifferential Revision: https://phabricator.services.mozilla.com/D301379\n";
+        assert_eq!(
+            detect_revision(msg),
+            Some((
+                "https://phabricator.services.mozilla.com".to_string(),
+                301379
+            ))
+        );
+        assert_eq!(detect_revision("Bug 1 - no trailer"), None);
+        assert_eq!(
+            detect_revision("Differential Revision: https://example.com/not-a-revision"),
+            None
+        );
+    }
 
     #[test]
     fn parse_revision_ids() {
