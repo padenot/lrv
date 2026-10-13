@@ -430,7 +430,10 @@ export class StackedViewMethods {
     if (!file.hunks.length) {
       return null;
     }
-    const parsed = parsePatchFiles(this.toUnifiedPatch(file), `lrv:${file.path}`)[0]?.files[0];
+    const parsed = parsePatchFiles(
+      this.toUnifiedPatch(file),
+      `lrv:${this.fileCacheKey(file.path)}@${this.commitLoadGeneration}`,
+    )[0]?.files[0];
     return parsed ?? null;
   }
 

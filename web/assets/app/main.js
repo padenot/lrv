@@ -13382,7 +13382,7 @@ var StackedViewMethods = class {
 	}
 	toPatchDiffsMetadata(file, parsePatchFiles) {
 		if (!file.hunks.length) return null;
-		return parsePatchFiles(this.toUnifiedPatch(file), `lrv:${file.path}`)[0]?.files[0] ?? null;
+		return parsePatchFiles(this.toUnifiedPatch(file), `lrv:${this.fileCacheKey(file.path)}@${this.commitLoadGeneration}`)[0]?.files[0] ?? null;
 	}
 	buildHeaderMetadata(file) {
 		const { additions, deletions } = this.fileDelta(file);
