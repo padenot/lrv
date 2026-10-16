@@ -14,6 +14,7 @@ use anyhow::{Context, Result};
 use clap::{ArgAction, Parser};
 use lrv::netutil;
 use moz_cli_version_check::VersionChecker;
+use std::collections::HashMap;
 use std::env;
 use std::io::{Read, Write};
 use std::process::Command;
@@ -21,7 +22,7 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex, Notify};
 
 use crate::output::OutputFormat;
-use crate::phabricator::PhabricatorClient;
+use crate::phabricator::{PhabricatorClient, Publisher, RevisionStatusInfo};
 use crate::server::{create_router, AppState};
 use crate::types::{CommentLine, DiffResponse, LineType, PrInfo, ProjectContext, ReviewNote, Side};
 use lrv::repository;
@@ -513,7 +514,11 @@ async fn load_phabricator_notes(
 
 /// Load the comments of the Phabricator revision(s) named by the commits' `Differential Revision:`
 /// trailers. `None` when no commit has one. Failures are warnings: the review must open regardless.
-async fn auto_fetch_phab(diffs: &[DiffResponse], include_done: bool) -> Option<Vec<ReviewNote>> {
+async fn auto_fetch_phab(
+    diffs: &[DiffResponse],
+    include_done: bool,
+    skip: &HashMap<usize, &RevisionStatusInfo>,
+) -> Option<Vec<ReviewNote>> {
     let messages: Vec<Option<&str>> = diffs.iter().map(|d| d.commit_message.as_deref()).collect();
     let revisions: Vec<(usize, String, u32)> =
         phabricator::resolve_phab_targets(&[], "", &messages)
@@ -534,6 +539,13 @@ async fn auto_fetch_phab(diffs: &[DiffResponse], include_done: bool) -> Option<V
     };
     let mut notes = Vec::new();
     for (i, base, id) in revisions {
+        if let Some(revision) = skip.get(&i) {
+            eprintln!(
+                "warning: not loading comments from D{id}: {}; update your checkout (e.g. moz-phab patch D{id})",
+                revision.reason.as_deref().unwrap_or_default()
+            );
+            continue;
+        }
         eprintln!("Loading review comments from Phabricator D{id}...");
         let fetched = async {
             let client = PhabricatorClient::new(base, token.clone())?;
@@ -565,6 +577,41 @@ async fn auto_fetch_phab(diffs: &[DiffResponse], include_done: bool) -> Option<V
         }
     }
     Some(notes)
+}
+
+async fn outdated_phab_revisions(publisher: &Publisher) -> Vec<RevisionStatusInfo> {
+    let validation = match tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        publisher.validate(),
+    )
+    .await
+    {
+        Ok(validation) => validation,
+        Err(_) => {
+            eprintln!("warning: couldn't check whether the Phabricator revisions are up to date: timed out");
+            return Vec::new();
+        }
+    };
+    if let Some(error) = &validation.error {
+        eprintln!(
+            "warning: couldn't check whether the Phabricator revisions are up to date: {error}"
+        );
+        return Vec::new();
+    }
+    for revision in &validation.revisions {
+        if !revision.outdated {
+            if let Some(reason) = &revision.reason {
+                eprintln!(
+                    "warning: couldn't check whether {} is up to date: {reason}",
+                    revision.id
+                );
+            }
+        }
+    }
+    phabricator::foreign_outdated(validation)
+        .into_iter()
+        .cloned()
+        .collect()
 }
 
 /// Assign each commit to the PR it belongs to; `commits` are the indices of each PR's commits.
@@ -936,6 +983,34 @@ async fn main() -> Result<()> {
     } else {
         None
     };
+    // Explicitly requested comments win; fetching on top of them would duplicate notes.
+    let explicit_comments = !args.phab_revisions.is_empty()
+        || args.phab_mcp_comments.is_some()
+        || args.github_pr_comments.is_some()
+        || args.github_pr.is_some();
+    let config_fetch = user_config.auto_fetch_comments && !explicit_comments;
+    let outdated = match &publisher {
+        Some(publisher) if !args.phab_revisions.is_empty() || config_fetch => {
+            outdated_phab_revisions(publisher).await
+        }
+        _ => Vec::new(),
+    };
+    // An explicit --phab-revision aborts; comments fetched because of the config are skipped.
+    if !args.phab_revisions.is_empty() && !outdated.is_empty() {
+        let reasons = outdated
+            .iter()
+            .filter_map(|revision| revision.reason.as_deref())
+            .collect::<Vec<_>>()
+            .join("\n");
+        anyhow::bail!(
+            "{reasons}\nUpdate your checkout (e.g. `moz-phab patch {}`) or run without --phab-revision.",
+            outdated[0].id
+        );
+    }
+    let skip = outdated
+        .iter()
+        .flat_map(|revision| revision.commit_idxs.iter().map(move |&idx| (idx, revision)))
+        .collect();
     review_notes.extend(
         load_phabricator_notes(
             &named_revisions,
@@ -946,7 +1021,7 @@ async fn main() -> Result<()> {
         .await?,
     );
     if named_revisions.len() < args.phab_revisions.len() {
-        match auto_fetch_phab(&diffs, args.phab_include_done).await {
+        match auto_fetch_phab(&diffs, args.phab_include_done, &skip).await {
             Some(notes) => review_notes.extend(notes),
             None => eprintln!("warning: no commit has a Differential Revision trailer"),
         }
@@ -981,13 +1056,8 @@ async fn main() -> Result<()> {
         }
         None => {}
     }
-    // Explicitly requested comments win; fetching on top of them would duplicate notes.
-    let explicit_comments = !args.phab_revisions.is_empty()
-        || args.phab_mcp_comments.is_some()
-        || args.github_pr_comments.is_some()
-        || args.github_pr.is_some();
-    if user_config.auto_fetch_comments && !explicit_comments {
-        match auto_fetch_phab(&diffs, args.phab_include_done).await {
+    if config_fetch {
+        match auto_fetch_phab(&diffs, args.phab_include_done, &skip).await {
             Some(notes) => review_notes.extend(notes),
             None => {
                 if let Some((notes, prs)) = auto_fetch_github(&diffs).await {

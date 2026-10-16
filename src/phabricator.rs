@@ -740,6 +740,8 @@ pub struct RevisionStatusInfo {
     pub reason: Option<String>,
     pub published: bool,
     #[serde(skip)]
+    pub outdated: bool,
+    #[serde(skip)]
     diff_id: u64,
 }
 
@@ -748,6 +750,18 @@ pub struct Validation {
     pub error: Option<String>,
     pub revisions: Vec<RevisionStatusInfo>,
     client: Option<PhabricatorClient>,
+}
+
+/// Revisions by someone else whose latest diff the local commit doesn't match.
+pub fn foreign_outdated(validation: &Validation) -> Vec<&RevisionStatusInfo> {
+    if validation.error.is_some() {
+        return Vec::new();
+    }
+    validation
+        .revisions
+        .iter()
+        .filter(|revision| revision.outdated && !revision.own)
+        .collect()
 }
 
 pub struct Publisher {
@@ -777,6 +791,7 @@ impl Publisher {
                     publishable: true,
                     reason: None,
                     published: false,
+                    outdated: false,
                     diff_id: 1,
                 }],
             })
@@ -839,6 +854,7 @@ impl Publisher {
                         closed: false,
                         publishable: false,
                         published: false,
+                        outdated: false,
                         diff_id: 0,
                         reason: (target.base_url != *base)
                             .then(|| "Revision is on a different server".into()),
@@ -875,6 +891,7 @@ impl Publisher {
                             )
                             .err()
                             .map(|e| e.to_string());
+                            revision.outdated = revision.reason.is_some();
                             revision.title = active.title;
                             revision.url = active.uri;
                             revision.own =
@@ -1063,8 +1080,9 @@ fn note_line_start(line: &CommentLine) -> usize {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_revision_publish, check_diff_matches, detect_revision, parse_revision_id,
-        resolve_phab_targets, ActiveDiff, PhabTarget,
+        build_revision_publish, check_diff_matches, detect_revision, foreign_outdated,
+        parse_revision_id, resolve_phab_targets, ActiveDiff, PhabTarget, RevisionStatusInfo,
+        Validation,
     };
     use crate::types::{Comment, CommentLine, ReviewAction, Side};
     use std::collections::HashMap;
@@ -1077,6 +1095,56 @@ mod tests {
             body: format!("body of {file}"),
             commit_idx,
         }
+    }
+
+    fn revision_status(id: &str, own: bool, outdated: bool) -> RevisionStatusInfo {
+        RevisionStatusInfo {
+            id: id.into(),
+            title: String::new(),
+            url: format!("https://phab.example/{id}"),
+            commit_idxs: vec![0],
+            own,
+            closed: false,
+            publishable: !outdated,
+            reason: outdated.then(|| "Diff mismatch".into()),
+            published: false,
+            outdated,
+            diff_id: 1,
+        }
+    }
+
+    #[test]
+    fn foreign_outdated_only_includes_foreign_mismatches() {
+        let mut other_reason = revision_status("D4", false, false);
+        other_reason.reason = Some("Revision spans several commits".into());
+        other_reason.publishable = false;
+        let validation = Validation {
+            user: "reviewer".into(),
+            error: None,
+            revisions: vec![
+                revision_status("D1", true, true),
+                revision_status("D2", false, true),
+                revision_status("D3", false, false),
+                other_reason,
+            ],
+            client: None,
+        };
+        let ids: Vec<_> = foreign_outdated(&validation)
+            .iter()
+            .map(|revision| revision.id.as_str())
+            .collect();
+        assert_eq!(ids, vec!["D2"]);
+    }
+
+    #[test]
+    fn foreign_outdated_is_empty_when_authentication_failed() {
+        let validation = Validation {
+            user: String::new(),
+            error: Some("Authentication failed".into()),
+            revisions: vec![revision_status("D1", false, true)],
+            client: None,
+        };
+        assert!(foreign_outdated(&validation).is_empty());
     }
 
     #[test]
