@@ -1,3 +1,4 @@
+use crate::agent::{AgentEvent, Poll};
 use crate::types::{Comment, CommitReview, DiffResponse, ReviewOutput, SeriesReviewOutput};
 use anyhow::Result;
 use std::fmt;
@@ -145,10 +146,7 @@ fn format_text(
 }
 
 fn format_text_comment(output: &mut String, comment: &Comment) {
-    let line_display = match &comment.line {
-        crate::types::CommentLine::Single(line) => line.to_string(),
-        crate::types::CommentLine::Range((start, end)) => format!("{}-{}", start, end),
-    };
+    let line_display = comment.line.to_string();
     output.push_str(&format!(
         "{}:{} [{}]\n",
         comment.file, line_display, comment.side
@@ -227,5 +225,57 @@ pub fn with_published(output: String, format: &OutputFormat, urls: Vec<String>) 
             "{output}\nReview published to Phabricator:\n  {}",
             urls.join("\n  ")
         ),
+    }
+}
+
+impl fmt::Display for crate::types::CommentLine {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Single(line) => write!(f, "{line}"),
+            Self::Range((start, end)) => write!(f, "{start}-{end}"),
+        }
+    }
+}
+
+pub fn format_listen(poll: &Poll, format: &OutputFormat) -> String {
+    let status = if !poll.events.is_empty() {
+        "events"
+    } else if poll.ended {
+        "ended"
+    } else {
+        "timeout"
+    };
+    match format {
+        OutputFormat::Json => {
+            let value = if status == "events" {
+                serde_json::json!({ "status": status, "events": poll.events })
+            } else {
+                serde_json::json!({ "status": status })
+            };
+            value.to_string()
+        }
+        OutputFormat::Text => match status {
+            "ended" => "The review has ended.".to_string(),
+            "timeout" => "No discussion yet; run lrv --listen again.".to_string(),
+            _ => {
+                let mut output = String::new();
+                for event in &poll.events {
+                    let AgentEvent::Discussion { discussion } = &event.event;
+                    let commit = discussion
+                        .commit_idx
+                        .map(|idx| format!(" [commit {idx}]"))
+                        .unwrap_or_default();
+                    output.push_str(&format!(
+                        "Discussion on {}:{} ({}){commit}\n",
+                        discussion.file, discussion.line, discussion.side
+                    ));
+                    for line in discussion.body.lines() {
+                        output.push_str(&format!("    {line}\n"));
+                    }
+                    output.push('\n');
+                }
+                output.trim_end().to_string()
+            }
+        },
     }
 }

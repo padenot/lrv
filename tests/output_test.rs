@@ -266,3 +266,58 @@ fn json_output_includes_the_note_a_comment_replies_to() {
     let v: serde_json::Value = serde_json::from_str(&json).unwrap();
     assert!(v["comments"][0].get("in_reply_to").is_none());
 }
+
+#[test]
+fn listen_formats_events_even_when_ended() {
+    use lrv::agent::Poll;
+    use lrv::output::{format_listen, OutputFormat};
+
+    let events = serde_json::json!([
+        {"seq": 1, "type": "discussion", "discussion": {
+            "id": "first", "file": "a.rs", "line": 3, "side": "new", "body": "First line\nSecond line"
+        }},
+        {"seq": 2, "type": "discussion", "discussion": {
+            "id": "second", "file": "b.rs", "line": [10, 12], "side": "old", "body": "Range", "commit_idx": 0
+        }}
+    ]);
+    let poll = Poll {
+        events: serde_json::from_value(events.clone()).unwrap(),
+        cursor: 2,
+        ended: true,
+    };
+    let value: serde_json::Value =
+        serde_json::from_str(&format_listen(&poll, &OutputFormat::Json)).unwrap();
+    assert_eq!(
+        value,
+        serde_json::json!({"status": "events", "events": events})
+    );
+    assert_eq!(
+        format_listen(&poll, &OutputFormat::Text),
+        "Discussion on a.rs:3 (new)\n    First line\n    Second line\n\nDiscussion on b.rs:10-12 (old) [commit 0]\n    Range"
+    );
+}
+
+#[test]
+fn listen_formats_timeout_and_ended() {
+    use lrv::agent::Poll;
+    use lrv::output::{format_listen, OutputFormat};
+
+    for (ended, status, text) in [
+        (
+            false,
+            "timeout",
+            "No discussion yet; run lrv --listen again.",
+        ),
+        (true, "ended", "The review has ended."),
+    ] {
+        let poll = Poll {
+            events: vec![],
+            cursor: 0,
+            ended,
+        };
+        let value: serde_json::Value =
+            serde_json::from_str(&format_listen(&poll, &OutputFormat::Json)).unwrap();
+        assert_eq!(value, serde_json::json!({"status": status}));
+        assert_eq!(format_listen(&poll, &OutputFormat::Text), text);
+    }
+}
