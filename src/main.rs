@@ -12,7 +12,7 @@ mod types;
 
 use anyhow::{Context, Result};
 use clap::{ArgAction, Parser};
-use lrv::{discovery, netutil};
+use lrv::{agent, discovery, netutil};
 use moz_cli_version_check::VersionChecker;
 use std::collections::HashMap;
 use std::env;
@@ -1329,6 +1329,7 @@ async fn main() -> Result<()> {
     let state = AppState {
         notes_version: std::sync::Arc::new(tokio::sync::watch::channel(0).0),
         agent_token: Arc::from(agent_token.clone()),
+        agent: agent::AgentChannel::new(agent::lease_from_env()),
         diffs: Arc::new(diffs),
         comments: Arc::new(Mutex::new(Vec::new())),
         overall_comment: Arc::new(Mutex::new(None)),
@@ -1510,6 +1511,11 @@ async fn main() -> Result<()> {
             server_result = result.context("Server error");
         }
     }
+
+    state.agent.close();
+    state.agent.drain(std::time::Duration::from_secs(1)).await;
+    // Let hyper flush the final poll response after the handler returns.
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
     discovery::remove_if_ours(&discovery_root, std::process::id());
     if let Some(code) = signal_exit_code {

@@ -72,6 +72,7 @@ fn make_jj_state(
         overall_comment: Arc::new(tokio::sync::Mutex::new(None)),
         notes_version: std::sync::Arc::new(tokio::sync::watch::channel(0).0),
         agent_token: Arc::from("test-token"),
+        agent: lrv::agent::AgentChannel::new(lrv::agent::lease_from_env()),
         review_notes: Arc::new(tokio::sync::Mutex::new(vec![])),
         shutdown_tx: Arc::new(tokio::sync::Mutex::new(Some(shutdown_tx))),
         config: Arc::new(tokio::sync::Mutex::new(lrv::config::UserConfig::default())),
@@ -342,6 +343,7 @@ fn make_state_from_patch(repo_dir: &std::path::Path, patch: &str) -> lrv::server
     let (shutdown_tx, _rx) = mpsc::channel::<()>(1);
     lrv::server::AppState {
         notes_version: Arc::new(tokio::sync::watch::channel(0).0),
+        agent: lrv::agent::AgentChannel::new(lrv::agent::lease_from_env()),
         agent_token: Arc::from("test-token"),
         diffs: Arc::new(vec![parsed]),
         comments: Arc::new(tokio::sync::Mutex::new(vec![])),

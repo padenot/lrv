@@ -45,6 +45,7 @@ fn test_app_state_construction() {
         overall_comment: Arc::new(Mutex::new(None)),
         notes_version: std::sync::Arc::new(tokio::sync::watch::channel(0).0),
         agent_token: Arc::from("test-token"),
+        agent: lrv::agent::AgentChannel::new(lrv::agent::lease_from_env()),
         review_notes: Arc::new(Mutex::new(vec![])),
         shutdown_tx: Arc::new(Mutex::new(Some(shutdown_tx))),
         config: Arc::new(Mutex::new(config)),
@@ -101,6 +102,7 @@ fn test_create_router() {
         overall_comment: Arc::new(Mutex::new(None)),
         notes_version: std::sync::Arc::new(tokio::sync::watch::channel(0).0),
         agent_token: Arc::from("test-token"),
+        agent: lrv::agent::AgentChannel::new(lrv::agent::lease_from_env()),
         review_notes: Arc::new(Mutex::new(vec![])),
         shutdown_tx: Arc::new(Mutex::new(Some(shutdown_tx))),
         config: Arc::new(Mutex::new(config)),
@@ -121,8 +123,7 @@ fn test_create_router() {
     let _router = lrv::server::create_router(state, false);
 }
 
-#[tokio::test]
-async fn test_review_note_api_round_trip() {
+fn review_note_state() -> lrv::server::AppState {
     let diff_data = lrv::types::DiffResponse {
         files: vec![],
         stats: lrv::types::DiffStats {
@@ -153,12 +154,13 @@ async fn test_review_note_api_round_trip() {
 
     let (shutdown_tx, _rx) = tokio::sync::mpsc::channel::<()>(1);
 
-    let state = lrv::server::AppState {
+    lrv::server::AppState {
         diffs: Arc::new(vec![diff_data]),
         comments: Arc::new(Mutex::new(vec![])),
         overall_comment: Arc::new(Mutex::new(None)),
         notes_version: std::sync::Arc::new(tokio::sync::watch::channel(0).0),
         agent_token: Arc::from("test-token"),
+        agent: lrv::agent::AgentChannel::new(lrv::agent::lease_from_env()),
         review_notes: Arc::new(Mutex::new(vec![])),
         shutdown_tx: Arc::new(Mutex::new(Some(shutdown_tx))),
         config: Arc::new(Mutex::new(config)),
@@ -173,8 +175,14 @@ async fn test_review_note_api_round_trip() {
         pull_requests: Default::default(),
         store: None,
         publish: None,
-    };
+    }
+}
 
+#[tokio::test]
+async fn test_review_note_api_round_trip() {
+    let state = review_note_state();
+    let agent = state.agent.clone();
+    assert!(!agent.attached());
     let app = lrv::server::create_router(state, false);
     let response = app
         .clone()
@@ -247,6 +255,7 @@ async fn test_review_note_api_round_trip() {
         .await
         .unwrap();
     assert_eq!(post.status(), StatusCode::OK);
+    assert!(agent.attached());
     let frame = tokio::time::timeout(Duration::from_secs(2), stream.next())
         .await
         .unwrap()
@@ -385,4 +394,72 @@ async fn test_config_mutation() {
     let config_lock = config.lock().await;
     assert_eq!(config_lock.color_scheme, "github-dark");
     assert!(!config_lock.split_view);
+}
+
+#[tokio::test(start_paused = true)]
+async fn test_agent_events_api() {
+    let state = review_note_state();
+    let agent = state.agent.clone();
+    let app = lrv::server::create_router(state, false);
+    for token in [None, Some("Bearer wrong-token")] {
+        let mut request = Request::builder().uri("/api/agent/events");
+        if let Some(token) = token {
+            request = request.header("authorization", token);
+        }
+        let response = app
+            .clone()
+            .oneshot(request.body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+    assert!(!agent.attached());
+    for (uri, expected) in [
+        (
+            "/api/agent/events?timeout=1",
+            serde_json::json!({"events": [], "cursor": 0, "ended": false}),
+        ),
+        (
+            "/api/agent/events?after=0",
+            serde_json::json!({"events": [{"seq": 1, "type": "discussion", "discussion": {
+            "id": "d1", "file": "src/lib.rs", "line": 3, "side": "new", "body": "Discuss this"
+        }}], "cursor": 1, "ended": false}),
+        ),
+        (
+            "/api/agent/events?after=1&timeout=1",
+            serde_json::json!({"events": [], "cursor": 1, "ended": false}),
+        ),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(uri)
+                    .header("authorization", "Bearer test-token")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(response.into_body(), 4096)
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&bytes).unwrap(),
+            expected
+        );
+        if uri == "/api/agent/events?timeout=1" {
+            agent.push(lrv::agent::AgentEvent::Discussion {
+                discussion: lrv::agent::Discussion {
+                    id: "d1".into(),
+                    file: "src/lib.rs".into(),
+                    line: lrv::types::CommentLine::Single(3),
+                    side: lrv::types::Side::New,
+                    body: "Discuss this".into(),
+                    commit_idx: None,
+                },
+            });
+        }
+    }
 }

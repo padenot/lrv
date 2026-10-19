@@ -58,6 +58,7 @@ pub struct AppState {
     pub overall_comment: Arc<Mutex<Option<String>>>,
     pub notes_version: Arc<tokio::sync::watch::Sender<u64>>,
     pub agent_token: Arc<str>,
+    pub agent: Arc<crate::agent::AgentChannel>,
     pub review_notes: Arc<Mutex<Vec<ReviewNote>>>,
     pub shutdown_tx: Arc<Mutex<Option<mpsc::Sender<()>>>>,
     pub config: Arc<Mutex<UserConfig>>,
@@ -803,6 +804,7 @@ pub fn create_router(state: AppState, enable_trace: bool) -> Router {
         .route("/api/comment", post(add_comment))
         .route("/api/comments/sync", post(sync_comments))
         .route("/api/events", get(events))
+        .route("/api/agent/events", get(agent_events))
         .route(
             "/api/review-notes",
             get(get_review_notes).post(add_review_note),
@@ -1486,18 +1488,40 @@ async fn get_review_notes(State(state): State<AppState>) -> Json<Vec<ReviewNote>
     Json(notes.clone())
 }
 
+fn agent_authorized(state: &AppState, headers: &HeaderMap) -> bool {
+    headers
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        == Some(format!("Bearer {}", state.agent_token).as_str())
+}
+
+#[derive(Deserialize)]
+struct AgentEventsQuery {
+    after: Option<u64>,
+    timeout: Option<u64>,
+}
+
+async fn agent_events(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<AgentEventsQuery>,
+) -> Response {
+    if !agent_authorized(&state, &headers) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let timeout = Duration::from_secs(query.timeout.unwrap_or(60).clamp(1, 600));
+    Json(state.agent.wait(query.after.unwrap_or(0), timeout).await).into_response()
+}
+
 async fn add_review_note(
     State(state): State<AppState>,
     headers: HeaderMap,
     Json(mut batch): Json<Vec<ReviewNote>>,
 ) -> Response {
-    if headers
-        .get(header::AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
-        != Some(format!("Bearer {}", state.agent_token).as_str())
-    {
+    if !agent_authorized(&state, &headers) {
         return StatusCode::UNAUTHORIZED.into_response();
     }
+    state.agent.touch();
     if batch
         .iter()
         .any(|note| !note.is_valid() || note.commit_idx.is_some_and(|idx| idx >= state.diffs.len()))

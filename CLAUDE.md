@@ -39,6 +39,7 @@ Any comment UX change (shortcuts, edit, delete, validation) must go in both.
 ## Key Behaviours
 
 - **Live review notes**: `/api/events` sends a `notes` SSE event on connection and after notes are added. The page refetches and merges new notes while preserving dispositions; it delays merging while a Reply form is open, checking every 500 ms.
+- **Agent events**: events are queued in memory and served by the token-authenticated long poll `GET /api/agent/events?after=&timeout=`, where `timeout` is in seconds (default 60, clamped to 1–600). The agent counts as attached while a poll is open, or within `LRV_AGENT_LEASE_SECS` (default 300) of its last poll or authenticated note write. On shutdown the channel closes and pending polls return `ended: true`.
 - **Agent discovery**: advertise the repository root, PID, URL and bearer token in `LRV_SERVER_DIR` (otherwise the runtime/cache directory under `lrv/servers`), keyed by an FNV64 root hash. Files are mode 0600 on Unix and removed on shutdown (including Ctrl-C and SIGTERM, which exit 130 and 143) only if still owned by this process. Posting review notes requires the token.
 - **Port**: derived from CWD hash (32768–40959); falls back to ephemeral if taken.
 - **Comment drafts**: IndexedDB, keyed by `working_directory + git_branch + jj_change_id` (stable across amends). On reload, a banner prompts to restore rather than auto-restoring.
