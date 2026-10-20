@@ -577,6 +577,13 @@ var DiscussionManager = class {
 		this.discussions.push(discussion);
 		this.notifyListeners();
 	}
+	async delete(id, onDeleted) {
+		const response = await fetch(`/api/discussions/${encodeURIComponent(id)}`, { method: "DELETE" });
+		if (!response.ok) throw new DiscussionError(response.status);
+		this.discussions = this.discussions.filter((d) => d.id !== id && d.thread_id !== id);
+		onDeleted?.();
+		this.notifyListeners();
+	}
 	notifyListeners() {
 		this.listeners.forEach((listener) => listener());
 	}
@@ -780,7 +787,29 @@ var DiscussionMethods = class {
 			resize();
 			textarea.focus();
 		});
-		box.appendChild(reply);
+		const actions = el("div", { className: "discussion-actions" });
+		const deleteButton = el("button", {
+			className: "btn-danger discussion-delete-btn",
+			text: "Delete"
+		});
+		const deleteError = el("div", { className: "comment-error" });
+		deleteError.hidden = true;
+		deleteButton.addEventListener("click", async () => {
+			deleteButton.disabled = true;
+			deleteError.hidden = true;
+			try {
+				await this.discussionManager.delete(root.id, () => {
+					this.reviewNoteManager.removeDiscussionReplies(root.id);
+				});
+			} catch (err) {
+				deleteButton.disabled = false;
+				deleteError.textContent = err instanceof Error ? err.message : "Failed to delete discussion";
+				deleteError.hidden = false;
+				box.dispatchEvent(new Event("discussion-layout"));
+			}
+		});
+		actions.append(reply, deleteButton);
+		box.append(actions, deleteError);
 		requestAnimationFrame(() => {
 			box.scrollTop = box.scrollHeight;
 		});
@@ -826,6 +855,9 @@ var ReviewNoteManager = class {
 	}
 	getDiscussionReplies(discussionId) {
 		return this.notes.filter((n) => n.discussion_id === discussionId);
+	}
+	removeDiscussionReplies(id) {
+		this.notes = this.notes.filter((note) => note.discussion_id !== id);
 	}
 	updateNote(target, patch) {
 		const idx = this.notes.findIndex((note) => this.isSameNote(note, target));

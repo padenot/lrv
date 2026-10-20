@@ -12,6 +12,7 @@ const binary = process.env.LRV_BIN || path.resolve(__dirname, '../../target/debu
 
 for (const stacked of [false, true]) {
   test(`discussions in ${stacked ? 'stacked' : 'Monaco'} view`, async ({ page }) => {
+    test.setTimeout(60000);
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lrv-discussions-'));
     const diffPath = path.join(root, 'review.diff');
     const env = {
@@ -176,7 +177,9 @@ for (const stacked of [false, true]) {
       await expect(thread).toContainText('Incoming while typing');
       expect((await keepAttached).status).toBe('timeout');
       await page.reload();
-      await expect(page.locator('.discussion')).toContainText('First discussion');
+      await expect(page.locator('.discussion')).toContainText('First discussion', {
+        timeout: 15000,
+      });
       const second = listen(30);
       await open();
       await expect(button).toBeVisible();
@@ -199,11 +202,34 @@ for (const stacked of [false, true]) {
         }
       });
       await button.click();
-      await expect(page.locator('.comment-error')).toHaveText('No agent is listening any more');
+      await expect(
+        page.locator(`${stacked ? '.stacked-comment-form' : '.inline-comment-box'} .comment-error`),
+      ).toHaveText('No agent is listening any more');
       await expect(textarea).toHaveValue('Keep this text');
       expect((await idle).status).toBe('timeout');
       await expect(button).toBeHidden({ timeout: 10000 });
       await expect(textarea).toHaveValue('Keep this text');
+      const firstThread = page.locator('.discussion').filter({ hasText: 'First discussion' });
+      await expect(firstThread.locator('.discussion-delete-btn')).toBeVisible();
+      // A failed deletion keeps the complete thread and allows retrying.
+      await page.route(`**/api/discussions/${rootDiscussion.id}`, (route) =>
+        route.fulfill({ status: 500 }),
+      );
+      await firstThread.locator('.discussion-delete-btn').click();
+      await expect(firstThread.locator('.comment-error')).toContainText('500');
+      await expect(firstThread.locator('.discussion-delete-btn')).toBeEnabled();
+      await expect(firstThread).toContainText('Agent answer');
+      await page.unroute(`**/api/discussions/${rootDiscussion.id}`);
+      // Delete remains available after the agent lease expires.
+      await firstThread.locator('.discussion-delete-btn').click();
+      await expect(firstThread).toHaveCount(0);
+      expect((await listen(30)).events).toEqual([
+        expect.objectContaining({ type: 'discussion_deleted', id: rootDiscussion.id }),
+      ]);
+      await page.reload();
+      await expect(page.locator('.discussion')).toHaveCount(1, { timeout: 15000 });
+      await expect(page.locator('.discussion')).toContainText('Second discussion');
+      await expect(page.locator('.discussion-entry-agent')).toHaveCount(0);
     } finally {
       for (const listener of listeners) {
         if (listener.exitCode === null) {

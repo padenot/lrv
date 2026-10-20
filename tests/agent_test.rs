@@ -238,6 +238,53 @@ async fn add_discussion_uses_shared_sequence_and_wakes_waiter() {
         serde_json::to_value(&discussions[1]).unwrap(),
         serde_json::to_value(&created).unwrap()
     );
-    let lrv::agent::AgentEvent::Discussion { discussion } = &poll.events[0].event;
+    let AgentEvent::Discussion { discussion } = &poll.events[0].event else {
+        panic!("expected discussion");
+    };
     assert_eq!(discussion.id, created.id);
+}
+
+#[tokio::test]
+async fn delete_discussion_removes_thread_and_queues_event() {
+    let channel = AgentChannel::new(LEASE);
+    channel.push(discussion());
+    let follow = channel
+        .add_discussion(lrv::agent::DiscussionRequest {
+            file: None,
+            line: None,
+            side: None,
+            thread_id: Some("d1".into()),
+            body: "Follow up".into(),
+            commit_idx: None,
+        })
+        .unwrap();
+    assert!(!channel.delete_discussion("unknown"));
+    assert!(!channel.delete_discussion(&follow.id));
+    assert!(!channel.is_deleted("d1"));
+    assert!(channel.delete_discussion("d1"));
+    assert!(channel.is_deleted("d1"));
+    assert!(channel.discussions().is_empty());
+    assert!(!channel.delete_discussion("d1"));
+    for after in [0, 2] {
+        let poll = channel.wait(after, TIMEOUT).await;
+        assert_eq!(
+            serde_json::to_value(&poll).unwrap(),
+            serde_json::json!({
+                "events": [{"seq": 3, "type": "discussion_deleted", "id": "d1"}],
+                "cursor": 3, "ended": false
+            })
+        );
+    }
+    let next = channel
+        .add_discussion(lrv::agent::DiscussionRequest {
+            file: Some("a.rs".into()),
+            line: Some(CommentLine::Single(1)),
+            side: Some(Side::New),
+            thread_id: None,
+            body: "New question".into(),
+            commit_idx: None,
+        })
+        .unwrap();
+    assert_eq!(next.id, "lrv-discussion-4");
+    assert_eq!(channel.discussions().len(), 1);
 }

@@ -65,6 +65,18 @@ export class DiscussionManager {
     this.notifyListeners();
   }
 
+  async delete(id: string, onDeleted?: () => void): Promise<void> {
+    const response = await fetch(`/api/discussions/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
+    if (!response.ok) {
+      throw new DiscussionError(response.status);
+    }
+    this.discussions = this.discussions.filter((d) => d.id !== id && d.thread_id !== id);
+    onDeleted?.();
+    this.notifyListeners();
+  }
+
   private notifyListeners(): void {
     this.listeners.forEach((listener) => listener());
   }

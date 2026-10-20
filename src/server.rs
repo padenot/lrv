@@ -13,7 +13,7 @@ use axum::{
         sse::{Event, KeepAlive, Sse},
         IntoResponse, Json, Response,
     },
-    routing::{get, post},
+    routing::{delete, get, post},
     Router,
 };
 use rust_embed::RustEmbed;
@@ -810,6 +810,7 @@ pub fn create_router(state: AppState, enable_trace: bool) -> Router {
             get(get_discussions).post(add_discussion),
         )
         .route("/api/agent/events", get(agent_events))
+        .route("/api/discussions/{id}", delete(delete_discussion))
         .route(
             "/api/review-notes",
             get(get_review_notes).post(add_review_note),
@@ -1502,6 +1503,25 @@ async fn get_discussions(State(state): State<AppState>) -> Json<Vec<Discussion>>
     Json(state.agent.discussions())
 }
 
+async fn delete_discussion(
+    State(state): State<AppState>,
+    AxumPath(id): AxumPath<String>,
+) -> StatusCode {
+    if state.context.is_public {
+        return StatusCode::FORBIDDEN;
+    }
+    let mut notes = state.review_notes.lock().await;
+    if !state.agent.delete_discussion(&id) {
+        return StatusCode::NOT_FOUND;
+    }
+    let previous_len = notes.len();
+    notes.retain(|note| note.discussion_id.as_deref() != Some(&id));
+    if notes.len() != previous_len {
+        state.notes_version.send_modify(|version| *version += 1);
+    }
+    StatusCode::NO_CONTENT
+}
+
 async fn add_discussion(
     State(state): State<AppState>,
     Json(mut req): Json<DiscussionRequest>,
@@ -1569,6 +1589,18 @@ async fn add_review_note(
     {
         return StatusCode::BAD_REQUEST.into_response();
     }
+    let mut notes = state.review_notes.lock().await;
+    let mut skipped = 0;
+    batch.retain(|note| {
+        let deleted = note
+            .discussion_id
+            .as_deref()
+            .is_some_and(|id| state.agent.is_deleted(id));
+        if deleted {
+            skipped += 1;
+        }
+        !deleted
+    });
     for note in &mut batch {
         if let Some(id) = &note.discussion_id {
             let Some(root) = state.agent.root_discussion(id) else {
@@ -1587,9 +1619,7 @@ async fn add_review_note(
     }
     tag_single_commit_notes(&mut batch, state.is_series, state.diffs.len());
     assign_note_ids(&mut batch);
-    let mut notes = state.review_notes.lock().await;
     let mut added = 0;
-    let mut skipped = 0;
     for note in batch {
         if notes.iter().any(|existing| existing.id == note.id) {
             skipped += 1;

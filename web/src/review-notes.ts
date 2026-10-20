@@ -70,6 +70,10 @@ export class ReviewNoteManager {
     return this.notes.filter((n) => n.discussion_id === discussionId);
   }
 
+  removeDiscussionReplies(id: string): void {
+    this.notes = this.notes.filter((note) => note.discussion_id !== id);
+  }
+
   updateNote(target: ReviewNote, patch: Partial<ReviewNote>): void {
     const idx = this.notes.findIndex((note) => this.isSameNote(note, target));
     if (idx < 0) {

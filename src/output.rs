@@ -260,23 +260,31 @@ pub fn format_listen(poll: &Poll, format: &OutputFormat) -> String {
             _ => {
                 let mut output = String::new();
                 for event in &poll.events {
-                    let AgentEvent::Discussion { discussion } = &event.event;
-                    let commit = discussion
-                        .commit_idx
-                        .map(|idx| format!(" [commit {idx}]"))
-                        .unwrap_or_default();
-                    let heading = match &discussion.thread_id {
-                        Some(thread) => format!("Follow-up {} in thread {thread}", discussion.id),
-                        None => format!("Discussion {}", discussion.id),
-                    };
-                    output.push_str(&format!(
-                        "{heading} on {}:{} ({}){commit}\n",
-                        discussion.file, discussion.line, discussion.side
-                    ));
-                    for line in discussion.body.lines() {
-                        output.push_str(&format!("    {line}\n"));
+                    match &event.event {
+                        AgentEvent::Discussion { discussion } => {
+                            let commit = discussion
+                                .commit_idx
+                                .map(|idx| format!(" [commit {idx}]"))
+                                .unwrap_or_default();
+                            let heading = match &discussion.thread_id {
+                                Some(thread) => {
+                                    format!("Follow-up {} in thread {thread}", discussion.id)
+                                }
+                                None => format!("Discussion {}", discussion.id),
+                            };
+                            output.push_str(&format!(
+                                "{heading} on {}:{} ({}){commit}\n",
+                                discussion.file, discussion.line, discussion.side
+                            ));
+                            for line in discussion.body.lines() {
+                                output.push_str(&format!("    {line}\n"));
+                            }
+                            output.push('\n');
+                        }
+                        AgentEvent::DiscussionDeleted { id } => {
+                            output.push_str(&format!("Discussion {id} was deleted by the reviewer; stop work on it and don't reply.\n\n"));
+                        }
                     }
-                    output.push('\n');
                 }
                 output.trim_end().to_string()
             }

@@ -1,5 +1,6 @@
 use crate::types::{CommentLine, Side};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::{watch, Notify};
@@ -44,6 +45,7 @@ impl DiscussionRequest {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AgentEvent {
     Discussion { discussion: Discussion },
+    DiscussionDeleted { id: String },
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -62,6 +64,7 @@ pub struct Poll {
 
 struct Inner {
     events: Vec<QueuedEvent>,
+    deleted: HashSet<String>,
     next_seq: u64,
     next_reply: u64,
     active_polls: usize,
@@ -93,6 +96,7 @@ impl AgentChannel {
         Arc::new(Self {
             inner: Mutex::new(Inner {
                 events: Vec::new(),
+                deleted: HashSet::new(),
                 next_seq: 1,
                 next_reply: 1,
                 active_polls: 0,
@@ -180,6 +184,35 @@ impl AgentChannel {
             })
     }
 
+    pub fn delete_discussion(&self, id: &str) -> bool {
+        let mut inner = self.inner.lock().unwrap();
+        if !inner.events.iter().any(|event| {
+            matches!(
+                &event.event,
+                AgentEvent::Discussion { discussion }
+                    if discussion.id == id && discussion.thread_id.is_none()
+            )
+        }) {
+            return false;
+        }
+        inner.events.retain(|event| match &event.event {
+            AgentEvent::Discussion { discussion } => {
+                discussion.id != id && discussion.thread_id.as_deref() != Some(id)
+            }
+            AgentEvent::DiscussionDeleted { .. } => true,
+        });
+        inner.deleted.insert(id.to_string());
+        self.push_locked(
+            &mut inner,
+            AgentEvent::DiscussionDeleted { id: id.to_string() },
+        );
+        true
+    }
+
+    pub fn is_deleted(&self, id: &str) -> bool {
+        self.inner.lock().unwrap().deleted.contains(id)
+    }
+
     pub fn reply_id(&self) -> String {
         let mut inner = self.inner.lock().unwrap();
         let id = format!("lrv-reply-{}", inner.next_reply);
@@ -193,8 +226,9 @@ impl AgentChannel {
             .unwrap()
             .events
             .iter()
-            .map(|event| match &event.event {
-                AgentEvent::Discussion { discussion } => discussion.clone(),
+            .filter_map(|event| match &event.event {
+                AgentEvent::Discussion { discussion } => Some(discussion.clone()),
+                AgentEvent::DiscussionDeleted { .. } => None,
             })
             .collect()
     }

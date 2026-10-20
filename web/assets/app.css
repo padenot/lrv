@@ -2409,6 +2409,12 @@ body:not(.agent-attached) .discuss-hint {
   padding-left: 8px;
 }
 
+.discussion-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+
 .discussion-reply {
   margin-top: 8px;
 }

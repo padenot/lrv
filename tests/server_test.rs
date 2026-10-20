@@ -789,3 +789,151 @@ async fn test_discussion_threads_and_agent_replies() {
         assert_eq!(date.len(), 24);
     }
 }
+
+fn delete_discussion_request(id: &str) -> Request<Body> {
+    Request::builder()
+        .method("DELETE")
+        .uri(format!("/api/discussions/{id}"))
+        .body(Body::empty())
+        .unwrap()
+}
+
+#[tokio::test]
+async fn test_delete_discussion_removes_replies_and_skips_late_replies() {
+    let state = review_note_state();
+    // Direct insertion doesn't attach an agent: deletion must work while detached.
+    let root = state
+        .agent
+        .add_discussion(lrv::agent::DiscussionRequest {
+            file: Some("a.rs".into()),
+            line: Some(lrv::types::CommentLine::Single(1)),
+            side: Some(lrv::types::Side::New),
+            body: "Question".into(),
+            thread_id: None,
+            commit_idx: None,
+        })
+        .unwrap();
+    let app = lrv::server::create_router(state.clone(), false);
+    let reply = serde_json::json!({"file": "a.rs", "line": 1, "side": "new", "body": "Answer", "discussion_id": root.id});
+    assert_eq!(
+        response_json(
+            app.clone()
+                .oneshot(reply_request(serde_json::json!([
+                    reply, {"file": "a.rs", "line": 1, "side": "new", "body": "Keep this note"}
+                ])))
+                .await
+                .unwrap()
+        )
+        .await,
+        serde_json::json!({"added": 2, "skipped": 0})
+    );
+    let version = *state.notes_version.borrow();
+    for status in [StatusCode::NO_CONTENT, StatusCode::NOT_FOUND] {
+        assert_eq!(
+            app.clone()
+                .oneshot(delete_discussion_request(&root.id))
+                .await
+                .unwrap()
+                .status(),
+            status
+        );
+    }
+    assert_eq!(*state.notes_version.borrow(), version + 1);
+    let notes = response_json(
+        app.clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/review-notes")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(notes.as_array().unwrap().len(), 1);
+    assert_eq!(notes[0]["body"], "Keep this note");
+    assert_eq!(
+        response_json(
+            app.clone()
+                .oneshot(reply_request(serde_json::json!([reply])))
+                .await
+                .unwrap()
+        )
+        .await,
+        serde_json::json!({"added": 0, "skipped": 1})
+    );
+    let mut unknown = reply;
+    unknown["discussion_id"] = serde_json::json!("unknown");
+    assert_eq!(
+        app.oneshot(reply_request(serde_json::json!([unknown])))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
+}
+
+#[tokio::test]
+async fn test_delete_discussion_without_agent_and_public_mode() {
+    let mut state = review_note_state();
+    state.agent.push(lrv::agent::AgentEvent::Discussion {
+        discussion: lrv::agent::Discussion {
+            id: "d1".into(),
+            created_at: 0,
+            thread_id: None,
+            file: "a.rs".into(),
+            line: lrv::types::CommentLine::Single(1),
+            side: lrv::types::Side::New,
+            body: "Question".into(),
+            commit_idx: None,
+        },
+    });
+    assert!(!state.agent.attached());
+    let follow = state
+        .agent
+        .add_discussion(lrv::agent::DiscussionRequest {
+            file: None,
+            line: None,
+            side: None,
+            thread_id: Some("d1".into()),
+            body: "Follow up".into(),
+            commit_idx: None,
+        })
+        .unwrap();
+    let private_app = lrv::server::create_router(state.clone(), false);
+    for id in [follow.id.as_str(), "unknown"] {
+        assert_eq!(
+            private_app
+                .clone()
+                .oneshot(delete_discussion_request(id))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::NOT_FOUND
+        );
+    }
+    Arc::make_mut(&mut state.context).is_public = true;
+    let app = lrv::server::create_router(state.clone(), false);
+    for id in ["d1", "unknown"] {
+        assert_eq!(
+            app.clone()
+                .oneshot(delete_discussion_request(id))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::FORBIDDEN
+        );
+    }
+    assert_eq!(state.agent.discussions().len(), 2);
+    Arc::make_mut(&mut state.context).is_public = false;
+    let app = lrv::server::create_router(state.clone(), false);
+    assert_eq!(
+        app.oneshot(delete_discussion_request("d1"))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NO_CONTENT
+    );
+    assert!(state.agent.discussions().is_empty());
+}

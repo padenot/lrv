@@ -146,6 +146,7 @@ export interface AppContext {
     updateNote(note: ReviewNote, patch: Partial<ReviewNote>): void;
     getNotes(): ReviewNote[];
     getDiscussionReplies(discussionId: string): ReviewNote[];
+    removeDiscussionReplies(id: string): void;
     getNotesForFile(file: string): ReviewNote[];
     findNote(file: string, line: number, side: Side): number;
     onChange(listener: () => void): void;
