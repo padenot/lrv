@@ -274,10 +274,10 @@ fn listen_formats_events_even_when_ended() {
 
     let events = serde_json::json!([
         {"seq": 1, "type": "discussion", "discussion": {
-            "id": "first", "file": "a.rs", "line": 3, "side": "new", "body": "First line\nSecond line"
+            "id": "first", "created_at": 0, "file": "a.rs", "line": 3, "side": "new", "body": "First line\nSecond line"
         }},
         {"seq": 2, "type": "discussion", "discussion": {
-            "id": "second", "file": "b.rs", "line": [10, 12], "side": "old", "body": "Range", "commit_idx": 0
+            "id": "second", "created_at": 0, "file": "b.rs", "line": [10, 12], "side": "old", "body": "Range", "commit_idx": 0
         }}
     ]);
     let poll = Poll {

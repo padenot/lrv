@@ -437,7 +437,7 @@ async fn test_agent_events_api() {
         (
             "/api/agent/events?after=0",
             serde_json::json!({"events": [{"seq": 1, "type": "discussion", "discussion": {
-            "id": "d1", "file": "src/lib.rs", "line": 3, "side": "new", "body": "Discuss this"
+            "id": "d1", "created_at": 0, "file": "src/lib.rs", "line": 3, "side": "new", "body": "Discuss this"
         }}], "cursor": 1, "ended": false}),
         ),
         (
@@ -468,6 +468,7 @@ async fn test_agent_events_api() {
             agent.push(lrv::agent::AgentEvent::Discussion {
                 discussion: lrv::agent::Discussion {
                     id: "d1".into(),
+                    created_at: 0,
                     file: "src/lib.rs".into(),
                     line: lrv::types::CommentLine::Single(3),
                     side: lrv::types::Side::New,
@@ -477,4 +478,168 @@ async fn test_agent_events_api() {
             });
         }
     }
+}
+
+fn discussion_request(payload: serde_json::Value) -> Request<Body> {
+    Request::builder()
+        .method("POST")
+        .uri("/api/discussions")
+        .header("content-type", "application/json")
+        .body(Body::from(payload.to_string()))
+        .unwrap()
+}
+
+#[tokio::test]
+async fn test_discussion_api_round_trip_and_submission_isolation() {
+    let mut state = review_note_state();
+    state.is_series = false;
+    let app = lrv::server::create_router(state.clone(), false);
+    let payload = serde_json::json!({
+        "file": "src/lib.rs", "line": [3, 4], "side": "new", "body": "Discuss this"
+    });
+    let response = app
+        .clone()
+        .oneshot(discussion_request(payload.clone()))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    assert!(state.agent.discussions().is_empty());
+
+    state.agent.touch();
+    let response = app
+        .clone()
+        .oneshot(discussion_request(payload.clone()))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(response.into_body(), 4096)
+        .await
+        .unwrap();
+    let discussion: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(discussion["id"], "lrv-discussion-1");
+    assert!(discussion["created_at"].as_u64().unwrap() > 0);
+    assert!(discussion.get("commit_idx").is_none());
+    for key in ["file", "line", "side", "body"] {
+        assert_eq!(discussion[key], payload[key]);
+    }
+    for (uri, expected) in [
+        (
+            "/api/agent/events?after=0&timeout=1",
+            serde_json::json!({"events": [{"seq": 1, "type": "discussion", "discussion": discussion}], "cursor": 1, "ended": false}),
+        ),
+        ("/api/discussions", serde_json::json!([discussion])),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(uri)
+                    .header("authorization", "Bearer test-token")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(response.into_body(), 4096)
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&bytes).unwrap(),
+            expected
+        );
+    }
+    assert!(state.comments.lock().await.is_empty());
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/complete")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"comments":[]}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let comments = state.comments.lock().await.clone();
+    assert!(comments.is_empty());
+    let output = lrv::output::format_output(
+        comments,
+        &lrv::output::OutputFormat::Json,
+        &state.diffs,
+        state.is_series,
+        state.overall_comment.lock().await.clone(),
+    );
+    let output: serde_json::Value = serde_json::from_str(&output).unwrap();
+    assert_eq!(output["comments"], serde_json::json!([]));
+    assert!(!output.to_string().contains("Discuss this"));
+}
+
+#[tokio::test]
+async fn test_discussion_validation() {
+    let state = review_note_state();
+    state.agent.touch();
+    let app = lrv::server::create_router(state.clone(), false);
+    for invalid in [
+        serde_json::json!({"line": 0}),
+        serde_json::json!({"line": [4, 3]}),
+        serde_json::json!({"body": " \n\t"}),
+        serde_json::json!({"file": ""}),
+        serde_json::json!({"commit_idx": 1}),
+    ] {
+        let mut payload = serde_json::json!({
+            "file": "src/lib.rs", "line": 3, "side": "new", "body": "Discuss this"
+        });
+        for (key, value) in invalid.as_object().unwrap() {
+            payload[key] = value.clone();
+        }
+        let response = app
+            .clone()
+            .oneshot(discussion_request(payload))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+    assert!(state.agent.discussions().is_empty());
+}
+
+#[tokio::test]
+async fn test_discussion_public_mode_refuses_with_or_without_agent() {
+    let mut state = review_note_state();
+    Arc::make_mut(&mut state.context).is_public = true;
+    let app = lrv::server::create_router(state.clone(), false);
+    for attached in [false, true] {
+        if attached {
+            state.agent.touch();
+        }
+        let response = app
+            .clone()
+            .oneshot(discussion_request(serde_json::json!({
+                "file": "src/lib.rs", "line": 3, "side": "new", "body": "Discuss this"
+            })))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
+    assert!(state.agent.discussions().is_empty());
+}
+
+#[tokio::test]
+async fn test_discussion_single_commit_series_pinning() {
+    let state = review_note_state();
+    state.agent.touch();
+    let app = lrv::server::create_router(state, false);
+    let response = app
+        .oneshot(discussion_request(serde_json::json!({
+            "file": "src/lib.rs", "line": 3, "side": "new", "body": "Discuss this"
+        })))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(response.into_body(), 4096)
+        .await
+        .unwrap();
+    let discussion: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(discussion["commit_idx"], 0);
 }

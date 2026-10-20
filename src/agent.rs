@@ -1,19 +1,37 @@
 use crate::types::{CommentLine, Side};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::{watch, Notify};
 use tokio::time::Instant;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Discussion {
     pub id: String,
+    #[serde(default)]
+    pub created_at: u64,
     pub file: String,
     pub line: CommentLine,
     pub side: Side,
     pub body: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub commit_idx: Option<usize>,
+}
+
+#[derive(Deserialize)]
+pub struct DiscussionRequest {
+    pub file: String,
+    pub line: CommentLine,
+    pub side: Side,
+    pub body: String,
+    #[serde(default)]
+    pub commit_idx: Option<usize>,
+}
+
+impl DiscussionRequest {
+    pub fn is_valid(&self) -> bool {
+        !self.file.is_empty() && !self.body.trim().is_empty() && self.line.is_valid()
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -82,11 +100,50 @@ impl AgentChannel {
 
     pub fn push(&self, event: AgentEvent) -> u64 {
         let mut inner = self.inner.lock().unwrap();
+        self.push_locked(&mut inner, event)
+    }
+
+    fn push_locked(&self, inner: &mut Inner, event: AgentEvent) -> u64 {
         let seq = inner.next_seq;
         inner.next_seq += 1;
         inner.events.push(QueuedEvent { seq, event });
         self.latest.send_replace(seq);
         seq
+    }
+
+    pub fn add_discussion(&self, req: DiscussionRequest) -> Discussion {
+        let mut inner = self.inner.lock().unwrap();
+        let discussion = Discussion {
+            id: format!("lrv-discussion-{}", inner.next_seq),
+            created_at: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64,
+            file: req.file,
+            line: req.line,
+            side: req.side,
+            body: req.body,
+            commit_idx: req.commit_idx,
+        };
+        self.push_locked(
+            &mut inner,
+            AgentEvent::Discussion {
+                discussion: discussion.clone(),
+            },
+        );
+        discussion
+    }
+
+    pub fn discussions(&self) -> Vec<Discussion> {
+        self.inner
+            .lock()
+            .unwrap()
+            .events
+            .iter()
+            .map(|event| match &event.event {
+                AgentEvent::Discussion { discussion } => discussion.clone(),
+            })
+            .collect()
     }
 
     pub async fn wait(&self, after: u64, timeout: Duration) -> Poll {

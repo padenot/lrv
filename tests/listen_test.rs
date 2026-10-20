@@ -151,6 +151,73 @@ mod unix {
     }
 
     #[test]
+    fn listen_receives_discussion_and_saves_cursor() {
+        let mut review = Review::start("discussion");
+        let mut listener = review.listener("30");
+        let discovery = fs::read_dir(review.dir.join("servers"))
+            .unwrap()
+            .flatten()
+            .find(|entry| entry.path().extension().is_some_and(|ext| ext == "json"))
+            .unwrap();
+        let discovery: serde_json::Value =
+            serde_json::from_slice(&fs::read(discovery.path()).unwrap()).unwrap();
+        let url = format!("{}/api/discussions", discovery["url"].as_str().unwrap());
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let client = reqwest::Client::new();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                let response = client
+                    .post(&url)
+                    .json(&serde_json::json!({
+                        "file": "a.txt", "line": 1, "side": "new", "body": "Discuss this"
+                    }))
+                    .send()
+                    .await
+                    .unwrap();
+                if response.status() == reqwest::StatusCode::CONFLICT {
+                    assert!(Instant::now() < deadline, "listener never attached");
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    continue;
+                }
+                assert_eq!(response.status(), reqwest::StatusCode::OK);
+                break;
+            }
+        });
+        wait_for_exit(&mut listener, Instant::now() + Duration::from_secs(5));
+        let output = listener.wait_with_output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let output: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(output["status"], "events");
+        let events = output["events"].as_array().unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0]["seq"], 1);
+        assert_eq!(events[0]["type"], "discussion");
+        assert_eq!(events[0]["discussion"]["body"], "Discuss this");
+
+        let mut listener = review.listener("1");
+        wait_for_exit(&mut listener, Instant::now() + Duration::from_secs(5));
+        let output = listener.wait_with_output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8(output.stdout).unwrap().trim(),
+            r#"{"status":"timeout"}"#
+        );
+        review.terminate();
+    }
+
+    #[test]
     fn sigterm_ends_pending_listener_without_delaying_exit() {
         let mut review = Review::start("sigterm");
         let mut listener = review.listener("30");

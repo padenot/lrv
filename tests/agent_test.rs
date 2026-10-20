@@ -10,6 +10,7 @@ fn discussion() -> AgentEvent {
     AgentEvent::Discussion {
         discussion: Discussion {
             id: "d1".into(),
+            created_at: 0,
             file: "src/lib.rs".into(),
             line: CommentLine::Single(3),
             side: Side::New,
@@ -202,4 +203,39 @@ async fn presence_tracks_polls_touch_expiry_and_close() {
     presence.changed().await.unwrap();
     assert!(!*presence.borrow_and_update());
     tracker.await.unwrap();
+}
+
+#[tokio::test(start_paused = true)]
+async fn add_discussion_uses_shared_sequence_and_wakes_waiter() {
+    let channel = AgentChannel::new(LEASE);
+    channel.push(discussion());
+    let producer = channel.clone();
+    let task = tokio::spawn(async move {
+        sleep(Duration::from_secs(1)).await;
+        producer.add_discussion(lrv::agent::DiscussionRequest {
+            file: "src/lib.rs".into(),
+            line: CommentLine::Single(3),
+            side: Side::New,
+            body: "A new discussion".into(),
+            commit_idx: None,
+        })
+    });
+    let start = Instant::now();
+    let poll = channel.wait(1, TIMEOUT).await;
+    assert_eq!(start.elapsed(), Duration::from_secs(1));
+    assert_eq!(poll.events.len(), 1);
+    assert_eq!(poll.events[0].seq, 2);
+    assert_eq!(poll.cursor, 2);
+    let created = task.await.unwrap();
+    assert_eq!(created.id, "lrv-discussion-2");
+    assert!(created.created_at > 0);
+    let discussions = channel.discussions();
+    assert_eq!(discussions.len(), 2);
+    assert_eq!(discussions[0].id, "d1");
+    assert_eq!(
+        serde_json::to_value(&discussions[1]).unwrap(),
+        serde_json::to_value(&created).unwrap()
+    );
+    let lrv::agent::AgentEvent::Discussion { discussion } = &poll.events[0].event;
+    assert_eq!(discussion.id, created.id);
 }

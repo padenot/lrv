@@ -1,3 +1,4 @@
+use crate::agent::{Discussion, DiscussionRequest};
 use crate::config::UserConfig;
 use crate::repository;
 use crate::skill::{skill_install_paths, EMBEDDED_SKILL};
@@ -804,6 +805,10 @@ pub fn create_router(state: AppState, enable_trace: bool) -> Router {
         .route("/api/comment", post(add_comment))
         .route("/api/comments/sync", post(sync_comments))
         .route("/api/events", get(events))
+        .route(
+            "/api/discussions",
+            get(get_discussions).post(add_discussion),
+        )
         .route("/api/agent/events", get(agent_events))
         .route(
             "/api/review-notes",
@@ -1491,6 +1496,29 @@ async fn events(
 async fn get_review_notes(State(state): State<AppState>) -> Json<Vec<ReviewNote>> {
     let notes = state.review_notes.lock().await;
     Json(notes.clone())
+}
+
+async fn get_discussions(State(state): State<AppState>) -> Json<Vec<Discussion>> {
+    Json(state.agent.discussions())
+}
+
+async fn add_discussion(
+    State(state): State<AppState>,
+    Json(mut req): Json<DiscussionRequest>,
+) -> Response {
+    if state.context.is_public {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    if !req.is_valid() || req.commit_idx.is_some_and(|idx| idx >= state.diffs.len()) {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+    if !state.agent.attached() {
+        return StatusCode::CONFLICT.into_response();
+    }
+    if state.is_series && state.diffs.len() == 1 && req.commit_idx.is_none() {
+        req.commit_idx = Some(0);
+    }
+    Json(state.agent.add_discussion(req)).into_response()
 }
 
 fn agent_authorized(state: &AppState, headers: &HeaderMap) -> bool {
