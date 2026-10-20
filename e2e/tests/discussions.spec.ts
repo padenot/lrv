@@ -109,6 +109,72 @@ for (const stacked of [false, true]) {
       await expect(page.locator('.submit-review-modal')).not.toContainText('First discussion');
       await page.locator('.cancel-submit-btn').click();
       expect(await commentDraftCount(page)).toBe(0);
+      const rootDiscussion = result.events[0].discussion;
+      const addReply = async (body: string) => {
+        const command = execFileAsync(binary, ['--add-notes', '-'], { cwd: root, env });
+        command.child.stdin!.end(
+          JSON.stringify([
+            {
+              file: rootDiscussion.file,
+              line: rootDiscussion.line,
+              side: rootDiscussion.side,
+              body,
+              discussion_id: rootDiscussion.id,
+              author: 'Test agent',
+            },
+          ]),
+        );
+        await command;
+      };
+      await addReply('Agent answer');
+      await expect(page.locator('.discussion-entry-agent')).toHaveText(/Test agent.*Agent answer/s);
+      await expect(page.locator('.review-note')).toHaveCount(0);
+      await expect(page.locator('#comment-count')).toHaveText('0');
+      expect(await page.evaluate(() => window.__APP!.commentCountFor(0))).toBe(0);
+      const followUp = listen(30);
+      const thread = page.locator('.discussion');
+      await thread.locator('.discussion-reply-btn').click();
+      const replyText = thread.locator('.discussion-reply-text');
+      await expect(replyText).toBeVisible();
+      if (!stacked) {
+        const formBounds = await thread.locator('.discussion-reply').boundingBox();
+        const zoneBounds = await page.locator('.review-note-zone:has(.discussion)').boundingBox();
+        expect(formBounds!.y).toBeGreaterThanOrEqual(zoneBounds!.y);
+        expect(formBounds!.y + formBounds!.height).toBeLessThanOrEqual(
+          zoneBounds!.y + zoneBounds!.height,
+        );
+      }
+      await replyText.fill('User follow-up');
+      await replyText.press('ControlOrMeta+Enter');
+      const followResult = await followUp;
+      expect(followResult.events[0].discussion).toMatchObject({
+        thread_id: rootDiscussion.id,
+        body: 'User follow-up',
+        file: rootDiscussion.file,
+        line: rootDiscussion.line,
+        side: rootDiscussion.side,
+      });
+      await expect(thread.locator('.discussion-body')).toHaveText([
+        'First discussion',
+        'Agent answer',
+        'User follow-up',
+      ]);
+      const keepAttached = listen(2);
+      await expect(thread.locator('.discussion-reply-btn')).toBeVisible();
+      await thread.locator('.discussion-reply-btn').click();
+      await replyText.fill('Unfinished follow-up');
+      await addReply('Incoming while typing');
+      await expect
+        .poll(async () =>
+          (await page.request.get(`${url}/api/review-notes`)).json().then((notes) => notes.length),
+        )
+        .toBe(2);
+      await page.waitForTimeout(750);
+      await expect(replyText).toHaveValue('Unfinished follow-up');
+      await expect(thread).not.toContainText('Incoming while typing');
+      await replyText.press('Escape');
+      await expect(thread).toContainText('Incoming while typing');
+      expect((await keepAttached).status).toBe('timeout');
       await page.reload();
       await expect(page.locator('.discussion')).toContainText('First discussion');
       const second = listen(30);

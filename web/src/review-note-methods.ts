@@ -18,7 +18,8 @@ type InlineThread = {
   line: CommentLine;
   side: 'old' | 'new';
   node: HTMLElement;
-  body: string;
+  height: () => number;
+  hover: string;
   discussion?: boolean;
 };
 
@@ -57,17 +58,32 @@ export class ReviewNoteMethods {
         file: note.file,
         line: note.line,
         side: note.side,
-        body: note.body,
+        height: () => this.reviewNoteHeightPx(note.body),
+        hover: note.body,
         node: this.buildReviewNoteNode(note),
       })),
-      ...this.discussionManager.getForFile(file.path).map((discussion) => ({
-        file: discussion.file,
-        line: discussion.line,
-        side: discussion.side,
-        body: discussion.body,
-        node: this.buildDiscussionNode(discussion),
-        discussion: true,
-      })),
+      ...this.discussionManager.getForFile(file.path).map((discussion) => {
+        const node = this.buildDiscussionNode(discussion);
+        return {
+          file: discussion.file,
+          line: discussion.line,
+          side: discussion.side,
+          node,
+          hover: discussion.body,
+          height: () => {
+            const bodies = Array.from(node.querySelectorAll('.discussion-body'));
+            const entries = bodies.reduce(
+              (total, body) => total + this.reviewNoteHeightPx(body.textContent || '') - 48,
+              0,
+            );
+            return Math.min(
+              460,
+              52 + entries + (node.querySelector('.discussion-reply') ? 200 : 0),
+            );
+          },
+          discussion: true,
+        };
+      }),
     ];
     const modifiedEditor = this.editor.getModifiedEditor();
     const originalEditor = this.editor.getOriginalEditor();
@@ -118,11 +134,18 @@ export class ReviewNoteMethods {
           className: `review-note-zone review-note-zone-${note.side}`,
         });
         node.appendChild(note.node);
-        const id = accessor.addZone({
+        const zone: editor.IViewZone = {
           afterLineNumber: line,
           domNode: node,
-          heightInPx: this.reviewNoteHeightPx(note.body),
-        });
+          heightInPx: note.height(),
+        };
+        const id = accessor.addZone(zone);
+        if (note.discussion) {
+          note.node.addEventListener('discussion-layout', () => {
+            zone.heightInPx = note.height();
+            targetEditor.changeViewZones((zones) => zones.layoutZone(id));
+          });
+        }
         newIds.push(id);
       });
     });
@@ -150,7 +173,7 @@ export class ReviewNoteMethods {
           glyphMarginClassName: note.discussion
             ? 'codicon codicon-hubot discussion-glyph'
             : 'codicon codicon-comment-discussion review-note-glyph',
-          glyphMarginHoverMessage: { value: note.body },
+          glyphMarginHoverMessage: { value: note.hover },
           linesDecorationsClassName: note.discussion
             ? 'discussion-line-decoration'
             : 'review-note-line-decoration',

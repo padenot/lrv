@@ -2336,6 +2336,7 @@ body {
 }
 
 body:not(.agent-attached) .discuss-btn,
+body:not(.agent-attached) .discussion-reply-btn,
 body:not(.agent-attached) .discuss-hint {
   display: none;
 }
@@ -2388,4 +2389,45 @@ body:not(.agent-attached) .discuss-hint {
 
 .monaco-editor .discussion-line-decoration {
   border-left: 2px solid var(--text-secondary);
+}
+
+.review-note-zone .discussion {
+  max-height: calc(100% - 8px);
+  box-sizing: border-box;
+}
+
+.discussion-entry {
+  padding: 6px 0;
+}
+
+.discussion-entry + .discussion-entry {
+  border-top: 1px solid var(--border-color);
+}
+
+.discussion-entry-agent {
+  border-left: 2px solid var(--accent-color);
+  padding-left: 8px;
+}
+
+.discussion-reply {
+  margin-top: 8px;
+}
+
+.discussion-reply-text {
+  width: 100%;
+  min-height: 80px;
+  box-sizing: border-box;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 8px;
+  font-family: var(--font-sans);
+  resize: vertical;
+}
+
+.discussion-reply-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
 }

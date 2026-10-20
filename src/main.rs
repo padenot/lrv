@@ -1,18 +1,16 @@
 mod config;
 mod diff;
 mod github;
-mod output;
 mod phab_mcp;
 mod phabricator;
 mod server;
 mod skill;
 mod store;
 mod themes;
-mod types;
 
 use anyhow::{Context, Result};
 use clap::{ArgAction, Parser};
-use lrv::{agent, discovery, netutil};
+use lrv::{agent, discovery, netutil, output, types};
 use moz_cli_version_check::VersionChecker;
 use std::collections::HashMap;
 use std::env;
@@ -592,6 +590,23 @@ fn load_review_notes_file(path: &str) -> Result<Vec<ReviewNote>> {
     Ok(notes)
 }
 
+fn load_startup_review_notes_file(path: &str) -> Result<Vec<ReviewNote>> {
+    let notes = load_review_notes_file(path)?;
+    validate_startup_review_notes(&notes)?;
+    Ok(notes)
+}
+
+fn validate_startup_review_notes(notes: &[ReviewNote]) -> Result<()> {
+    if let Some(note) = notes.iter().find(|note| note.discussion_id.is_some()) {
+        anyhow::bail!(
+            "Invalid review note for {}:{}: discussion_id is only accepted by a running review (--add-notes / POST /api/review-notes)",
+            note.file,
+            note.line
+        );
+    }
+    Ok(())
+}
+
 fn find_review() -> Result<(PathBuf, discovery::ServerInfo)> {
     let cwd = env::current_dir()?;
     let root = repository::root(&cwd).unwrap_or_else(|| cwd.clone());
@@ -1074,7 +1089,7 @@ async fn main() -> Result<()> {
         return listen_to_review(args.listen_timeout, &args.format.parse()?).await;
     }
     if let Some(path) = args.validate_review_notes {
-        match load_review_notes_file(&path) {
+        match load_startup_review_notes_file(&path) {
             Ok(notes) => {
                 eprintln!(
                     "OK: {} note{}",
@@ -1223,7 +1238,7 @@ async fn main() -> Result<()> {
 
     let mut review_notes = Vec::new();
     for path in &args.review_notes_file {
-        review_notes.extend(load_review_notes_file(path)?);
+        review_notes.extend(load_startup_review_notes_file(path)?);
     }
 
     let phab_base_url = args
@@ -1333,6 +1348,7 @@ async fn main() -> Result<()> {
             }
         }
     }
+    validate_startup_review_notes(&review_notes)?;
     tag_single_commit_notes(&mut review_notes, is_series, diffs.len());
     assign_note_ids(&mut review_notes);
 

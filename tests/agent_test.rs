@@ -9,6 +9,7 @@ const TIMEOUT: Duration = Duration::from_secs(60);
 fn discussion() -> AgentEvent {
     AgentEvent::Discussion {
         discussion: Discussion {
+            thread_id: None,
             id: "d1".into(),
             created_at: 0,
             file: "src/lib.rs".into(),
@@ -213,9 +214,10 @@ async fn add_discussion_uses_shared_sequence_and_wakes_waiter() {
     let task = tokio::spawn(async move {
         sleep(Duration::from_secs(1)).await;
         producer.add_discussion(lrv::agent::DiscussionRequest {
-            file: "src/lib.rs".into(),
-            line: CommentLine::Single(3),
-            side: Side::New,
+            file: Some("src/lib.rs".into()),
+            line: Some(CommentLine::Single(3)),
+            side: Some(Side::New),
+            thread_id: None,
             body: "A new discussion".into(),
             commit_idx: None,
         })
@@ -226,7 +228,7 @@ async fn add_discussion_uses_shared_sequence_and_wakes_waiter() {
     assert_eq!(poll.events.len(), 1);
     assert_eq!(poll.events[0].seq, 2);
     assert_eq!(poll.cursor, 2);
-    let created = task.await.unwrap();
+    let created = task.await.unwrap().unwrap();
     assert_eq!(created.id, "lrv-discussion-2");
     assert!(created.created_at > 0);
     let discussions = channel.discussions();

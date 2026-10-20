@@ -3,6 +3,7 @@ import type { CommentLine } from './comments';
 
 export type ReviewNote = {
   id?: string;
+  discussion_id?: string;
   file: string;
   line: CommentLine;
   side: 'old' | 'new';
@@ -53,15 +54,20 @@ export class ReviewNoteManager {
   }
 
   getNotes(): ReviewNote[] {
-    return [...this.notes];
+    return this.notes.filter((n) => !n.discussion_id);
   }
 
   getNotesForFile(file: string): ReviewNote[] {
     return this.notes.filter(
       (n) =>
+        !n.discussion_id &&
         n.file === file &&
         (this.currentCommitIdx === null || n.commit_idx === this.currentCommitIdx),
     );
+  }
+
+  getDiscussionReplies(discussionId: string): ReviewNote[] {
+    return this.notes.filter((n) => n.discussion_id === discussionId);
   }
 
   updateNote(target: ReviewNote, patch: Partial<ReviewNote>): void {
@@ -76,6 +82,7 @@ export class ReviewNoteManager {
   findNote(file: string, line: number, side: 'old' | 'new'): number {
     return this.notes.findIndex(
       (n) =>
+        !n.discussion_id &&
         n.file === file &&
         n.side === side &&
         commentContainsLine(n, line) &&

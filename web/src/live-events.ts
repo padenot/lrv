@@ -16,7 +16,7 @@ export function startLiveEvents(
     if (!pending) {
       return;
     }
-    if (document.querySelector('.review-note-reply')) {
+    if (document.querySelector('.review-note-reply, .discussion-reply')) {
       timer = setTimeout(merge, 500);
       return;
     }

@@ -28,7 +28,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 use tokio::sync::{mpsc, Mutex, Semaphore};
 use tokio::task::JoinSet;
 use tokio_stream::{wrappers::WatchStream, StreamExt};
@@ -1509,16 +1509,24 @@ async fn add_discussion(
     if state.context.is_public {
         return StatusCode::FORBIDDEN.into_response();
     }
-    if !req.is_valid() || req.commit_idx.is_some_and(|idx| idx >= state.diffs.len()) {
+    if !req.is_valid() {
         return StatusCode::BAD_REQUEST.into_response();
+    }
+    if req.thread_id.is_none() {
+        if req.commit_idx.is_some_and(|idx| idx >= state.diffs.len()) {
+            return StatusCode::BAD_REQUEST.into_response();
+        }
+        if state.is_series && state.diffs.len() == 1 && req.commit_idx.is_none() {
+            req.commit_idx = Some(0);
+        }
     }
     if !state.agent.attached() {
         return StatusCode::CONFLICT.into_response();
     }
-    if state.is_series && state.diffs.len() == 1 && req.commit_idx.is_none() {
-        req.commit_idx = Some(0);
+    match state.agent.add_discussion(req) {
+        Some(discussion) => Json(discussion).into_response(),
+        None => StatusCode::BAD_REQUEST.into_response(),
     }
-    Json(state.agent.add_discussion(req)).into_response()
 }
 
 fn agent_authorized(state: &AppState, headers: &HeaderMap) -> bool {
@@ -1560,6 +1568,22 @@ async fn add_review_note(
         .any(|note| !note.is_valid() || note.commit_idx.is_some_and(|idx| idx >= state.diffs.len()))
     {
         return StatusCode::BAD_REQUEST.into_response();
+    }
+    for note in &mut batch {
+        if let Some(id) = &note.discussion_id {
+            let Some(root) = state.agent.root_discussion(id) else {
+                return StatusCode::BAD_REQUEST.into_response();
+            };
+            note.file = root.file;
+            note.line = root.line;
+            note.side = root.side;
+            note.commit_idx = root.commit_idx;
+            note.read_only = true;
+            note.date = Some(rfc3339_utc(SystemTime::now()));
+            if note.id.is_none() {
+                note.id = Some(state.agent.reply_id());
+            }
+        }
     }
     tag_single_commit_notes(&mut batch, state.is_series, state.diffs.len());
     assign_note_ids(&mut batch);

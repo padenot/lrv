@@ -265,8 +265,12 @@ pub fn format_listen(poll: &Poll, format: &OutputFormat) -> String {
                         .commit_idx
                         .map(|idx| format!(" [commit {idx}]"))
                         .unwrap_or_default();
+                    let heading = match &discussion.thread_id {
+                        Some(thread) => format!("Follow-up {} in thread {thread}", discussion.id),
+                        None => format!("Discussion {}", discussion.id),
+                    };
                     output.push_str(&format!(
-                        "Discussion on {}:{} ({}){commit}\n",
+                        "{heading} on {}:{} ({}){commit}\n",
                         discussion.file, discussion.line, discussion.side
                     ));
                     for line in discussion.body.lines() {

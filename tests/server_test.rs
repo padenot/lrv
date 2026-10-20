@@ -467,6 +467,7 @@ async fn test_agent_events_api() {
         if uri == "/api/agent/events?timeout=1" {
             agent.push(lrv::agent::AgentEvent::Discussion {
                 discussion: lrv::agent::Discussion {
+                    thread_id: None,
                     id: "d1".into(),
                     created_at: 0,
                     file: "src/lib.rs".into(),
@@ -642,4 +643,149 @@ async fn test_discussion_single_commit_series_pinning() {
         .unwrap();
     let discussion: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(discussion["commit_idx"], 0);
+}
+
+async fn response_json(response: axum::response::Response) -> serde_json::Value {
+    let bytes = axum::body::to_bytes(response.into_body(), 65536)
+        .await
+        .unwrap();
+    serde_json::from_slice(&bytes).unwrap()
+}
+
+fn reply_request(batch: serde_json::Value) -> Request<Body> {
+    Request::builder()
+        .method("POST")
+        .uri("/api/review-notes")
+        .header("authorization", "Bearer test-token")
+        .header("content-type", "application/json")
+        .body(Body::from(batch.to_string()))
+        .unwrap()
+}
+
+#[tokio::test]
+async fn test_discussion_threads_and_agent_replies() {
+    let state = review_note_state();
+    state.agent.touch();
+    let app = lrv::server::create_router(state.clone(), false);
+    let root = response_json(
+        app.clone()
+            .oneshot(discussion_request(serde_json::json!({
+                "file": "root.rs", "line": [3, 5], "side": "old", "body": "Question"
+            })))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(root["commit_idx"], 0);
+    let follow = response_json(
+        app.clone()
+            .oneshot(discussion_request(serde_json::json!({
+                "thread_id": root["id"], "body": "Follow up"
+            })))
+            .await
+            .unwrap(),
+    )
+    .await;
+    for key in ["file", "line", "side", "commit_idx"] {
+        assert_eq!(follow[key], root[key]);
+    }
+    assert_eq!(follow["thread_id"], root["id"]);
+    let poll = response_json(
+        app.clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/agent/events?after=1&timeout=1")
+                    .header("authorization", "Bearer test-token")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(poll["events"][0]["discussion"], follow);
+    assert_eq!(poll["events"][0]["seq"], 2);
+
+    for id in [serde_json::json!("unknown"), follow["id"].clone()] {
+        let response = app
+            .clone()
+            .oneshot(discussion_request(serde_json::json!({
+                "thread_id": id, "body": "Invalid follow up"
+            })))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let response = app.clone().oneshot(reply_request(serde_json::json!([
+            {"file": "ordinary.rs", "line": 1, "side": "new", "body": "Don't store this"},
+            {"file": "wrong.rs", "line": 1, "side": "new", "body": "Done.", "discussion_id": root["id"]},
+            {"file": "wrong.rs", "line": 1, "side": "new", "body": "Done.", "discussion_id": id}
+        ]))).await.unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert!(state.review_notes.lock().await.is_empty());
+    }
+    for missing in ["file", "line", "side"] {
+        let mut payload =
+            serde_json::json!({"file": "a.rs", "line": 1, "side": "new", "body": "Question"});
+        payload.as_object_mut().unwrap().remove(missing);
+        assert_eq!(
+            app.clone()
+                .oneshot(discussion_request(payload))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::BAD_REQUEST
+        );
+    }
+    let mut reply = serde_json::json!({
+        "file": "wrong.rs", "line": 9, "side": "new", "body": "Done.",
+        "discussion_id": root["id"], "date": "untrusted date"
+    });
+    let before = lrv::types::rfc3339_utc(std::time::SystemTime::now());
+    let response = app
+        .clone()
+        .oneshot(reply_request(serde_json::json!([reply, reply])))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response_json(response).await,
+        serde_json::json!({"added": 2, "skipped": 0})
+    );
+    reply["id"] = serde_json::json!("idempotent-reply");
+    for expected in [
+        serde_json::json!({"added": 1, "skipped": 0}),
+        serde_json::json!({"added": 0, "skipped": 1}),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(reply_request(serde_json::json!([reply])))
+            .await
+            .unwrap();
+        assert_eq!(response_json(response).await, expected);
+    }
+    let notes = response_json(
+        app.clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/review-notes")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap(),
+    )
+    .await;
+    let notes = notes.as_array().unwrap();
+    assert_eq!(notes.len(), 3);
+    assert_ne!(notes[0]["id"], notes[1]["id"]);
+    let after = lrv::types::rfc3339_utc(std::time::SystemTime::now());
+    for note in notes {
+        for key in ["file", "line", "side", "commit_idx"] {
+            assert_eq!(note[key], root[key]);
+        }
+        assert_eq!(note["read_only"], true);
+        let date = note["date"].as_str().unwrap();
+        assert!(date >= before.as_str() && date <= after.as_str());
+        assert_eq!(date.len(), 24);
+    }
 }

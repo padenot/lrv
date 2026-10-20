@@ -10,6 +10,8 @@ pub struct Discussion {
     pub id: String,
     #[serde(default)]
     pub created_at: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread_id: Option<String>,
     pub file: String,
     pub line: CommentLine,
     pub side: Side,
@@ -20,17 +22,21 @@ pub struct Discussion {
 
 #[derive(Deserialize)]
 pub struct DiscussionRequest {
-    pub file: String,
-    pub line: CommentLine,
-    pub side: Side,
+    pub file: Option<String>,
+    pub line: Option<CommentLine>,
+    pub side: Option<Side>,
     pub body: String,
-    #[serde(default)]
     pub commit_idx: Option<usize>,
+    pub thread_id: Option<String>,
 }
 
 impl DiscussionRequest {
     pub fn is_valid(&self) -> bool {
-        !self.file.is_empty() && !self.body.trim().is_empty() && self.line.is_valid()
+        !self.body.trim().is_empty()
+            && (self.thread_id.is_some()
+                || (self.file.as_ref().is_some_and(|file| !file.is_empty())
+                    && self.line.as_ref().is_some_and(CommentLine::is_valid)
+                    && self.side.is_some()))
     }
 }
 
@@ -57,6 +63,7 @@ pub struct Poll {
 struct Inner {
     events: Vec<QueuedEvent>,
     next_seq: u64,
+    next_reply: u64,
     active_polls: usize,
     last_activity: Option<Instant>,
     closed: bool,
@@ -87,6 +94,7 @@ impl AgentChannel {
             inner: Mutex::new(Inner {
                 events: Vec::new(),
                 next_seq: 1,
+                next_reply: 1,
                 active_polls: 0,
                 last_activity: None,
                 closed: false,
@@ -111,19 +119,41 @@ impl AgentChannel {
         seq
     }
 
-    pub fn add_discussion(&self, req: DiscussionRequest) -> Discussion {
+    pub fn add_discussion(&self, req: DiscussionRequest) -> Option<Discussion> {
+        if !req.is_valid() {
+            return None;
+        }
         let mut inner = self.inner.lock().unwrap();
+        let (file, line, side, commit_idx) = if let Some(id) = &req.thread_id {
+            let root = inner.events.iter().find_map(|event| match &event.event {
+                AgentEvent::Discussion { discussion }
+                    if discussion.id == *id && discussion.thread_id.is_none() =>
+                {
+                    Some(discussion)
+                }
+                _ => None,
+            })?;
+            (
+                root.file.clone(),
+                root.line.clone(),
+                root.side,
+                root.commit_idx,
+            )
+        } else {
+            (req.file?, req.line?, req.side?, req.commit_idx)
+        };
         let discussion = Discussion {
             id: format!("lrv-discussion-{}", inner.next_seq),
             created_at: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis() as u64,
-            file: req.file,
-            line: req.line,
-            side: req.side,
+            thread_id: req.thread_id,
+            file,
+            line,
+            side,
             body: req.body,
-            commit_idx: req.commit_idx,
+            commit_idx,
         };
         self.push_locked(
             &mut inner,
@@ -131,7 +161,30 @@ impl AgentChannel {
                 discussion: discussion.clone(),
             },
         );
-        discussion
+        Some(discussion)
+    }
+
+    pub fn root_discussion(&self, id: &str) -> Option<Discussion> {
+        self.inner
+            .lock()
+            .unwrap()
+            .events
+            .iter()
+            .find_map(|event| match &event.event {
+                AgentEvent::Discussion { discussion }
+                    if discussion.id == id && discussion.thread_id.is_none() =>
+                {
+                    Some(discussion.clone())
+                }
+                _ => None,
+            })
+    }
+
+    pub fn reply_id(&self) -> String {
+        let mut inner = self.inner.lock().unwrap();
+        let id = format!("lrv-reply-{}", inner.next_reply);
+        inner.next_reply += 1;
+        id
     }
 
     pub fn discussions(&self) -> Vec<Discussion> {

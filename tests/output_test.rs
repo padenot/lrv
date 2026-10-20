@@ -277,7 +277,7 @@ fn listen_formats_events_even_when_ended() {
             "id": "first", "created_at": 0, "file": "a.rs", "line": 3, "side": "new", "body": "First line\nSecond line"
         }},
         {"seq": 2, "type": "discussion", "discussion": {
-            "id": "second", "created_at": 0, "file": "b.rs", "line": [10, 12], "side": "old", "body": "Range", "commit_idx": 0
+            "id": "second", "thread_id": "first", "created_at": 0, "file": "b.rs", "line": [10, 12], "side": "old", "body": "Range", "commit_idx": 0
         }}
     ]);
     let poll = Poll {
@@ -293,7 +293,7 @@ fn listen_formats_events_even_when_ended() {
     );
     assert_eq!(
         format_listen(&poll, &OutputFormat::Text),
-        "Discussion on a.rs:3 (new)\n    First line\n    Second line\n\nDiscussion on b.rs:10-12 (old) [commit 0]\n    Range"
+        "Discussion first on a.rs:3 (new)\n    First line\n    Second line\n\nFollow-up second in thread first on b.rs:10-12 (old) [commit 0]\n    Range"
     );
 }
 

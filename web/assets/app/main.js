@@ -551,7 +551,10 @@ var DiscussionManager = class {
 	listeners = [];
 	currentCommitIdx = null;
 	getForFile(file) {
-		return this.discussions.filter((d) => d.file === file && (this.currentCommitIdx === null || d.commit_idx === this.currentCommitIdx));
+		return this.discussions.filter((d) => !d.thread_id && d.file === file && (this.currentCommitIdx === null || d.commit_idx === this.currentCommitIdx));
+	}
+	getFollowUps(rootId) {
+		return this.discussions.filter((d) => d.thread_id === rootId);
 	}
 	onChange(listener) {
 		this.listeners.push(listener);
@@ -564,7 +567,7 @@ var DiscussionManager = class {
 		const response = await fetch("/api/discussions", {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify(this.currentCommitIdx === null ? req : {
+			body: JSON.stringify(this.currentCommitIdx === null || "thread_id" in req ? req : {
 				...req,
 				commit_idx: this.currentCommitIdx
 			})
@@ -668,7 +671,7 @@ function linkifyText(text) {
 //#endregion
 //#region web/src/discussion-methods.ts
 var DiscussionMethods = class {
-	buildDiscussionNode(discussion) {
+	buildDiscussionNode(root) {
 		const box = el("div", { className: "discussion" });
 		for (const eventName of [
 			"pointerdown",
@@ -676,13 +679,111 @@ var DiscussionMethods = class {
 			"click",
 			"dblclick"
 		]) box.addEventListener(eventName, (event) => event.stopPropagation());
-		const meta = el("div", {
-			className: "discussion-meta",
-			text: `You · ${new Date(discussion.created_at).toLocaleTimeString()} · ${discussion.side} line ${commentLineLabel(discussion)} · Sent to agent`
+		const entries = [
+			{
+				body: root.body,
+				time: root.created_at,
+				author: "You",
+				agent: false
+			},
+			...this.discussionManager.getFollowUps(root.id).map((d) => ({
+				body: d.body,
+				time: d.created_at,
+				author: "You",
+				agent: false
+			})),
+			...this.reviewNoteManager.getDiscussionReplies(root.id).map((note) => ({
+				body: note.body,
+				time: Date.parse(note.date),
+				author: note.author || "Agent",
+				agent: true
+			}))
+		].sort((a, b) => a.time - b.time);
+		for (const entry of entries) {
+			const node = el("div", { className: `discussion-entry${entry.agent ? " discussion-entry-agent" : ""}` });
+			const meta = el("div", {
+				className: "discussion-meta",
+				text: `${entry.author} · ${new Date(entry.time).toLocaleTimeString()} · ${root.side} line ${commentLineLabel(root)}`
+			});
+			const body = el("div", { className: "discussion-body" });
+			appendLinkifiedText(body, entry.body);
+			node.append(meta, body);
+			box.appendChild(node);
+		}
+		const reply = el("button", {
+			className: "btn-secondary discussion-reply-btn",
+			text: "Reply"
 		});
-		const body = el("div", { className: "discussion-body" });
-		appendLinkifiedText(body, discussion.body);
-		box.append(meta, body);
+		reply.addEventListener("click", () => {
+			if (box.querySelector(".discussion-reply")) return;
+			const form = el("div", { className: "discussion-reply" });
+			const textarea = el("textarea", {
+				className: "discussion-reply-text",
+				attrs: { placeholder: "Follow up with the agent..." }
+			});
+			const controls = el("div", { className: "discussion-reply-actions" });
+			const send = el("button", {
+				className: "btn-primary",
+				text: "Send"
+			});
+			const cancel = el("button", {
+				className: "btn-secondary",
+				text: "Cancel"
+			});
+			const error = el("div", { className: "comment-error" });
+			error.hidden = true;
+			const resize = () => {
+				box.dispatchEvent(new Event("discussion-layout"));
+				box.scrollTop = box.scrollHeight;
+			};
+			const close = () => {
+				form.remove();
+				reply.hidden = false;
+				resize();
+			};
+			const submit = async () => {
+				const body = textarea.value.trim();
+				if (!body || send.disabled) {
+					textarea.focus();
+					return;
+				}
+				send.disabled = true;
+				error.hidden = true;
+				try {
+					await this.discussionManager.send({
+						thread_id: root.id,
+						body
+					});
+				} catch (err) {
+					error.textContent = err instanceof DiscussionError && err.status === 409 ? "No agent is listening any more" : "Failed to send discussion";
+					error.hidden = false;
+					send.disabled = false;
+					resize();
+				}
+			};
+			send.addEventListener("click", () => void submit());
+			cancel.addEventListener("click", close);
+			textarea.addEventListener("keydown", (event) => {
+				if (event.key === "Escape") {
+					event.preventDefault();
+					event.stopPropagation();
+					close();
+				} else if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+					event.preventDefault();
+					submit();
+				}
+			});
+			controls.append(send, cancel);
+			form.append(textarea, error, controls);
+			box.appendChild(form);
+			reply.hidden = true;
+			resize();
+			textarea.focus();
+		});
+		box.appendChild(reply);
+		requestAnimationFrame(() => {
+			box.scrollTop = box.scrollHeight;
+		});
 		return box;
 	}
 };
@@ -718,10 +819,13 @@ var ReviewNoteManager = class {
 		this.notifyListeners();
 	}
 	getNotes() {
-		return [...this.notes];
+		return this.notes.filter((n) => !n.discussion_id);
 	}
 	getNotesForFile(file) {
-		return this.notes.filter((n) => n.file === file && (this.currentCommitIdx === null || n.commit_idx === this.currentCommitIdx));
+		return this.notes.filter((n) => !n.discussion_id && n.file === file && (this.currentCommitIdx === null || n.commit_idx === this.currentCommitIdx));
+	}
+	getDiscussionReplies(discussionId) {
+		return this.notes.filter((n) => n.discussion_id === discussionId);
 	}
 	updateNote(target, patch) {
 		const idx = this.notes.findIndex((note) => this.isSameNote(note, target));
@@ -733,7 +837,7 @@ var ReviewNoteManager = class {
 		this.notifyListeners();
 	}
 	findNote(file, line, side) {
-		return this.notes.findIndex((n) => n.file === file && n.side === side && commentContainsLine(n, line) && (this.currentCommitIdx === null || n.commit_idx === this.currentCommitIdx));
+		return this.notes.findIndex((n) => !n.discussion_id && n.file === file && n.side === side && commentContainsLine(n, line) && (this.currentCommitIdx === null || n.commit_idx === this.currentCommitIdx));
 	}
 	onChange(listener) {
 		this.listeners.push(listener);
@@ -815,7 +919,7 @@ function startLiveEvents(app) {
 	const merge = () => {
 		timer = null;
 		if (!pending) return;
-		if (document.querySelector(".review-note-reply")) {
+		if (document.querySelector(".review-note-reply, .discussion-reply")) {
 			timer = setTimeout(merge, 500);
 			return;
 		}
@@ -12213,16 +12317,24 @@ var ReviewNoteMethods = class {
 			file: note.file,
 			line: note.line,
 			side: note.side,
-			body: note.body,
+			height: () => this.reviewNoteHeightPx(note.body),
+			hover: note.body,
 			node: this.buildReviewNoteNode(note)
-		})), ...this.discussionManager.getForFile(file.path).map((discussion) => ({
-			file: discussion.file,
-			line: discussion.line,
-			side: discussion.side,
-			body: discussion.body,
-			node: this.buildDiscussionNode(discussion),
-			discussion: true
-		}))];
+		})), ...this.discussionManager.getForFile(file.path).map((discussion) => {
+			const node = this.buildDiscussionNode(discussion);
+			return {
+				file: discussion.file,
+				line: discussion.line,
+				side: discussion.side,
+				node,
+				hover: discussion.body,
+				height: () => {
+					const entries = Array.from(node.querySelectorAll(".discussion-body")).reduce((total, body) => total + this.reviewNoteHeightPx(body.textContent || "") - 48, 0);
+					return Math.min(460, 52 + entries + (node.querySelector(".discussion-reply") ? 200 : 0));
+				},
+				discussion: true
+			};
+		})];
 		const modifiedEditor = this.editor.getModifiedEditor();
 		const originalEditor = this.editor.getOriginalEditor();
 		const modifiedNotes = notes.filter((note) => note.side === "new");
@@ -12243,10 +12355,15 @@ var ReviewNoteMethods = class {
 				const line = Math.max(1, Math.min(commentEndLine(note), maxLine));
 				const node = el("div", { className: `review-note-zone review-note-zone-${note.side}` });
 				node.appendChild(note.node);
-				const id = accessor.addZone({
+				const zone = {
 					afterLineNumber: line,
 					domNode: node,
-					heightInPx: this.reviewNoteHeightPx(note.body)
+					heightInPx: note.height()
+				};
+				const id = accessor.addZone(zone);
+				if (note.discussion) note.node.addEventListener("discussion-layout", () => {
+					zone.heightInPx = note.height();
+					targetEditor.changeViewZones((zones) => zones.layoutZone(id));
 				});
 				newIds.push(id);
 			});
@@ -12265,7 +12382,7 @@ var ReviewNoteMethods = class {
 				options: {
 					isWholeLine: true,
 					glyphMarginClassName: note.discussion ? "codicon codicon-hubot discussion-glyph" : "codicon codicon-comment-discussion review-note-glyph",
-					glyphMarginHoverMessage: { value: note.body },
+					glyphMarginHoverMessage: { value: note.hover },
 					linesDecorationsClassName: note.discussion ? "discussion-line-decoration" : "review-note-line-decoration"
 				}
 			};
