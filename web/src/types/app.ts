@@ -1,4 +1,5 @@
 import type { CommentLine, ReviewComment } from '../comments';
+import type { DiscussionManager } from '../discussions';
 import type { ReviewNote } from '../review-notes';
 import type { editor } from 'monaco-editor';
 
@@ -121,6 +122,7 @@ export type DiffStats = {
 };
 
 export interface AppContext {
+  discussionManager: DiscussionManager;
   agentAttached: boolean;
   setAgentAttached(attached: boolean): void;
   commentManager: {

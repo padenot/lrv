@@ -34,6 +34,7 @@ Comment form has two independent implementations:
 - `comments-ui-methods.ts` — Monaco diff view
 - `stacked-view-methods.ts` — stacked table view
 
+Discuss (button + Mod+Alt+Enter, shown via `body.agent-attached`) belongs in both forms; discussions render from `discussionManager`, never `commentManager`.
 Any comment UX change (shortcuts, edit, delete, validation) must go in both.
 
 ## Key Behaviours

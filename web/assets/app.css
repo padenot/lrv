@@ -2334,3 +2334,58 @@ body {
   opacity: 0.5;
   cursor: default;
 }
+
+body:not(.agent-attached) .discuss-btn,
+body:not(.agent-attached) .discuss-hint {
+  display: none;
+}
+
+.comment-error {
+  margin-bottom: 14px;
+  padding: 8px 10px;
+  border: 1px solid var(--error-color);
+  border-radius: 6px;
+  color: var(--error-color);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.comment-error[hidden] {
+  display: none;
+}
+
+.discussion {
+  position: relative;
+  z-index: 50;
+  margin: 4px 12px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--text-secondary);
+  border-radius: 4px;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  pointer-events: auto;
+  overflow: auto;
+}
+
+.discussion-meta {
+  margin-bottom: 4px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.discussion-body {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.monaco-editor .discussion-glyph {
+  color: var(--text-secondary);
+}
+
+.monaco-editor .discussion-line-decoration {
+  border-left: 2px solid var(--text-secondary);
+}

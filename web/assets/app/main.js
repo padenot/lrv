@@ -538,6 +538,155 @@ var CommentManager = class {
 	}
 };
 //#endregion
+//#region web/src/discussions.ts
+var DiscussionError = class extends Error {
+	status;
+	constructor(status) {
+		super(`Discussion request failed (${status})`);
+		this.status = status;
+	}
+};
+var DiscussionManager = class {
+	discussions = [];
+	listeners = [];
+	currentCommitIdx = null;
+	getForFile(file) {
+		return this.discussions.filter((d) => d.file === file && (this.currentCommitIdx === null || d.commit_idx === this.currentCommitIdx));
+	}
+	onChange(listener) {
+		this.listeners.push(listener);
+	}
+	setDiscussions(discussions) {
+		this.discussions = [...discussions];
+		this.notifyListeners();
+	}
+	async send(req) {
+		const response = await fetch("/api/discussions", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify(this.currentCommitIdx === null ? req : {
+				...req,
+				commit_idx: this.currentCommitIdx
+			})
+		});
+		if (!response.ok) throw new DiscussionError(response.status);
+		const discussion = await response.json();
+		this.discussions.push(discussion);
+		this.notifyListeners();
+	}
+	notifyListeners() {
+		this.listeners.forEach((listener) => listener());
+	}
+};
+//#endregion
+//#region web/src/linkify.ts
+const BUG_RE = /\b([bB]ug)\s+(\d{6,})\b/g;
+const PHAB_RE = /\b(D\d{6,})\b/g;
+const MD_LINK_RE = /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g;
+const URL_RE = /\bhttps?:\/\/[^\s<>()]+/g;
+function appendLinkifiedText(target, text) {
+	target.textContent = "";
+	target.appendChild(linkifyText(text));
+}
+function linkifyText(text) {
+	const fragment = document.createDocumentFragment();
+	const matches = [];
+	for (const match of text.matchAll(MD_LINK_RE)) {
+		const full = match[0];
+		const label = match[1];
+		const href = match[2];
+		if (!full || !label || !href || match.index === void 0) continue;
+		matches.push({
+			start: match.index,
+			end: match.index + full.length,
+			text: label,
+			href
+		});
+	}
+	for (const match of text.matchAll(URL_RE)) {
+		const full = match[0];
+		if (!full || match.index === void 0) continue;
+		const trimmed = full.replace(/[),.;:!?]+$/g, "");
+		matches.push({
+			start: match.index,
+			end: match.index + trimmed.length,
+			text: trimmed,
+			href: trimmed
+		});
+	}
+	for (const match of text.matchAll(BUG_RE)) {
+		const full = match[0];
+		const id = match[2];
+		if (!full || !id || match.index === void 0) continue;
+		matches.push({
+			start: match.index,
+			end: match.index + full.length,
+			text: full,
+			href: `https://bugzilla.mozilla.org/show_bug.cgi?id=${id}`
+		});
+	}
+	for (const match of text.matchAll(PHAB_RE)) {
+		const full = match[1];
+		if (!full || match.index === void 0) continue;
+		matches.push({
+			start: match.index,
+			end: match.index + full.length,
+			text: full,
+			href: `https://phabricator.services.mozilla.com/${full}`
+		});
+	}
+	if (matches.length === 0) {
+		fragment.appendChild(document.createTextNode(text));
+		return fragment;
+	}
+	matches.sort((a, b) => a.start - b.start || b.end - a.end);
+	const filtered = [];
+	let cursor = -1;
+	matches.forEach((match) => {
+		if (match.start < cursor) return;
+		filtered.push(match);
+		cursor = match.end;
+	});
+	let pos = 0;
+	filtered.forEach((match) => {
+		if (match.start > pos) fragment.appendChild(document.createTextNode(text.slice(pos, match.start)));
+		const anchor = el("a", {
+			className: "auto-link",
+			text: match.text,
+			attrs: {
+				href: match.href,
+				target: "_blank",
+				rel: "noopener noreferrer"
+			}
+		});
+		fragment.appendChild(anchor);
+		pos = match.end;
+	});
+	if (pos < text.length) fragment.appendChild(document.createTextNode(text.slice(pos)));
+	return fragment;
+}
+//#endregion
+//#region web/src/discussion-methods.ts
+var DiscussionMethods = class {
+	buildDiscussionNode(discussion) {
+		const box = el("div", { className: "discussion" });
+		for (const eventName of [
+			"pointerdown",
+			"mousedown",
+			"click",
+			"dblclick"
+		]) box.addEventListener(eventName, (event) => event.stopPropagation());
+		const meta = el("div", {
+			className: "discussion-meta",
+			text: `You · ${new Date(discussion.created_at).toLocaleTimeString()} · ${discussion.side} line ${commentLineLabel(discussion)} · Sent to agent`
+		});
+		const body = el("div", { className: "discussion-body" });
+		appendLinkifiedText(body, discussion.body);
+		box.append(meta, body);
+		return box;
+	}
+};
+//#endregion
 //#region web/src/review-notes.ts
 var ReviewNoteManager = class {
 	notes;
@@ -917,93 +1066,6 @@ function markAppReady() {
 			subtree: true
 		});
 	}
-}
-//#endregion
-//#region web/src/linkify.ts
-const BUG_RE = /\b([bB]ug)\s+(\d{6,})\b/g;
-const PHAB_RE = /\b(D\d{6,})\b/g;
-const MD_LINK_RE = /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g;
-const URL_RE = /\bhttps?:\/\/[^\s<>()]+/g;
-function appendLinkifiedText(target, text) {
-	target.textContent = "";
-	target.appendChild(linkifyText(text));
-}
-function linkifyText(text) {
-	const fragment = document.createDocumentFragment();
-	const matches = [];
-	for (const match of text.matchAll(MD_LINK_RE)) {
-		const full = match[0];
-		const label = match[1];
-		const href = match[2];
-		if (!full || !label || !href || match.index === void 0) continue;
-		matches.push({
-			start: match.index,
-			end: match.index + full.length,
-			text: label,
-			href
-		});
-	}
-	for (const match of text.matchAll(URL_RE)) {
-		const full = match[0];
-		if (!full || match.index === void 0) continue;
-		const trimmed = full.replace(/[),.;:!?]+$/g, "");
-		matches.push({
-			start: match.index,
-			end: match.index + trimmed.length,
-			text: trimmed,
-			href: trimmed
-		});
-	}
-	for (const match of text.matchAll(BUG_RE)) {
-		const full = match[0];
-		const id = match[2];
-		if (!full || !id || match.index === void 0) continue;
-		matches.push({
-			start: match.index,
-			end: match.index + full.length,
-			text: full,
-			href: `https://bugzilla.mozilla.org/show_bug.cgi?id=${id}`
-		});
-	}
-	for (const match of text.matchAll(PHAB_RE)) {
-		const full = match[1];
-		if (!full || match.index === void 0) continue;
-		matches.push({
-			start: match.index,
-			end: match.index + full.length,
-			text: full,
-			href: `https://phabricator.services.mozilla.com/${full}`
-		});
-	}
-	if (matches.length === 0) {
-		fragment.appendChild(document.createTextNode(text));
-		return fragment;
-	}
-	matches.sort((a, b) => a.start - b.start || b.end - a.end);
-	const filtered = [];
-	let cursor = -1;
-	matches.forEach((match) => {
-		if (match.start < cursor) return;
-		filtered.push(match);
-		cursor = match.end;
-	});
-	let pos = 0;
-	filtered.forEach((match) => {
-		if (match.start > pos) fragment.appendChild(document.createTextNode(text.slice(pos, match.start)));
-		const anchor = el("a", {
-			className: "auto-link",
-			text: match.text,
-			attrs: {
-				href: match.href,
-				target: "_blank",
-				rel: "noopener noreferrer"
-			}
-		});
-		fragment.appendChild(anchor);
-		pos = match.end;
-	});
-	if (pos < text.length) fragment.appendChild(document.createTextNode(text.slice(pos)));
-	return fragment;
 }
 //#endregion
 //#region web/src/file-order.ts
@@ -11983,6 +12045,14 @@ var CommentsUIMethods = class {
 				autofocus: true
 			}
 		});
+		const discuss = existingComment ? null : el("button", {
+			className: "btn-secondary discuss-btn",
+			text: "Discuss"
+		});
+		const error = el("div", {
+			className: "comment-error",
+			attrs: { hidden: true }
+		});
 		const actions = el("div", { className: "comment-actions" }, [
 			el("span", {
 				className: "shortcut-hint",
@@ -11996,6 +12066,11 @@ var CommentsUIMethods = class {
 				className: "btn-secondary cancel-btn",
 				text: "Cancel"
 			}),
+			existingComment ? null : el("span", {
+				className: "shortcut-hint discuss-hint",
+				text: `${modKey}+Alt+Enter to discuss`
+			}),
+			discuss,
 			el("button", {
 				className: "btn-primary save-btn",
 				text: "Save"
@@ -12003,6 +12078,7 @@ var CommentsUIMethods = class {
 		]);
 		domNode.appendChild(title);
 		domNode.appendChild(textarea);
+		domNode.appendChild(error);
 		domNode.appendChild(actions);
 		const widget = {
 			getId: () => "inline.comment.widget",
@@ -12038,6 +12114,10 @@ var CommentsUIMethods = class {
 			if (e.key === "Escape") cleanup();
 			else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
 				e.preventDefault();
+				if (e.altKey) {
+					if (this.agentAttached && !existingComment) sendDiscussion();
+					return;
+				}
 				saveComment();
 			}
 		};
@@ -12067,6 +12147,32 @@ var CommentsUIMethods = class {
 			this.updateDecorations();
 			cleanup();
 		};
+		const sendDiscussion = async () => {
+			const body = textarea.value.trim();
+			if (!body) {
+				textarea.focus();
+				return;
+			}
+			if (!discuss || discuss.disabled) return;
+			discuss.disabled = true;
+			error.hidden = true;
+			try {
+				await this.discussionManager.send({
+					file,
+					line: commentLine,
+					side,
+					body
+				});
+				cleanup();
+			} catch (err) {
+				error.textContent = err instanceof DiscussionError && err.status === 409 ? "No agent is listening any more" : "Failed to send discussion. Try again.";
+				error.hidden = false;
+				targetEditor.layoutContentWidget(widget);
+			} finally {
+				discuss.disabled = false;
+			}
+		};
+		if (discuss) discuss.onclick = () => void sendDiscussion();
 		if (saveBtn) saveBtn.onclick = saveComment;
 		if (cancelBtn) cancelBtn.onclick = cleanup;
 		const deleteBtnEl = domNode.querySelector(".delete-btn");
@@ -12103,7 +12209,20 @@ var ReviewNoteMethods = class {
 		if (!this.editor) return;
 		const file = this.files[this.currentFileIndex];
 		if (!file) return;
-		const notes = this.reviewNoteManager.getNotesForFile(file.path);
+		const notes = [...this.reviewNoteManager.getNotesForFile(file.path).map((note) => ({
+			file: note.file,
+			line: note.line,
+			side: note.side,
+			body: note.body,
+			node: this.buildReviewNoteNode(note)
+		})), ...this.discussionManager.getForFile(file.path).map((discussion) => ({
+			file: discussion.file,
+			line: discussion.line,
+			side: discussion.side,
+			body: discussion.body,
+			node: this.buildDiscussionNode(discussion),
+			discussion: true
+		}))];
 		const modifiedEditor = this.editor.getModifiedEditor();
 		const originalEditor = this.editor.getOriginalEditor();
 		const modifiedNotes = notes.filter((note) => note.side === "new");
@@ -12123,11 +12242,11 @@ var ReviewNoteMethods = class {
 			notes.forEach((note) => {
 				const line = Math.max(1, Math.min(commentEndLine(note), maxLine));
 				const node = el("div", { className: `review-note-zone review-note-zone-${note.side}` });
-				node.appendChild(this.buildReviewNoteNode(note));
+				node.appendChild(note.node);
 				const id = accessor.addZone({
 					afterLineNumber: line,
 					domNode: node,
-					heightInPx: this.reviewNoteHeightPx(note)
+					heightInPx: this.reviewNoteHeightPx(note.body)
 				});
 				newIds.push(id);
 			});
@@ -12145,9 +12264,9 @@ var ReviewNoteMethods = class {
 				range: new monaco.Range(start, 1, end, 1),
 				options: {
 					isWholeLine: true,
-					glyphMarginClassName: "codicon codicon-comment-discussion review-note-glyph",
+					glyphMarginClassName: note.discussion ? "codicon codicon-hubot discussion-glyph" : "codicon codicon-comment-discussion review-note-glyph",
 					glyphMarginHoverMessage: { value: note.body },
-					linesDecorationsClassName: "review-note-line-decoration"
+					linesDecorationsClassName: note.discussion ? "discussion-line-decoration" : "review-note-line-decoration"
 				}
 			};
 		});
@@ -12332,8 +12451,8 @@ var ReviewNoteMethods = class {
 		const index = this.commentManager.comments.findIndex(({ in_reply_to: target }) => target !== void 0 && target.id === note.id && target.author === note.author && target.body === note.body);
 		if (index >= 0) this.commentManager.removeComment(index);
 	}
-	reviewNoteHeightPx(note) {
-		const visualLines = note.body.split("\n").reduce((total, line) => total + Math.max(1, Math.ceil(line.length / 86)), 0);
+	reviewNoteHeightPx(body) {
+		const visualLines = body.split("\n").reduce((total, line) => total + Math.max(1, Math.ceil(line.length / 86)), 0);
 		return Math.max(124, Math.min(460, 88 + visualLines * 18));
 	}
 };
@@ -13157,6 +13276,7 @@ var SeriesMethods = class {
 		this.currentCommitIdx = clamped;
 		this.commentManager.currentCommitIdx = clamped;
 		this.reviewNoteManager.currentCommitIdx = clamped;
+		this.discussionManager.currentCommitIdx = clamped;
 		this.resetFileView();
 		this.clearStackedView();
 		if (this._commitViewEl) {
@@ -13578,6 +13698,11 @@ var StackedViewMethods = class {
 		const metadata = annotation.metadata;
 		if (!metadata) return;
 		if (metadata.kind === "draft") return this.buildDraftAnnotation(metadata);
+		if (metadata.kind === "discussion") {
+			const wrap = el("div", { className: "stacked-annotation" });
+			wrap.appendChild(this.buildDiscussionNode(metadata.discussion));
+			return wrap;
+		}
 		if (metadata.kind === "review-note") {
 			const wrap = el("div", { className: `stacked-annotation stacked-review-note-${metadata.note.side}` });
 			wrap.appendChild(this.buildReviewNoteNode(metadata.note));
@@ -13599,6 +13724,20 @@ var StackedViewMethods = class {
 			className: "stacked-comment-cancel btn-secondary",
 			text: "Cancel"
 		});
+		const reset = () => {
+			this.stackedDraft = null;
+			this.stackedLastRangeSelection = null;
+			this.stackedCodeView?.clearSelectedLines({ notify: false });
+			this.renderStackedComments();
+		};
+		const discuss = el("button", {
+			className: "stacked-comment-discuss btn-secondary discuss-btn",
+			text: "Discuss"
+		});
+		const error = el("div", {
+			className: "comment-error",
+			attrs: { hidden: true }
+		});
 		const doSave = () => {
 			const body = ta.value.trim();
 			if (!body) {
@@ -13615,30 +13754,52 @@ var StackedViewMethods = class {
 				...comment,
 				commit_idx: this.currentCommitIdx
 			} : comment);
-			this.stackedDraft = null;
-			this.stackedLastRangeSelection = null;
-			this.stackedCodeView?.clearSelectedLines({ notify: false });
-			this.renderStackedComments();
+			reset();
 		};
+		const sendDiscussion = async () => {
+			const body = ta.value.trim();
+			if (!body) {
+				ta.focus();
+				return;
+			}
+			if (discuss.disabled) return;
+			discuss.disabled = true;
+			error.hidden = true;
+			try {
+				await this.discussionManager.send({
+					file: draft.file,
+					line: draft.line,
+					side: draft.side,
+					body
+				});
+				reset();
+			} catch (err) {
+				error.textContent = err instanceof DiscussionError && err.status === 409 ? "No agent is listening any more" : "Failed to send discussion. Try again.";
+				error.hidden = false;
+			} finally {
+				discuss.disabled = false;
+			}
+		};
+		discuss.addEventListener("click", () => void sendDiscussion());
 		save.addEventListener("click", doSave);
 		cancel.addEventListener("click", () => {
-			this.stackedDraft = null;
-			this.stackedLastRangeSelection = null;
-			this.stackedCodeView?.clearSelectedLines({ notify: false });
-			this.renderStackedComments();
+			reset();
 		});
 		ta.addEventListener("keydown", (event) => {
 			if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
 				event.preventDefault();
+				if (event.altKey) {
+					if (this.agentAttached) sendDiscussion();
+					return;
+				}
 				doSave();
-			} else if (event.key === "Escape") {
-				this.stackedDraft = null;
-				this.stackedLastRangeSelection = null;
-				this.stackedCodeView?.clearSelectedLines({ notify: false });
-				this.renderStackedComments();
-			}
+			} else if (event.key === "Escape") reset();
 		});
-		form.append(ta, el("div", { className: "stacked-comment-actions" }, [save, cancel]));
+		form.append(ta, error, el("div", { className: "stacked-comment-actions" }, [
+			discuss,
+			save,
+			cancel
+		]));
 		queueMicrotask(() => ta.focus());
 		return form;
 	}
@@ -13687,7 +13848,7 @@ var StackedViewMethods = class {
 			ta.addEventListener("keydown", (event) => {
 				if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
 					event.preventDefault();
-					saveEdit();
+					if (!event.altKey) saveEdit();
 				} else if (event.key === "Escape") this.renderStackedComments();
 			});
 			box.replaceChildren(meta, ta, el("div", { className: "stacked-comment-actions-row" }, [save, cancel]));
@@ -13718,6 +13879,16 @@ var StackedViewMethods = class {
 				metadata: {
 					kind: "review-note",
 					note
+				}
+			});
+		});
+		this.discussionManager.getForFile(path).forEach((discussion) => {
+			annotations.push({
+				side: this.toAnnotationSide(discussion.side),
+				lineNumber: commentEndLine(discussion),
+				metadata: {
+					kind: "discussion",
+					discussion
 				}
 			});
 		});
@@ -13839,6 +14010,7 @@ var MonacoApp = class {
 	phabStatus = null;
 	commentManager;
 	reviewNoteManager;
+	discussionManager;
 	currentFileIndex;
 	editor;
 	isInline;
@@ -13880,12 +14052,14 @@ var MonacoApp = class {
 	commentDraftWrite;
 	setAgentAttached(attached) {
 		this.agentAttached = attached;
+		document.body.classList.toggle("agent-attached", attached);
 		const badge = $$1("#agent-status");
 		if (badge) badge.hidden = !attached;
 	}
 	constructor() {
 		this.commentManager = new CommentManager();
 		this.reviewNoteManager = new ReviewNoteManager();
+		this.discussionManager = new DiscussionManager();
 		this.currentFileIndex = 0;
 		this.editor = null;
 		this.isInline = false;
@@ -13934,6 +14108,10 @@ var MonacoApp = class {
 			this.updateUI();
 			if (this.isStacked) this.renderStackedComments();
 		});
+		this.discussionManager.onChange(() => {
+			this.renderReviewNotes();
+			this.renderFileList();
+		});
 		this.reviewNoteManager.onChange(() => {
 			this.renderReviewNotes();
 			this.renderFileList();
@@ -13947,13 +14125,14 @@ var MonacoApp = class {
 		if (performance.getEntriesByName("page:script-start").length > 0) window.Perf.measure("page:script-to-init-start", "page:script-start", "init:start");
 		window.Perf.mark("init:fetch:start");
 		const t0 = performance.now();
-		const [configData, contextData, diffData, seriesData, reviewNotesData, userThemesData] = await Promise.all([
+		const [configData, contextData, diffData, seriesData, reviewNotesData, userThemesData, discussionsData] = await Promise.all([
 			fetchJSON("/api/config"),
 			fetchJSON("/api/context"),
 			fetchJSON("/api/diff"),
 			fetchJSON("/api/series"),
 			fetchJSON("/api/review-notes"),
 			fetchJSON("/api/themes"),
+			fetchJSON("/api/discussions"),
 			document.fonts.ready
 		]);
 		window.Perf.mark("init:fetch:end");
@@ -13972,6 +14151,8 @@ var MonacoApp = class {
 		this.currentCommitIdx = 0;
 		this.commentManager.currentCommitIdx = seriesData.is_series ? 0 : null;
 		this.reviewNoteManager.currentCommitIdx = seriesData.is_series ? 0 : null;
+		this.discussionManager.currentCommitIdx = seriesData.is_series ? 0 : null;
+		this.discussionManager.setDiscussions(discussionsData ?? []);
 		this.reviewNoteManager.setNotes(reviewNotesData ?? []);
 		this.files = sortDiffFiles(diffData.files);
 		this.diff = {
@@ -14334,6 +14515,7 @@ applyMixin(MonacoApp, NavigationMethods);
 applyMixin(MonacoApp, CommitMethods);
 applyMixin(MonacoApp, CommentsUIMethods);
 applyMixin(MonacoApp, ReviewNoteMethods);
+applyMixin(MonacoApp, DiscussionMethods);
 applyMixin(MonacoApp, DialogMethods);
 applyMixin(MonacoApp, SeriesMethods);
 applyMixin(MonacoApp, StackedViewMethods);

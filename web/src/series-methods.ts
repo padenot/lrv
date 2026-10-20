@@ -41,6 +41,7 @@ export class SeriesMethods {
   declare _eagerPrefetchStarted: boolean;
   declare commentManager: AppContext['commentManager'];
   declare reviewNoteManager: AppContext['reviewNoteManager'];
+  declare discussionManager: AppContext['discussionManager'];
   declare loadFile: (index: number) => Promise<void>;
   declare loadCommitView: () => void;
   declare renderFileList: () => void;
@@ -203,6 +204,7 @@ export class SeriesMethods {
     this.currentCommitIdx = clamped;
     this.commentManager.currentCommitIdx = clamped;
     this.reviewNoteManager.currentCommitIdx = clamped;
+    this.discussionManager.currentCommitIdx = clamped;
 
     // Invalidate the previous view before awaiting anything. Its outstanding
     // file loads may finish, but cannot publish into this generation.
