@@ -554,7 +554,7 @@ var DiscussionManager = class {
 		return this.discussions.filter((d) => !d.thread_id && d.file === file && (this.currentCommitIdx === null || d.commit_idx === this.currentCommitIdx));
 	}
 	getFollowUps(rootId) {
-		return this.discussions.filter((d) => d.thread_id === rootId);
+		return this.discussions.filter((d) => d.thread_id === rootId && !d.summarize);
 	}
 	onChange(listener) {
 		this.listeners.push(listener);
@@ -576,6 +576,7 @@ var DiscussionManager = class {
 		const discussion = await response.json();
 		this.discussions.push(discussion);
 		this.notifyListeners();
+		return discussion;
 	}
 	async delete(id, onDeleted) {
 		const response = await fetch(`/api/discussions/${encodeURIComponent(id)}`, { method: "DELETE" });
@@ -678,6 +679,20 @@ function linkifyText(text) {
 //#endregion
 //#region web/src/discussion-methods.ts
 var DiscussionMethods = class {
+	deleteDiscussion(root) {
+		return this.discussionManager.delete(root.id, () => {
+			this.reviewNoteManager.removeDiscussionReplies(root.id);
+		});
+	}
+	async summarizeDiscussion(root) {
+		const summary = this.reviewNoteManager.nextSummary(root.id);
+		await this.discussionManager.send({
+			thread_id: root.id,
+			body: "Summarize this thread as a review comment.",
+			summarize: true
+		});
+		return (await summary).body;
+	}
 	buildDiscussionNode(root) {
 		const box = el("div", { className: "discussion" });
 		for (const eventName of [
@@ -798,9 +813,7 @@ var DiscussionMethods = class {
 			deleteButton.disabled = true;
 			deleteError.hidden = true;
 			try {
-				await this.discussionManager.delete(root.id, () => {
-					this.reviewNoteManager.removeDiscussionReplies(root.id);
-				});
+				await this.deleteDiscussion(root);
 			} catch (err) {
 				deleteButton.disabled = false;
 				deleteError.textContent = err instanceof Error ? err.message : "Failed to delete discussion";
@@ -808,7 +821,15 @@ var DiscussionMethods = class {
 				box.dispatchEvent(new Event("discussion-layout"));
 			}
 		});
-		actions.append(reply, deleteButton);
+		const convert = el("button", {
+			className: "btn-secondary discussion-convert-btn",
+			text: "Convert"
+		});
+		convert.addEventListener("click", () => {
+			if (this.isStacked) this.showStackedDiscussionDraft(root);
+			else this.showCommentDialog(root.file, root.line, commentEndLine(root), root.side, root);
+		});
+		actions.append(reply, convert, deleteButton);
 		box.append(actions, deleteError);
 		requestAnimationFrame(() => {
 			box.scrollTop = box.scrollHeight;
@@ -821,6 +842,7 @@ var DiscussionMethods = class {
 var ReviewNoteManager = class {
 	notes;
 	listeners;
+	summaryWaiters = [];
 	currentCommitIdx;
 	constructor() {
 		this.notes = [];
@@ -854,7 +876,19 @@ var ReviewNoteManager = class {
 		return this.notes.filter((n) => !n.discussion_id && n.file === file && (this.currentCommitIdx === null || n.commit_idx === this.currentCommitIdx));
 	}
 	getDiscussionReplies(discussionId) {
-		return this.notes.filter((n) => n.discussion_id === discussionId);
+		return this.notes.filter((n) => n.discussion_id === discussionId && !n.summary);
+	}
+	nextSummary(rootId) {
+		const isSummary = (note) => note.discussion_id === rootId && note.summary;
+		const known = new Set(this.notes.filter(isSummary));
+		return new Promise((resolve) => {
+			const check = () => {
+				const summary = this.notes.find((note) => isSummary(note) && !known.has(note));
+				if (summary) resolve(summary);
+				return !!summary;
+			};
+			this.summaryWaiters.push(check);
+		});
 	}
 	removeDiscussionReplies(id) {
 		this.notes = this.notes.filter((note) => note.discussion_id !== id);
@@ -875,6 +909,7 @@ var ReviewNoteManager = class {
 		this.listeners.push(listener);
 	}
 	notifyListeners() {
+		this.summaryWaiters = this.summaryWaiters.filter((check) => !check());
 		this.listeners.forEach((l) => l());
 	}
 	isSameNote(a, b) {
@@ -12151,10 +12186,10 @@ var CommentsUIMethods = class {
 		this.modifiedDecorations = modifiedEditor.deltaDecorations(this.modifiedDecorations, modifiedDecorations);
 		this.originalDecorations = originalEditor.deltaDecorations(this.originalDecorations, originalDecorations);
 	}
-	showCommentDialog(file, commentLine, monacoLineNumber, side) {
+	showCommentDialog(file, commentLine, monacoLineNumber, side, discussion) {
 		if (!this.editor) return;
 		const targetEditor = side === "new" ? this.editor.getModifiedEditor() : this.editor.getOriginalEditor();
-		if (!Array.isArray(commentLine)) {
+		if (!discussion && !Array.isArray(commentLine)) {
 			const resolvedCommentLine = this.commentLineFromEditorSelection(targetEditor, monacoLineNumber, side === "new" ? this.lastModifiedRangeSelection : this.lastOriginalRangeSelection);
 			if (Array.isArray(resolvedCommentLine)) commentLine = resolvedCommentLine;
 		}
@@ -12163,7 +12198,7 @@ var CommentsUIMethods = class {
 			this.currentWidget = null;
 			this.currentWidgetEditor = null;
 		}
-		const existingIndex = this.commentManager.findComment(file, monacoLineNumber, side);
+		const existingIndex = discussion ? -1 : this.commentManager.findComment(file, monacoLineNumber, side);
 		const existingComment = existingIndex >= 0 ? this.commentManager.comments[existingIndex] : null;
 		const domNode = el("div", { className: "inline-comment-box" });
 		const updateMaxWidth = () => {
@@ -12181,10 +12216,14 @@ var CommentsUIMethods = class {
 				autofocus: true
 			}
 		});
-		const discuss = existingComment ? null : el("button", {
+		const discuss = existingComment || discussion ? null : el("button", {
 			className: "btn-secondary discuss-btn",
 			text: "Discuss"
 		});
+		const summarize = discussion ? el("button", {
+			className: "btn-secondary summarize-btn",
+			text: "Summarize"
+		}) : null;
 		const error = el("div", {
 			className: "comment-error",
 			attrs: { hidden: true }
@@ -12202,11 +12241,12 @@ var CommentsUIMethods = class {
 				className: "btn-secondary cancel-btn",
 				text: "Cancel"
 			}),
-			existingComment ? null : el("span", {
+			discuss ? el("span", {
 				className: "shortcut-hint discuss-hint",
 				text: `${modKey}+Alt+Enter to discuss`
-			}),
+			}) : null,
 			discuss,
+			summarize,
 			el("button", {
 				className: "btn-primary save-btn",
 				text: "Save"
@@ -12265,9 +12305,17 @@ var CommentsUIMethods = class {
 			textarea.removeEventListener("keydown", handleKeydown);
 			textarea.removeEventListener("input", autoResize);
 		};
-		const saveComment = () => {
+		const saveComment = async () => {
 			if (!textarea.value.trim()) {
 				textarea.focus();
+				return;
+			}
+			if (discussion) try {
+				await this.deleteDiscussion(discussion);
+			} catch (err) {
+				error.textContent = err instanceof Error ? err.message : "Failed to delete discussion";
+				error.hidden = false;
+				targetEditor.layoutContentWidget(widget);
 				return;
 			}
 			if (existingIndex >= 0) this.commentManager.updateComment(existingIndex, textarea.value);
@@ -12309,7 +12357,23 @@ var CommentsUIMethods = class {
 			}
 		};
 		if (discuss) discuss.onclick = () => void sendDiscussion();
-		if (saveBtn) saveBtn.onclick = saveComment;
+		if (summarize && discussion) summarize.onclick = async () => {
+			summarize.disabled = true;
+			summarize.textContent = "Summarizing…";
+			error.hidden = true;
+			try {
+				textarea.value = await this.summarizeDiscussion(discussion);
+				autoResize();
+			} catch (err) {
+				error.textContent = err instanceof DiscussionError && err.status === 409 ? "No agent is listening any more" : "Failed to request a summary. Try again.";
+				error.hidden = false;
+			} finally {
+				summarize.disabled = false;
+				summarize.textContent = "Summarize";
+				targetEditor.layoutContentWidget(widget);
+			}
+		};
+		if (saveBtn) saveBtn.onclick = () => void saveComment();
 		if (cancelBtn) cancelBtn.onclick = cleanup;
 		const deleteBtnEl = domNode.querySelector(".delete-btn");
 		if (deleteBtnEl) deleteBtnEl.onclick = () => {
@@ -13796,6 +13860,15 @@ var StackedViewMethods = class {
 		};
 		this.renderStackedComments();
 	}
+	showStackedDiscussionDraft(discussion) {
+		this.stackedDraft = {
+			file: discussion.file,
+			line: discussion.line,
+			side: discussion.side,
+			discussion
+		};
+		this.renderStackedComments();
+	}
 	showStackedDraftFromSelection(file, range) {
 		if (!file || !range) return;
 		const startSide = range.side ? this.fromAnnotationSide(range.side) : null;
@@ -13865,6 +13938,12 @@ var StackedViewMethods = class {
 		ta.className = "stacked-comment-ta";
 		ta.placeholder = "Add a comment...";
 		ta.rows = 3;
+		const state = this.stackedDraft ?? draft;
+		ta.value = state.body ?? "";
+		ta.addEventListener("input", () => {
+			state.body = ta.value;
+		});
+		const { discussion } = draft;
 		const save = el("button", {
 			className: "stacked-comment-save btn-primary",
 			text: "Save"
@@ -13883,14 +13962,26 @@ var StackedViewMethods = class {
 			className: "stacked-comment-discuss btn-secondary discuss-btn",
 			text: "Discuss"
 		});
+		const summarize = discussion ? el("button", {
+			className: "stacked-comment-summarize btn-secondary summarize-btn",
+			text: state.summarizing ? "Summarizing…" : "Summarize",
+			attrs: { disabled: state.summarizing }
+		}) : null;
 		const error = el("div", {
 			className: "comment-error",
 			attrs: { hidden: true }
 		});
-		const doSave = () => {
+		const doSave = async () => {
 			const body = ta.value.trim();
 			if (!body) {
 				ta.focus();
+				return;
+			}
+			if (discussion) try {
+				await this.deleteDiscussion(discussion);
+			} catch (err) {
+				error.textContent = err instanceof Error ? err.message : "Failed to delete discussion";
+				error.hidden = false;
 				return;
 			}
 			const comment = {
@@ -13930,7 +14021,27 @@ var StackedViewMethods = class {
 			}
 		};
 		discuss.addEventListener("click", () => void sendDiscussion());
-		save.addEventListener("click", doSave);
+		summarize?.addEventListener("click", async () => {
+			state.summarizing = true;
+			summarize.disabled = true;
+			summarize.textContent = "Summarizing…";
+			error.hidden = true;
+			try {
+				const body = await this.summarizeDiscussion(discussion);
+				delete state.summarizing;
+				if (this.stackedDraft === state) {
+					state.body = body;
+					this.renderStackedComments();
+				}
+			} catch (err) {
+				delete state.summarizing;
+				summarize.disabled = false;
+				summarize.textContent = "Summarize";
+				error.textContent = err instanceof DiscussionError && err.status === 409 ? "No agent is listening any more" : "Failed to request a summary. Try again.";
+				error.hidden = false;
+			}
+		});
+		save.addEventListener("click", () => void doSave());
 		cancel.addEventListener("click", () => {
 			reset();
 		});
@@ -13938,14 +14049,14 @@ var StackedViewMethods = class {
 			if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
 				event.preventDefault();
 				if (event.altKey) {
-					if (this.agentAttached) sendDiscussion();
+					if (this.agentAttached && !discussion) sendDiscussion();
 					return;
 				}
 				doSave();
 			} else if (event.key === "Escape") reset();
 		});
 		form.append(ta, error, el("div", { className: "stacked-comment-actions" }, [
-			discuss,
+			discussion ? summarize : discuss,
 			save,
 			cancel
 		]));

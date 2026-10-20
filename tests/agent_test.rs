@@ -9,6 +9,7 @@ const TIMEOUT: Duration = Duration::from_secs(60);
 fn discussion() -> AgentEvent {
     AgentEvent::Discussion {
         discussion: Discussion {
+            summarize: false,
             thread_id: None,
             id: "d1".into(),
             created_at: 0,
@@ -217,6 +218,7 @@ async fn add_discussion_uses_shared_sequence_and_wakes_waiter() {
             file: Some("src/lib.rs".into()),
             line: Some(CommentLine::Single(3)),
             side: Some(Side::New),
+            summarize: false,
             thread_id: None,
             body: "A new discussion".into(),
             commit_idx: None,
@@ -253,6 +255,7 @@ async fn delete_discussion_removes_thread_and_queues_event() {
             file: None,
             line: None,
             side: None,
+            summarize: false,
             thread_id: Some("d1".into()),
             body: "Follow up".into(),
             commit_idx: None,
@@ -280,6 +283,7 @@ async fn delete_discussion_removes_thread_and_queues_event() {
             file: Some("a.rs".into()),
             line: Some(CommentLine::Single(1)),
             side: Some(Side::New),
+            summarize: false,
             thread_id: None,
             body: "New question".into(),
             commit_idx: None,
@@ -287,4 +291,27 @@ async fn delete_discussion_removes_thread_and_queues_event() {
         .unwrap();
     assert_eq!(next.id, "lrv-discussion-4");
     assert_eq!(channel.discussions().len(), 1);
+}
+
+#[tokio::test]
+async fn summarize_is_only_valid_as_a_follow_up() {
+    let channel = AgentChannel::new(LEASE);
+    let mut request: lrv::agent::DiscussionRequest = serde_json::from_value(serde_json::json!({
+        "file": "a.rs", "line": 1, "side": "old", "body": "Summarize", "summarize": true
+    }))
+    .unwrap();
+    assert!(!request.is_valid());
+    channel.push(discussion());
+    request.thread_id = Some("d1".into());
+    let follow = channel.add_discussion(request).unwrap();
+    assert!(follow.summarize);
+    let poll = channel.wait(1, TIMEOUT).await;
+    let encoded = serde_json::to_value(&poll).unwrap();
+    assert_eq!(encoded["events"][0]["discussion"]["summarize"], true);
+    let decoded: lrv::agent::Poll = serde_json::from_value(encoded).unwrap();
+    let AgentEvent::Discussion { discussion } = &decoded.events[0].event else {
+        panic!("expected discussion");
+    };
+    assert!(discussion.summarize);
+    assert!(channel.discussions()[1].summarize);
 }

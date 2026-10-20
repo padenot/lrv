@@ -30,29 +30,35 @@ fn startup_notes_reject_discussion_replies() {
     fs::create_dir_all(&dir).unwrap();
     let notes = dir.join("notes.json");
     let diff = dir.join("change.diff");
-    fs::write(&notes, DISCUSSION_REPLY).unwrap();
     fs::write(
         &diff,
         "diff --git a/src/lib.rs b/src/lib.rs\n--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1 +1 @@\n-old\n+new\n",
     )
     .unwrap();
 
-    for flag in ["--validate-review-notes", "--review-notes-file"] {
-        let output = Command::new(env!("CARGO_BIN_EXE_lrv"))
-            .arg(flag)
-            .arg(&notes)
-            .arg("--file")
-            .arg(&diff)
-            .arg("--no-open")
-            .output()
-            .unwrap();
-        assert_eq!(output.status.code(), Some(1));
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(stderr.contains("src/lib.rs:3-5"), "{flag}: {stderr}");
-        assert!(
-            stderr.contains("discussion_id is only accepted by a running review"),
-            "{flag}: {stderr}"
-        );
+    for payload in [
+        DISCUSSION_REPLY.to_string(),
+        DISCUSSION_REPLY.replace("\"discussion_id\":\"lrv-discussion-1\"", "\"summary\":true"),
+        DISCUSSION_REPLY.replace("\"body\":", "\"summary\":true,\"body\":"),
+    ] {
+        fs::write(&notes, payload).unwrap();
+        for flag in ["--validate-review-notes", "--review-notes-file"] {
+            let output = Command::new(env!("CARGO_BIN_EXE_lrv"))
+                .arg(flag)
+                .arg(&notes)
+                .arg("--file")
+                .arg(&diff)
+                .arg("--no-open")
+                .output()
+                .unwrap();
+            assert_eq!(output.status.code(), Some(1));
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(stderr.contains("src/lib.rs:3-5"), "{flag}: {stderr}");
+            assert!(
+                stderr.contains("discussion_id and summary are only accepted by a running review"),
+                "{flag}: {stderr}"
+            );
+        }
     }
     fs::remove_dir_all(dir).unwrap();
 }

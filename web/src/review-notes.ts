@@ -4,6 +4,7 @@ import type { CommentLine } from './comments';
 export type ReviewNote = {
   id?: string;
   discussion_id?: string;
+  summary?: boolean;
   file: string;
   line: CommentLine;
   side: 'old' | 'new';
@@ -19,6 +20,7 @@ export type ReviewNote = {
 export class ReviewNoteManager {
   private notes: ReviewNote[];
   private listeners: Array<() => void>;
+  private summaryWaiters: Array<() => boolean> = [];
   currentCommitIdx: number | null;
 
   constructor() {
@@ -67,7 +69,23 @@ export class ReviewNoteManager {
   }
 
   getDiscussionReplies(discussionId: string): ReviewNote[] {
-    return this.notes.filter((n) => n.discussion_id === discussionId);
+    return this.notes.filter((n) => n.discussion_id === discussionId && !n.summary);
+  }
+
+  // Resolves with the first summary of the thread added after this call.
+  nextSummary(rootId: string): Promise<ReviewNote> {
+    const isSummary = (note: ReviewNote) => note.discussion_id === rootId && note.summary;
+    const known = new Set(this.notes.filter(isSummary));
+    return new Promise((resolve) => {
+      const check = () => {
+        const summary = this.notes.find((note) => isSummary(note) && !known.has(note));
+        if (summary) {
+          resolve(summary);
+        }
+        return !!summary;
+      };
+      this.summaryWaiters.push(check);
+    });
   }
 
   removeDiscussionReplies(id: string): void {
@@ -99,6 +117,7 @@ export class ReviewNoteManager {
   }
 
   private notifyListeners(): void {
+    this.summaryWaiters = this.summaryWaiters.filter((check) => !check());
     this.listeners.forEach((l) => l());
   }
 

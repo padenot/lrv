@@ -1,5 +1,5 @@
 import type { CommentLine, ReviewComment } from '../comments';
-import type { DiscussionManager } from '../discussions';
+import type { Discussion, DiscussionManager } from '../discussions';
 import type { ReviewNote } from '../review-notes';
 import type { editor } from 'monaco-editor';
 
@@ -145,6 +145,7 @@ export interface AppContext {
     addNote(note: ReviewNote): void;
     updateNote(note: ReviewNote, patch: Partial<ReviewNote>): void;
     getNotes(): ReviewNote[];
+    nextSummary(rootId: string): Promise<ReviewNote>;
     getDiscussionReplies(discussionId: string): ReviewNote[];
     removeDiscussionReplies(id: string): void;
     getNotesForFile(file: string): ReviewNote[];
@@ -228,7 +229,16 @@ export interface AppContext {
   showKeyboardHelp(): void;
   updateDecorations(): void;
   renderReviewNotes(): void;
-  showCommentDialog(file: string, fileLine: CommentLine, monacoLine: number, side: Side): void;
+  showCommentDialog(
+    file: string,
+    fileLine: CommentLine,
+    monacoLine: number,
+    side: Side,
+    discussion?: Discussion,
+  ): void;
+  showStackedDiscussionDraft(discussion: Discussion): void;
+  deleteDiscussion(discussion: Discussion): Promise<void>;
+  summarizeDiscussion(discussion: Discussion): Promise<string>;
   showCommitSummaryDialog(): void;
   initFileHunks(file: DiffFile): void;
   isAddedFile(file: DiffFile): boolean;

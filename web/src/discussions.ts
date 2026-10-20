@@ -3,6 +3,7 @@ import type { CommentLine } from './comments';
 export type Discussion = {
   id: string;
   thread_id?: string;
+  summarize?: boolean;
   created_at: number;
   file: string;
   line: CommentLine;
@@ -12,7 +13,8 @@ export type Discussion = {
 };
 
 export type DiscussionRequest =
-  Omit<Discussion, 'id' | 'created_at' | 'thread_id'> | { thread_id: string; body: string };
+  | Omit<Discussion, 'id' | 'created_at' | 'thread_id'>
+  | { thread_id: string; body: string; summarize?: boolean };
 
 export class DiscussionError extends Error {
   constructor(public status: number) {
@@ -35,7 +37,7 @@ export class DiscussionManager {
   }
 
   getFollowUps(rootId: string): Discussion[] {
-    return this.discussions.filter((d) => d.thread_id === rootId);
+    return this.discussions.filter((d) => d.thread_id === rootId && !d.summarize);
   }
 
   onChange(listener: () => void): void {
@@ -47,7 +49,7 @@ export class DiscussionManager {
     this.notifyListeners();
   }
 
-  async send(req: DiscussionRequest): Promise<void> {
+  async send(req: DiscussionRequest): Promise<Discussion> {
     const response = await fetch('/api/discussions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -63,6 +65,7 @@ export class DiscussionManager {
     const discussion: Discussion = await response.json();
     this.discussions.push(discussion);
     this.notifyListeners();
+    return discussion;
   }
 
   async delete(id: string, onDeleted?: () => void): Promise<void> {

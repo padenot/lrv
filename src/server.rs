@@ -1583,10 +1583,11 @@ async fn add_review_note(
         return StatusCode::UNAUTHORIZED.into_response();
     }
     state.agent.touch();
-    if batch
-        .iter()
-        .any(|note| !note.is_valid() || note.commit_idx.is_some_and(|idx| idx >= state.diffs.len()))
-    {
+    if batch.iter().any(|note| {
+        !note.is_valid()
+            || (note.summary && note.discussion_id.is_none())
+            || note.commit_idx.is_some_and(|idx| idx >= state.diffs.len())
+    }) {
         return StatusCode::BAD_REQUEST.into_response();
     }
     let mut notes = state.review_notes.lock().await;

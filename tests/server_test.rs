@@ -467,6 +467,7 @@ async fn test_agent_events_api() {
         if uri == "/api/agent/events?timeout=1" {
             agent.push(lrv::agent::AgentEvent::Discussion {
                 discussion: lrv::agent::Discussion {
+                    summarize: false,
                     thread_id: None,
                     id: "d1".into(),
                     created_at: 0,
@@ -588,6 +589,7 @@ async fn test_discussion_validation() {
         serde_json::json!({"body": " \n\t"}),
         serde_json::json!({"file": ""}),
         serde_json::json!({"commit_idx": 1}),
+        serde_json::json!({"summarize": true}),
     ] {
         let mut payload = serde_json::json!({
             "file": "src/lib.rs", "line": 3, "side": "new", "body": "Discuss this"
@@ -680,7 +682,7 @@ async fn test_discussion_threads_and_agent_replies() {
     let follow = response_json(
         app.clone()
             .oneshot(discussion_request(serde_json::json!({
-                "thread_id": root["id"], "body": "Follow up"
+                "thread_id": root["id"], "body": "Follow up", "summarize": true
             })))
             .await
             .unwrap(),
@@ -690,6 +692,28 @@ async fn test_discussion_threads_and_agent_replies() {
         assert_eq!(follow[key], root[key]);
     }
     assert_eq!(follow["thread_id"], root["id"]);
+    assert_eq!(follow["summarize"], true);
+    let listed = response_json(
+        app.clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/discussions")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(listed, serde_json::json!([root, follow]));
+    let invalid_summary = app
+        .clone()
+        .oneshot(reply_request(serde_json::json!([
+            {"file": "root.rs", "line": 1, "side": "new", "body": "Summary", "summary": true}
+        ])))
+        .await
+        .unwrap();
+    assert_eq!(invalid_summary.status(), StatusCode::BAD_REQUEST);
     let poll = response_json(
         app.clone()
             .oneshot(
@@ -738,7 +762,7 @@ async fn test_discussion_threads_and_agent_replies() {
     }
     let mut reply = serde_json::json!({
         "file": "wrong.rs", "line": 9, "side": "new", "body": "Done.",
-        "discussion_id": root["id"], "date": "untrusted date"
+        "discussion_id": root["id"], "date": "untrusted date", "summary": true
     });
     let before = lrv::types::rfc3339_utc(std::time::SystemTime::now());
     let response = app
@@ -783,6 +807,7 @@ async fn test_discussion_threads_and_agent_replies() {
         for key in ["file", "line", "side", "commit_idx"] {
             assert_eq!(note[key], root[key]);
         }
+        assert_eq!(note["summary"], true);
         assert_eq!(note["read_only"], true);
         let date = note["date"].as_str().unwrap();
         assert!(date >= before.as_str() && date <= after.as_str());
@@ -809,6 +834,7 @@ async fn test_delete_discussion_removes_replies_and_skips_late_replies() {
             line: Some(lrv::types::CommentLine::Single(1)),
             side: Some(lrv::types::Side::New),
             body: "Question".into(),
+            summarize: false,
             thread_id: None,
             commit_idx: None,
         })
@@ -863,6 +889,18 @@ async fn test_delete_discussion_removes_replies_and_skips_late_replies() {
         .await,
         serde_json::json!({"added": 0, "skipped": 1})
     );
+    let mut summary = reply.clone();
+    summary["summary"] = serde_json::json!(true);
+    assert_eq!(
+        response_json(
+            app.clone()
+                .oneshot(reply_request(serde_json::json!([summary])))
+                .await
+                .unwrap()
+        )
+        .await,
+        serde_json::json!({"added": 0, "skipped": 1})
+    );
     let mut unknown = reply;
     unknown["discussion_id"] = serde_json::json!("unknown");
     assert_eq!(
@@ -881,6 +919,7 @@ async fn test_delete_discussion_without_agent_and_public_mode() {
         discussion: lrv::agent::Discussion {
             id: "d1".into(),
             created_at: 0,
+            summarize: false,
             thread_id: None,
             file: "a.rs".into(),
             line: lrv::types::CommentLine::Single(1),
@@ -896,6 +935,7 @@ async fn test_delete_discussion_without_agent_and_public_mode() {
             file: None,
             line: None,
             side: None,
+            summarize: false,
             thread_id: Some("d1".into()),
             body: "Follow up".into(),
             commit_idx: None,

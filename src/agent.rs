@@ -13,6 +13,8 @@ pub struct Discussion {
     pub created_at: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread_id: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub summarize: bool,
     pub file: String,
     pub line: CommentLine,
     pub side: Side,
@@ -29,11 +31,14 @@ pub struct DiscussionRequest {
     pub body: String,
     pub commit_idx: Option<usize>,
     pub thread_id: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub summarize: bool,
 }
 
 impl DiscussionRequest {
     pub fn is_valid(&self) -> bool {
         !self.body.trim().is_empty()
+            && (!self.summarize || self.thread_id.is_some())
             && (self.thread_id.is_some()
                 || (self.file.as_ref().is_some_and(|file| !file.is_empty())
                     && self.line.as_ref().is_some_and(CommentLine::is_valid)
@@ -153,6 +158,7 @@ impl AgentChannel {
                 .unwrap_or_default()
                 .as_millis() as u64,
             thread_id: req.thread_id,
+            summarize: req.summarize,
             file,
             line,
             side,

@@ -597,9 +597,12 @@ fn load_startup_review_notes_file(path: &str) -> Result<Vec<ReviewNote>> {
 }
 
 fn validate_startup_review_notes(notes: &[ReviewNote]) -> Result<()> {
-    if let Some(note) = notes.iter().find(|note| note.discussion_id.is_some()) {
+    if let Some(note) = notes
+        .iter()
+        .find(|note| note.discussion_id.is_some() || note.summary)
+    {
         anyhow::bail!(
-            "Invalid review note for {}:{}: discussion_id is only accepted by a running review (--add-notes / POST /api/review-notes)",
+            "Invalid review note for {}:{}: discussion_id and summary are only accepted by a running review (--add-notes / POST /api/review-notes)",
             note.file,
             note.line
         );

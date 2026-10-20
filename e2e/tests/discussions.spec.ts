@@ -42,6 +42,10 @@ for (const stacked of [false, true]) {
       await isolateConfig(page);
       child = spawn(binary, ['--file', diffPath, '--no-open'], { cwd: root, env });
       const server = child;
+      let stdout = '';
+      server.stdout?.on('data', (data: Buffer) => {
+        stdout += data.toString();
+      });
       const url = await new Promise<string>((resolve, reject) => {
         let output = '';
         const timer = setTimeout(
@@ -228,8 +232,140 @@ for (const stacked of [false, true]) {
       ]);
       await page.reload();
       await expect(page.locator('.discussion')).toHaveCount(1, { timeout: 15000 });
+      if (!stacked) {
+        // Clicking before the diff settles hits the loading overlay or races
+        // the initial hunk reveal, which scrolls the comment widget away.
+        await expect(page.locator('#editor-container')).not.toHaveClass(/diff-loading/);
+        await expect(page.locator('.focused-line')).not.toHaveCount(0);
+      }
       await expect(page.locator('.discussion')).toContainText('Second discussion');
       await expect(page.locator('.discussion-entry-agent')).toHaveCount(0);
+
+      await page.unroute('**/api/discussions');
+      // Convert reuses the comment form; saving replaces the thread with a comment.
+      const remaining = page.locator('.discussion');
+      const form = page.locator(stacked ? '.stacked-comment-form' : '.inline-comment-box');
+      const summarize = form.locator('.summarize-btn');
+      const save = form.locator(stacked ? '.stacked-comment-save' : '.save-btn');
+      await remaining.locator('.discussion-convert-btn').click();
+      await expect(form).toBeVisible();
+      await expect(form.locator('.discuss-btn')).toHaveCount(0);
+      await expect(summarize).toBeHidden();
+      await textarea.fill('Cancelled conversion');
+      await textarea.press('Escape');
+      await expect(form).toHaveCount(0);
+      await expect(remaining).toContainText('Second discussion');
+      await expect(page.locator('#comment-count')).toHaveText('0');
+      await remaining.locator('.discussion-convert-btn').click();
+      await textarea.fill('Typed review comment');
+      const remainingId = await page.evaluate(
+        async () => (await fetch('/api/discussions').then((r) => r.json()))[0].id,
+      );
+      // A failed deletion keeps the form and adds no comment.
+      await page.route(`**/api/discussions/${remainingId}`, (route) =>
+        route.fulfill({ status: 500 }),
+      );
+      await save.click();
+      await expect(form.locator('.comment-error')).toContainText('500');
+      await expect(textarea).toHaveValue('Typed review comment');
+      await expect(page.locator('#comment-count')).toHaveText('0');
+      await page.unroute(`**/api/discussions/${remainingId}`);
+      await textarea.press('ControlOrMeta+Enter');
+      await expect(remaining).toHaveCount(0);
+      await expect(form).toHaveCount(0);
+      await expect(page.locator('#comment-count')).toHaveText('1');
+      expect(await page.evaluate(() => window.__APP!.commentManager.getComments())).toEqual([
+        { file: 'a.txt', line: 1, side: 'new', body: 'Typed review comment' },
+      ]);
+
+      const serverInfo = JSON.parse(
+        fs.readFileSync(
+          path.join(
+            env.LRV_SERVER_DIR,
+            fs.readdirSync(env.LRV_SERVER_DIR).find((file) => file.endsWith('.json'))!,
+          ),
+          'utf8',
+        ),
+      );
+      const postNote = async (note: Record<string, unknown>) => {
+        const response = await page.request.post(`${url}/api/review-notes`, {
+          headers: { Authorization: `Bearer ${serverInfo.token}` },
+          data: [note],
+        });
+        expect(response.ok()).toBe(true);
+      };
+      // Authenticated note writes keep the one-second agent lease alive.
+      const stayAttached = (body: string) =>
+        postNote({ file: 'a.txt', line: 1, side: 'new', body });
+      await stayAttached('Unrelated note');
+      await expect(page.locator('body')).toHaveClass(/agent-attached/);
+      const summaryRoot = await page.evaluate(() =>
+        window.__APP!.discussionManager.send({
+          file: 'a.txt',
+          line: 1,
+          side: 'old',
+          commit_idx: 0,
+          body: 'Thread to summarize',
+        }),
+      );
+      await remaining.locator('.discussion-convert-btn').click();
+      await textarea.fill('Draft before summary');
+      await stayAttached('Keep attached 1');
+      await summarize.click();
+      await expect(summarize).toHaveText('Summarizing…');
+      await expect(summarize).toBeDisabled();
+      await textarea.fill('Still editable while waiting');
+      const requests = await (await page.request.get(`${url}/api/discussions`)).json();
+      expect(requests[1]).toMatchObject({ thread_id: summaryRoot.id, summarize: true });
+      await expect(remaining.locator('.discussion-body')).toHaveText(['Thread to summarize']);
+      await stayAttached('Unrelated while converting');
+      await page.waitForTimeout(750);
+      await expect(textarea).toHaveValue('Still editable while waiting');
+      await postNote({
+        file: 'a.txt',
+        line: 1,
+        side: 'new',
+        body: 'Agent summary',
+        discussion_id: summaryRoot.id,
+        summary: true,
+      });
+      await expect(textarea).toHaveValue('Agent summary');
+      await expect(summarize).toHaveText('Summarize');
+      await expect(remaining.locator('.discussion-body')).toHaveText(['Thread to summarize']);
+      await expect(remaining.locator('.discussion-entry-agent')).toHaveCount(0);
+      // A second request must not reuse the previous summary.
+      await stayAttached('Keep attached 2');
+      await summarize.click();
+      await expect(summarize).toHaveText('Summarizing…');
+      await expect(textarea).toHaveValue('Agent summary');
+      await postNote({
+        file: 'a.txt',
+        line: 1,
+        side: 'new',
+        body: 'Fresh summary',
+        discussion_id: summaryRoot.id,
+        summary: true,
+      });
+      await expect(textarea).toHaveValue('Fresh summary');
+      await textarea.fill('Edited summary');
+      await save.click();
+      await expect(remaining).toHaveCount(0);
+      await expect(page.locator('#comment-count')).toHaveText('2');
+      expect(await page.evaluate(() => window.__APP!.commentManager.getComments())).toEqual([
+        { file: 'a.txt', line: 1, side: 'new', body: 'Typed review comment' },
+        { file: 'a.txt', line: 1, side: 'old', body: 'Edited summary' },
+      ]);
+      expect(await (await page.request.get(`${url}/api/discussions`)).json()).toEqual([]);
+      const notes = await (await page.request.get(`${url}/api/review-notes`)).json();
+      expect(notes.every((note: { discussion_id?: string }) => !note.discussion_id)).toBe(true);
+      await page.locator('#submit-review').click();
+      await page.locator('.confirm-submit-btn').click();
+      await expect.poll(() => server.exitCode).toBe(0);
+      const submitted = JSON.parse(stdout);
+      expect(submitted.comments).toEqual([
+        { file: 'a.txt', line: 1, side: 'new', body: 'Typed review comment' },
+        { file: 'a.txt', line: 1, side: 'old', body: 'Edited summary' },
+      ]);
     } finally {
       for (const listener of listeners) {
         if (listener.exitCode === null) {

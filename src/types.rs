@@ -101,6 +101,8 @@ pub struct ReviewNote {
     pub id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub discussion_id: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub summary: bool,
     pub file: String,
     pub line: CommentLine,
     pub side: Side,
@@ -186,6 +188,7 @@ impl ReviewNote {
             date,
             source_url,
             commit_idx,
+            summary: false,
             discussion_id: None,
             read_only: true,
         }
@@ -364,6 +367,7 @@ mod tests {
             date: None,
             source_url: None,
             commit_idx,
+            summary: false,
             discussion_id: None,
             read_only: false,
         }
