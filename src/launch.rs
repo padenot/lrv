@@ -286,10 +286,10 @@ pub fn build_prompt(req: &LaunchRequest, paths: &[PathBuf], diffs: &[DiffRespons
         ));
     }
     if req.initial_review {
-        prompt.push_str("First review the supplied diff files and relevant source for actionable bugs. Post findings as a JSON array using lrv --add-notes - (stdin). Include the correct zero-based commit_idx on every note, exact file, line, side, body and your provider name as author. Post [] if there are no findings.\n");
+        prompt.push_str("First review the supplied diff files and relevant source for actionable bugs. Write findings as a JSON array to a file with your file-writing tool, then post them with lrv --add-notes <path>. Include the correct zero-based commit_idx on every note, exact file, line, side, body and your provider name as author. Post [] if there are no findings.\n");
     } else {
         prompt.push_str("Skip the initial review and start listening immediately.\n");
     }
-    prompt.push_str("Then run lrv --listen --listen-timeout 540 in the foreground with a tool timeout of at least 550 seconds. Read its output directly. Reply to discussions using lrv --add-notes - as described in the skill, then listen again. Repeat after timeout. On ended, exit. On a nonzero listen exit, report the error and exit. Never stop after merely posting review notes or answering a discussion.\n");
+    prompt.push_str("Then run lrv --listen --listen-timeout 540 in the foreground with a tool timeout of at least 550 seconds. Read its output directly. Reply to discussions by writing the JSON to a file and running lrv --add-notes <path> as described in the skill, then listen again. Repeat after timeout. On ended, exit. On a nonzero listen exit, report the error and exit. Never stop after merely posting review notes or answering a discussion.\n");
     prompt
 }
