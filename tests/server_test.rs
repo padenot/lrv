@@ -222,14 +222,29 @@ async fn test_review_note_api_round_trip() {
         .unwrap();
     assert_eq!(events.status(), StatusCode::OK);
     let mut stream = events.into_body().into_data_stream();
-    let frame = tokio::time::timeout(Duration::from_secs(2), stream.next())
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
-    let frame = String::from_utf8(frame.to_vec()).unwrap();
-    assert!(frame.contains("event: notes"));
-    assert!(frame.contains("data: {\"version\":0}"));
+    let mut buffer = String::new();
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while !buffer.contains("event: notes") || !buffer.contains("event: agent") {
+            let chunk = stream.next().await.unwrap().unwrap();
+            buffer.push_str(std::str::from_utf8(&chunk).unwrap());
+        }
+    })
+    .await
+    .unwrap();
+    assert!(buffer.contains("data: {\"version\":0}"));
+    assert!(buffer.contains("data: {\"attached\":false}"));
+    let waiter = agent.clone();
+    let poll = tokio::spawn(async move { waiter.wait(0, Duration::from_secs(5)).await });
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while !buffer.contains("data: {\"attached\":true}") {
+            let chunk = stream.next().await.unwrap().unwrap();
+            buffer.push_str(std::str::from_utf8(&chunk).unwrap());
+        }
+    })
+    .await
+    .unwrap();
+    poll.abort();
+    let _ = poll.await;
     let note = serde_json::json!({
         "id": "n1",
         "file": "src/lib.rs",

@@ -340,6 +340,27 @@ body {
   background: var(--border-color);
 }
 
+.agent-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.agent-badge::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent-color);
+}
+
+.agent-badge[hidden] {
+  display: none;
+}
+
 .comment-badge {
   background: var(--bg-elevated);
   color: var(--text-primary);

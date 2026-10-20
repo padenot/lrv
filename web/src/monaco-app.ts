@@ -60,6 +60,7 @@ function applyMixin(TargetClass: Constructor, MethodsClass: Constructor) {
 }
 
 export class MonacoApp {
+  agentAttached = false;
   publishedCommentKeys = new Set<string>();
   publishedRevisionIds = new Set<string>();
   publishTabStates = new Map<string, PublishTabState>();
@@ -139,6 +140,14 @@ export class MonacoApp {
   declare setupKeyboardShortcuts: () => void;
   declare toggleView: () => void;
   declare updateViewToggleLabel: () => void;
+
+  setAgentAttached(attached: boolean): void {
+    this.agentAttached = attached;
+    const badge = $<HTMLElement>('#agent-status');
+    if (badge) {
+      badge.hidden = !attached;
+    }
+  }
 
   constructor() {
     this.commentManager = new CommentManager();

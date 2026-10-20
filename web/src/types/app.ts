@@ -121,6 +121,8 @@ export type DiffStats = {
 };
 
 export interface AppContext {
+  agentAttached: boolean;
+  setAgentAttached(attached: boolean): void;
   commentManager: {
     comments: ReviewComment[];
     currentCommitIdx: number | null;
@@ -137,6 +139,7 @@ export interface AppContext {
   reviewNoteManager: {
     currentCommitIdx: number | null;
     setNotes(notes: ReviewNote[]): void;
+    mergeNotes(notes: ReviewNote[]): void;
     addNote(note: ReviewNote): void;
     updateNote(note: ReviewNote, patch: Partial<ReviewNote>): void;
     getNotes(): ReviewNote[];

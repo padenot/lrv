@@ -164,3 +164,42 @@ async fn drain_is_bounded_with_an_open_poll() {
     channel.close();
     assert!(task.await.unwrap().ended);
 }
+
+#[tokio::test(start_paused = true)]
+async fn presence_tracks_polls_touch_expiry_and_close() {
+    let channel = AgentChannel::new(LEASE);
+    let tracker = channel.clone();
+    let tracker = tokio::spawn(async move { tracker.track_presence().await });
+    let mut presence = channel.presence();
+    assert!(!*presence.borrow_and_update());
+
+    let waiter = channel.clone();
+    let poll = tokio::spawn(async move { waiter.wait(0, LEASE * 3).await });
+    presence.changed().await.unwrap();
+    assert!(*presence.borrow_and_update());
+    advance(LEASE * 2).await;
+    tokio::task::yield_now().await;
+    assert!(*presence.borrow());
+    channel.push(discussion());
+    assert_eq!(poll.await.unwrap().events.len(), 1);
+    assert!(*presence.borrow());
+
+    advance(LEASE - Duration::from_secs(1)).await;
+    channel.touch();
+    tokio::task::yield_now().await;
+    advance(Duration::from_secs(2)).await;
+    tokio::task::yield_now().await;
+    assert!(*presence.borrow());
+    assert!(!presence.has_changed().unwrap());
+    advance(LEASE).await;
+    presence.changed().await.unwrap();
+    assert!(!*presence.borrow_and_update());
+
+    channel.touch();
+    presence.changed().await.unwrap();
+    assert!(*presence.borrow_and_update());
+    channel.close();
+    presence.changed().await.unwrap();
+    assert!(!*presence.borrow_and_update());
+    tracker.await.unwrap();
+}

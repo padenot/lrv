@@ -1480,7 +1480,12 @@ async fn events(
             .event("notes")
             .data(serde_json::json!({"version": version}).to_string()))
     });
-    Sse::new(stream).keep_alive(KeepAlive::default())
+    let presence = WatchStream::new(state.agent.presence()).map(|attached| {
+        Ok(Event::default()
+            .event("agent")
+            .data(serde_json::json!({"attached": attached}).to_string()))
+    });
+    Sse::new(stream.merge(presence)).keep_alive(KeepAlive::default())
 }
 
 async fn get_review_notes(State(state): State<AppState>) -> Json<Vec<ReviewNote>> {

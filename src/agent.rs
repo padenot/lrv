@@ -2,7 +2,7 @@ use crate::types::{CommentLine, Side};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tokio::sync::watch;
+use tokio::sync::{watch, Notify};
 use tokio::time::Instant;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -48,6 +48,8 @@ pub struct AgentChannel {
     inner: Mutex<Inner>,
     latest: watch::Sender<u64>,
     lease: Duration,
+    presence: watch::Sender<bool>,
+    activity: Notify,
 }
 
 struct PollGuard<'a>(&'a AgentChannel);
@@ -57,6 +59,7 @@ impl Drop for PollGuard<'_> {
         let mut inner = self.0.inner.lock().unwrap();
         inner.active_polls -= 1;
         inner.last_activity = Some(Instant::now());
+        self.0.activity.notify_one();
     }
 }
 
@@ -72,6 +75,8 @@ impl AgentChannel {
             }),
             latest: watch::channel(0).0,
             lease,
+            presence: watch::channel(false).0,
+            activity: Notify::new(),
         })
     }
 
@@ -89,6 +94,8 @@ impl AgentChannel {
             let mut inner = self.inner.lock().unwrap();
             inner.active_polls += 1;
             inner.last_activity = Some(Instant::now());
+            self.set_presence(!inner.closed);
+            self.activity.notify_one();
         }
         let _guard = PollGuard(self);
         let mut rx = self.latest.subscribe();
@@ -121,7 +128,51 @@ impl AgentChannel {
     }
 
     pub fn touch(&self) {
-        self.inner.lock().unwrap().last_activity = Some(Instant::now());
+        let mut inner = self.inner.lock().unwrap();
+        inner.last_activity = Some(Instant::now());
+        self.set_presence(!inner.closed);
+        self.activity.notify_one();
+    }
+
+    fn set_presence(&self, attached: bool) {
+        self.presence.send_if_modified(|value| {
+            if *value == attached {
+                return false;
+            }
+            *value = attached;
+            true
+        });
+    }
+
+    pub fn presence(&self) -> watch::Receiver<bool> {
+        self.presence.subscribe()
+    }
+
+    pub async fn track_presence(&self) {
+        loop {
+            let expiry = {
+                let inner = self.inner.lock().unwrap();
+                if inner.closed {
+                    break;
+                }
+                let expiry = if inner.active_polls > 0 {
+                    None
+                } else {
+                    inner.last_activity.map(|time| time + self.lease)
+                };
+                let now = Instant::now();
+                self.set_presence(inner.active_polls > 0 || expiry.is_some_and(|time| time > now));
+                expiry.filter(|time| *time > now)
+            };
+            tokio::select! {
+                _ = async {
+                    if let Some(expiry) = expiry {
+                        tokio::time::sleep_until(expiry).await;
+                    }
+                }, if expiry.is_some() => {}
+                _ = self.activity.notified() => {}
+            }
+        }
     }
 
     pub fn attached(&self) -> bool {
@@ -135,6 +186,8 @@ impl AgentChannel {
     pub fn close(&self) {
         let mut inner = self.inner.lock().unwrap();
         inner.closed = true;
+        self.set_presence(false);
+        self.activity.notify_one();
         self.latest.send_modify(|version| *version += 1);
     }
 

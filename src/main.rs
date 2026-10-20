@@ -1527,6 +1527,11 @@ async fn main() -> Result<()> {
     // Prefer loopback when opening browser
     let url = format!("http://127.0.0.1:{}", actual_port);
 
+    tokio::spawn({
+        let agent = state.agent.clone();
+        async move { agent.track_presence().await }
+    });
+
     // Run servers with graceful shutdown
     let shutdown_notify = Arc::new(Notify::new());
     let mut handles = Vec::new();

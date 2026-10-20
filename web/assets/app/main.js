@@ -691,6 +691,8 @@ function startLiveEvents(app) {
 			fetching = false;
 		}
 	};
+	source.addEventListener("agent", (e) => app.setAgentAttached(JSON.parse(e.data).attached === true));
+	source.addEventListener("error", () => app.setAgentAttached(false));
 	source.addEventListener("notes", () => void refresh());
 	window.addEventListener("pagehide", () => {
 		source.close();
@@ -13830,6 +13832,7 @@ function applyMixin(TargetClass, MethodsClass) {
 	}
 }
 var MonacoApp = class {
+	agentAttached = false;
 	publishedCommentKeys = /* @__PURE__ */ new Set();
 	publishedRevisionIds = /* @__PURE__ */ new Set();
 	publishTabStates = /* @__PURE__ */ new Map();
@@ -13875,6 +13878,11 @@ var MonacoApp = class {
 	commitLoadGeneration;
 	commentDraftKey;
 	commentDraftWrite;
+	setAgentAttached(attached) {
+		this.agentAttached = attached;
+		const badge = $$1("#agent-status");
+		if (badge) badge.hidden = !attached;
+	}
 	constructor() {
 		this.commentManager = new CommentManager();
 		this.reviewNoteManager = new ReviewNoteManager();
