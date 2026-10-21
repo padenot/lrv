@@ -73,6 +73,7 @@ export type AppContextData = {
   working_directory?: string;
   git_branch?: string;
   is_public?: boolean;
+  launch_available?: boolean;
   claude_skill_installed?: boolean;
   comment_store_error?: string | null;
   phabricator_available?: boolean;
@@ -124,7 +125,9 @@ export type DiffStats = {
 export interface AppContext {
   discussionManager: DiscussionManager;
   agentAttached: boolean;
-  setAgentAttached(attached: boolean): void;
+  agentState: AgentState;
+  setAgentState(state: AgentState): void;
+  setupConnectAgent(): void;
   commentManager: {
     comments: ReviewComment[];
     currentCommitIdx: number | null;
@@ -253,3 +256,17 @@ export interface AppContext {
   clearFocusedHunk(): void;
   openCommentOnCurrentFocus(): void;
 }
+
+export type AgentState = {
+  attached: boolean;
+  busy: boolean;
+  launch: 'idle' | 'running' | 'failed';
+  initial_review?: boolean;
+  error?: string | null;
+};
+export type LaunchRequest = {
+  provider: 'claude' | 'codex';
+  model: string;
+  effort: string;
+  initial_review: boolean;
+};

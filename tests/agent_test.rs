@@ -174,36 +174,37 @@ async fn presence_tracks_polls_touch_expiry_and_close() {
     let tracker = channel.clone();
     let tracker = tokio::spawn(async move { tracker.track_presence().await });
     let mut presence = channel.presence();
-    assert!(!*presence.borrow_and_update());
+    assert!(!presence.borrow_and_update().attached);
 
     let waiter = channel.clone();
     let poll = tokio::spawn(async move { waiter.wait(0, LEASE * 3).await });
     presence.changed().await.unwrap();
-    assert!(*presence.borrow_and_update());
+    assert!(presence.borrow_and_update().attached);
     advance(LEASE * 2).await;
     tokio::task::yield_now().await;
-    assert!(*presence.borrow());
+    assert!(presence.borrow().attached);
     channel.push(discussion());
     assert_eq!(poll.await.unwrap().events.len(), 1);
-    assert!(*presence.borrow());
+    presence.borrow_and_update();
+    assert!(presence.borrow().attached);
 
     advance(LEASE - Duration::from_secs(1)).await;
     channel.touch();
     tokio::task::yield_now().await;
     advance(Duration::from_secs(2)).await;
     tokio::task::yield_now().await;
-    assert!(*presence.borrow());
+    assert!(presence.borrow().attached);
     assert!(!presence.has_changed().unwrap());
     advance(LEASE).await;
     presence.changed().await.unwrap();
-    assert!(!*presence.borrow_and_update());
+    assert!(!presence.borrow_and_update().attached);
 
     channel.touch();
     presence.changed().await.unwrap();
-    assert!(*presence.borrow_and_update());
+    assert!(presence.borrow_and_update().attached);
     channel.close();
     presence.changed().await.unwrap();
-    assert!(!*presence.borrow_and_update());
+    assert!(!presence.borrow_and_update().attached);
     tracker.await.unwrap();
 }
 
@@ -314,4 +315,36 @@ async fn summarize_is_only_valid_as_a_follow_up() {
     };
     assert!(discussion.summarize);
     assert!(channel.discussions()[1].summarize);
+}
+
+#[tokio::test(start_paused = true)]
+async fn busy_until_next_poll_and_reset_on_expiry() {
+    let channel = AgentChannel::new(LEASE);
+    let tracker = channel.clone();
+    let tracker = tokio::spawn(async move { tracker.track_presence().await });
+    let presence = channel.presence();
+    channel.push(discussion());
+    channel.wait(0, TIMEOUT).await;
+    assert!(presence.borrow().attached);
+    assert!(presence.borrow().busy);
+    let next = channel.clone();
+    let poll = tokio::spawn(async move { next.wait(1, TIMEOUT).await });
+    tokio::task::yield_now().await;
+    assert!(!presence.borrow().busy);
+    assert!(presence.borrow().attached);
+    advance(TIMEOUT).await;
+    assert!(poll.await.unwrap().events.is_empty());
+    assert!(!presence.borrow().busy);
+    channel.wait(0, TIMEOUT).await;
+    assert!(presence.borrow().busy);
+    advance(LEASE).await;
+    tokio::task::yield_now().await;
+    assert!(!presence.borrow().attached);
+    assert!(!presence.borrow().busy);
+    channel.touch();
+    assert!(!presence.borrow().busy);
+    channel.close();
+    assert!(!presence.borrow().attached);
+    assert!(!presence.borrow().busy);
+    tracker.await.unwrap();
 }

@@ -237,6 +237,8 @@ pub struct ProjectContext {
     pub git_branch: Option<String>,
     pub title: Option<String>,
     pub is_public: bool,
+    #[serde(default)]
+    pub launch_available: bool,
     pub claude_skill_installed: bool,
     /// Set when no comment database could be opened, so comments are not
     /// saved for recovery.

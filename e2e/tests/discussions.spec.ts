@@ -94,6 +94,7 @@ for (const stacked of [false, true]) {
       await expect(button).toBeHidden();
       await textarea.press('ControlOrMeta+Alt+Enter');
       await expect(page.locator('#comment-count')).toHaveText('0');
+      await expect(page.locator('#connect-agent')).toBeVisible();
       const first = listen(30);
       await expect(button).toBeVisible();
       await expect(textarea).toHaveValue('First discussion');
@@ -102,6 +103,9 @@ for (const stacked of [false, true]) {
       await expect(page.locator('.discussion')).toContainText('First discussion');
       const result = await first;
       expect(result.status).toBe('events');
+      await expect(page.locator('#agent-status')).toHaveClass(/busy/);
+      await expect(page.locator('#agent-status')).toHaveText('Connected');
+      await expect(page.locator('#connect-agent')).toBeHidden();
       expect(result.events[0].discussion).toMatchObject({
         file: 'a.txt',
         line: 1,
@@ -137,6 +141,8 @@ for (const stacked of [false, true]) {
       await expect(page.locator('#comment-count')).toHaveText('0');
       expect(await page.evaluate(() => window.__APP!.commentCountFor(0))).toBe(0);
       const followUp = listen(30);
+      await expect(page.locator('#agent-status')).not.toHaveClass(/busy/);
+      await expect(page.locator('#agent-status')).toHaveText('Connected');
       const thread = page.locator('.discussion');
       await thread.locator('.discussion-reply-btn').click();
       const replyText = thread.locator('.discussion-reply-text');

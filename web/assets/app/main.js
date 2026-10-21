@@ -590,6 +590,172 @@ var DiscussionManager = class {
 	}
 };
 //#endregion
+//#region web/src/api.ts
+let fileFetchPending = 0;
+let fileFetchDelayTimer = null;
+let fetchSpinnerEl = null;
+function ensureFetchSpinner() {
+	if (!fetchSpinnerEl) {
+		const host = document.querySelector(".header .header-actions");
+		if (!host) return;
+		const spinner = el("span", {
+			className: "fetch-spinner",
+			attrs: { id: "fetch-spinner" }
+		});
+		host.insertBefore(spinner, host.firstChild);
+		fetchSpinnerEl = spinner;
+	}
+}
+function showFetchSpinnerDelayed() {
+	ensureFetchSpinner();
+	if (!fetchSpinnerEl) return;
+	if (fileFetchDelayTimer) return;
+	fileFetchDelayTimer = setTimeout(() => {
+		if (fileFetchPending > 0) {
+			fetchSpinnerEl?.classList.add("visible");
+			const app = window.__APP;
+			if (app && typeof app.eagerPrefetchAllFiles === "function") app.eagerPrefetchAllFiles();
+		}
+		fileFetchDelayTimer = null;
+	}, 400);
+}
+function hideFetchSpinnerMaybe() {
+	if (fileFetchPending === 0) {
+		if (fileFetchDelayTimer) {
+			clearTimeout(fileFetchDelayTimer);
+			fileFetchDelayTimer = null;
+		}
+		if (fetchSpinnerEl) fetchSpinnerEl.classList.remove("visible");
+	}
+}
+async function fetchJSON(url, options) {
+	const isFile = url.startsWith("/api/file");
+	if (isFile) {
+		fileFetchPending++;
+		if (fileFetchPending === 1) showFetchSpinnerDelayed();
+	}
+	try {
+		const res = await fetch(url, options);
+		if (!res.ok) {
+			const text = await res.text();
+			throw new Error(`Request failed ${res.status} ${res.statusText} at ${url}${text ? `: ${text.slice(0, 200)}` : ""}`);
+		}
+		return await res.json();
+	} finally {
+		if (isFile) {
+			fileFetchPending = Math.max(0, fileFetchPending - 1);
+			hideFetchSpinnerMaybe();
+		}
+	}
+}
+function launchAgent(request) {
+	return fetchJSON("/api/agent/launch", {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify(request)
+	});
+}
+//#endregion
+//#region web/src/connect-agent-methods.ts
+const storageKey = "lrv.connect-agent";
+var ConnectAgentMethods = class {
+	setAgentState(state) {
+		this.agentState = state;
+		this.agentAttached = state.attached;
+		document.body.classList.toggle("agent-attached", state.attached);
+		const available = this.context?.launch_available === true;
+		const active = state.attached || state.launch === "running";
+		const button = $$1("#connect-agent");
+		const badge = $$1("#agent-status");
+		button.hidden = !available || active;
+		badge.hidden = !available || !active;
+		const busy = state.busy || state.initial_review || !state.attached && state.launch === "running";
+		badge.classList.toggle("busy", busy);
+		badge.title = busy ? "The agent is working" : "The agent is waiting for discussion comments";
+		if (active) {
+			$$1("#connect-agent-popover").hidden = true;
+			button.setAttribute("aria-expanded", "false");
+		}
+	}
+	setupConnectAgent() {
+		const button = $$1("#connect-agent");
+		const popover = $$1("#connect-agent-popover");
+		const form = $$1("#connect-agent-form");
+		const provider = $$1("#agent-provider");
+		const model = $$1("#agent-model");
+		const effort = $$1("#agent-effort");
+		const review = $$1("#agent-initial-review");
+		const error = $$1("#agent-launch-error");
+		const submit = $$1("#agent-launch-submit");
+		try {
+			const saved = JSON.parse(localStorage.getItem(storageKey) || "null");
+			if (saved) {
+				provider.value = saved.provider === "codex" ? "codex" : "claude";
+				model.value = typeof saved.model === "string" ? saved.model : "";
+				effort.value = typeof saved.effort === "string" ? saved.effort : "";
+				review.checked = saved.initial_review !== false;
+			}
+		} catch {}
+		const values = () => ({
+			provider: provider.value,
+			model: model.value.trim(),
+			effort: effort.value.trim(),
+			initial_review: review.checked
+		});
+		const save = () => {
+			try {
+				localStorage.setItem(storageKey, JSON.stringify(values()));
+			} catch {}
+		};
+		form.addEventListener("input", save);
+		form.addEventListener("change", save);
+		const close = () => {
+			popover.hidden = true;
+			button.setAttribute("aria-expanded", "false");
+		};
+		button.addEventListener("click", () => {
+			popover.hidden = !popover.hidden;
+			button.setAttribute("aria-expanded", String(!popover.hidden));
+			if (!popover.hidden) {
+				error.textContent = this.agentState.error || "";
+				provider.focus();
+			}
+		});
+		document.addEventListener("click", (event) => {
+			if (!(event.target instanceof Node) || !button.parentElement?.contains(event.target)) close();
+		});
+		document.addEventListener("keydown", (event) => {
+			if (event.key === "Escape" && !popover.hidden) {
+				event.stopPropagation();
+				close();
+				button.focus();
+			}
+		});
+		form.addEventListener("submit", (event) => {
+			event.preventDefault();
+			save();
+			submit.disabled = true;
+			error.textContent = "";
+			const req = values();
+			const previousState = this.agentState;
+			launchAgent(req).then(() => {
+				if (this.agentState === previousState) this.setAgentState({
+					attached: this.agentAttached,
+					busy: true,
+					launch: "running",
+					initial_review: req.initial_review
+				});
+				close();
+			}).catch((reason) => {
+				error.textContent = reason instanceof Error ? reason.message : String(reason);
+			}).finally(() => {
+				submit.disabled = false;
+			});
+		});
+		this.setAgentState(this.agentState);
+	}
+};
+//#endregion
 //#region web/src/linkify.ts
 const BUG_RE = /\b([bB]ug)\s+(\d{6,})\b/g;
 const PHAB_RE = /\b(D\d{6,})\b/g;
@@ -917,65 +1083,6 @@ var ReviewNoteManager = class {
 	}
 };
 //#endregion
-//#region web/src/api.ts
-let fileFetchPending = 0;
-let fileFetchDelayTimer = null;
-let fetchSpinnerEl = null;
-function ensureFetchSpinner() {
-	if (!fetchSpinnerEl) {
-		const host = document.querySelector(".header .header-actions");
-		if (!host) return;
-		const spinner = el("span", {
-			className: "fetch-spinner",
-			attrs: { id: "fetch-spinner" }
-		});
-		host.insertBefore(spinner, host.firstChild);
-		fetchSpinnerEl = spinner;
-	}
-}
-function showFetchSpinnerDelayed() {
-	ensureFetchSpinner();
-	if (!fetchSpinnerEl) return;
-	if (fileFetchDelayTimer) return;
-	fileFetchDelayTimer = setTimeout(() => {
-		if (fileFetchPending > 0) {
-			fetchSpinnerEl?.classList.add("visible");
-			const app = window.__APP;
-			if (app && typeof app.eagerPrefetchAllFiles === "function") app.eagerPrefetchAllFiles();
-		}
-		fileFetchDelayTimer = null;
-	}, 400);
-}
-function hideFetchSpinnerMaybe() {
-	if (fileFetchPending === 0) {
-		if (fileFetchDelayTimer) {
-			clearTimeout(fileFetchDelayTimer);
-			fileFetchDelayTimer = null;
-		}
-		if (fetchSpinnerEl) fetchSpinnerEl.classList.remove("visible");
-	}
-}
-async function fetchJSON(url, options) {
-	const isFile = url.startsWith("/api/file");
-	if (isFile) {
-		fileFetchPending++;
-		if (fileFetchPending === 1) showFetchSpinnerDelayed();
-	}
-	try {
-		const res = await fetch(url, options);
-		if (!res.ok) {
-			const text = await res.text();
-			throw new Error(`Request failed ${res.status} ${res.statusText} at ${url}${text ? `: ${text.slice(0, 200)}` : ""}`);
-		}
-		return await res.json();
-	} finally {
-		if (isFile) {
-			fileFetchPending = Math.max(0, fileFetchPending - 1);
-			hideFetchSpinnerMaybe();
-		}
-	}
-}
-//#endregion
 //#region web/src/live-events.ts
 function startLiveEvents(app) {
 	const source = new EventSource("/api/events");
@@ -1011,8 +1118,12 @@ function startLiveEvents(app) {
 			fetching = false;
 		}
 	};
-	source.addEventListener("agent", (e) => app.setAgentAttached(JSON.parse(e.data).attached === true));
-	source.addEventListener("error", () => app.setAgentAttached(false));
+	source.addEventListener("agent", (e) => app.setAgentState(JSON.parse(e.data)));
+	source.addEventListener("error", () => app.setAgentState({
+		...app.agentState,
+		attached: false,
+		busy: app.agentState.launch === "running"
+	}));
 	source.addEventListener("notes", () => void refresh());
 	window.addEventListener("pagehide", () => {
 		source.close();
@@ -14310,12 +14421,11 @@ var MonacoApp = class {
 	commitLoadGeneration;
 	commentDraftKey;
 	commentDraftWrite;
-	setAgentAttached(attached) {
-		this.agentAttached = attached;
-		document.body.classList.toggle("agent-attached", attached);
-		const badge = $$1("#agent-status");
-		if (badge) badge.hidden = !attached;
-	}
+	agentState = {
+		attached: false,
+		busy: false,
+		launch: "idle"
+	};
 	constructor() {
 		this.commentManager = new CommentManager();
 		this.reviewNoteManager = new ReviewNoteManager();
@@ -14560,6 +14670,8 @@ var MonacoApp = class {
 		}
 		const themeColors = defs[themeName]?.colors ?? {};
 		const fromTheme = (token) => themeColors[token] ?? "";
+		setVar("--success-color", fromTheme("testing.iconPassed") || "#3fb950");
+		setVar("--warning-color", fromTheme("editorWarning.foreground") || "#d29922");
 		setVar("--bg-primary", fromTheme("editor.background"));
 		setVar("--bg-secondary", fromTheme("editorGutter.background") || fromTheme("editor.lineHighlightBackground") || fromTheme("editor.background"));
 		setVar("--bg-elevated", fromTheme("editorGutter.background") || fromTheme("editor.lineHighlightBackground") || fromTheme("editor.background"));
@@ -14674,6 +14786,7 @@ var MonacoApp = class {
 			this.showSettingsModal();
 		});
 		$$1("#help-btn")?.addEventListener("click", () => this.showKeyboardHelp());
+		this.setupConnectAgent();
 		const submitBtn = $$1("#submit-review");
 		const menu = $$1("#submit-menu");
 		const menuItems = Array.from(menu.querySelectorAll("[role=\"menuitem\"]"));
@@ -14780,6 +14893,7 @@ applyMixin(MonacoApp, DialogMethods);
 applyMixin(MonacoApp, SeriesMethods);
 applyMixin(MonacoApp, StackedViewMethods);
 applyMixin(MonacoApp, PublishDialogMethods);
+applyMixin(MonacoApp, ConnectAgentMethods);
 //#endregion
 //#region web/src/main.ts
 document.title = "lrv — Loading…";

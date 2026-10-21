@@ -55,6 +55,8 @@ struct CommitQuery {
 #[derive(Clone)]
 pub struct AppState {
     pub diffs: Arc<Vec<DiffResponse>>,
+    pub raw_diffs: Arc<Vec<String>>,
+    pub launcher: Arc<crate::launch::AgentLauncher>,
     pub comments: Arc<Mutex<Vec<Comment>>>,
     pub overall_comment: Arc<Mutex<Option<String>>>,
     pub notes_version: Arc<tokio::sync::watch::Sender<u64>>,
@@ -810,6 +812,7 @@ pub fn create_router(state: AppState, enable_trace: bool) -> Router {
             get(get_discussions).post(add_discussion),
         )
         .route("/api/agent/events", get(agent_events))
+        .route("/api/agent/launch", post(launch_agent))
         .route("/api/discussions/{id}", delete(delete_discussion))
         .route(
             "/api/review-notes",
@@ -1486,10 +1489,18 @@ async fn events(
             .event("notes")
             .data(serde_json::json!({"version": version}).to_string()))
     });
-    let presence = WatchStream::new(state.agent.presence()).map(|attached| {
-        Ok(Event::default()
-            .event("agent")
-            .data(serde_json::json!({"attached": attached}).to_string()))
+    let presence_changes = WatchStream::new(state.agent.presence()).map(|_| ());
+    let launch_changes = WatchStream::new(state.launcher.subscribe())
+        .skip(1)
+        .map(|_| ());
+    let presence = presence_changes.merge(launch_changes).map(move |_| {
+        let presence = *state.agent.presence().borrow();
+        Ok(Event::default().event("agent").data(
+            state
+                .launcher
+                .agent_state(&state.agent, presence)
+                .to_string(),
+        ))
     });
     Sse::new(stream.merge(presence)).keep_alive(KeepAlive::default())
 }
@@ -1560,6 +1571,49 @@ fn agent_authorized(state: &AppState, headers: &HeaderMap) -> bool {
 struct AgentEventsQuery {
     after: Option<u64>,
     timeout: Option<u64>,
+}
+
+async fn launch_agent(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<crate::launch::LaunchRequest>,
+) -> Response {
+    if state.context.is_public {
+        return (
+            StatusCode::FORBIDDEN,
+            "Agent launch is disabled in public mode",
+        )
+            .into_response();
+    }
+    let host = headers
+        .get(header::HOST)
+        .and_then(|h| h.to_str().ok())
+        .and_then(|h| h.parse::<axum::http::uri::Authority>().ok());
+    if !host.is_some_and(|host| {
+        state
+            .launcher
+            .allowed_hosts
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|allowed| allowed.eq_ignore_ascii_case(host.host()))
+    }) {
+        return (StatusCode::FORBIDDEN, "Untrusted Host header").into_response();
+    }
+    match state.launcher.launch(
+        &req,
+        &state.context,
+        &state.raw_diffs,
+        &state.diffs,
+        state.agent.clone(),
+    ) {
+        Ok(()) => (
+            StatusCode::ACCEPTED,
+            Json(serde_json::json!({"launch": "running"})),
+        )
+            .into_response(),
+        Err(error) => error.into_response(),
+    }
 }
 
 async fn agent_events(

@@ -528,7 +528,7 @@ test.describe('Review Workflow E2E', () => {
     await page.locator('.monaco-editor').first().waitFor({ timeout: 5000 });
 
     // Click on the header to focus the page without triggering Monaco
-    await page.locator('.header').click();
+    await page.locator('.header .wordmark').click();
 
     // Press ? to show help (Shift+Slash to match keyboard code detection)
     await page.keyboard.press('Shift+Slash');
@@ -553,7 +553,7 @@ test.describe('Review Workflow E2E', () => {
     await page.locator('.monaco-editor').first().waitFor({ timeout: 5000 });
 
     // Click on the header to focus the page without triggering Monaco
-    await page.locator('.header').click();
+    await page.locator('.header .wordmark').click();
 
     // Verify first file is active
     await expect(selectedFileTreeRow(page)).toHaveCount(1);

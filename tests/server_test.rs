@@ -31,6 +31,7 @@ fn test_app_state_construction() {
         git_branch: Some("main".to_string()),
         title: None,
         is_public: false,
+        launch_available: true,
         claude_skill_installed: false,
         comment_store_error: None,
         phabricator_available: false,
@@ -46,6 +47,8 @@ fn test_app_state_construction() {
         notes_version: std::sync::Arc::new(tokio::sync::watch::channel(0).0),
         agent_token: Arc::from("test-token"),
         agent: lrv::agent::AgentChannel::new(lrv::agent::lease_from_env()),
+        launcher: lrv::launch::AgentLauncher::new(),
+        raw_diffs: std::sync::Arc::new(Vec::new()),
         review_notes: Arc::new(Mutex::new(vec![])),
         shutdown_tx: Arc::new(Mutex::new(Some(shutdown_tx))),
         config: Arc::new(Mutex::new(config)),
@@ -89,6 +92,7 @@ fn test_create_router() {
         git_branch: None,
         title: None,
         is_public: false,
+        launch_available: true,
         claude_skill_installed: false,
         comment_store_error: None,
         phabricator_available: false,
@@ -103,6 +107,8 @@ fn test_create_router() {
         notes_version: std::sync::Arc::new(tokio::sync::watch::channel(0).0),
         agent_token: Arc::from("test-token"),
         agent: lrv::agent::AgentChannel::new(lrv::agent::lease_from_env()),
+        launcher: lrv::launch::AgentLauncher::new(),
+        raw_diffs: std::sync::Arc::new(Vec::new()),
         review_notes: Arc::new(Mutex::new(vec![])),
         shutdown_tx: Arc::new(Mutex::new(Some(shutdown_tx))),
         config: Arc::new(Mutex::new(config)),
@@ -147,6 +153,7 @@ fn review_note_state() -> lrv::server::AppState {
         git_branch: None,
         title: None,
         is_public: false,
+        launch_available: true,
         claude_skill_installed: false,
         comment_store_error: None,
         phabricator_available: false,
@@ -161,6 +168,8 @@ fn review_note_state() -> lrv::server::AppState {
         notes_version: std::sync::Arc::new(tokio::sync::watch::channel(0).0),
         agent_token: Arc::from("test-token"),
         agent: lrv::agent::AgentChannel::new(lrv::agent::lease_from_env()),
+        launcher: lrv::launch::AgentLauncher::new(),
+        raw_diffs: std::sync::Arc::new(Vec::new()),
         review_notes: Arc::new(Mutex::new(vec![])),
         shutdown_tx: Arc::new(Mutex::new(Some(shutdown_tx))),
         config: Arc::new(Mutex::new(config)),
@@ -232,11 +241,11 @@ async fn test_review_note_api_round_trip() {
     .await
     .unwrap();
     assert!(buffer.contains("data: {\"version\":0}"));
-    assert!(buffer.contains("data: {\"attached\":false}"));
+    assert!(buffer.contains("data: {\"attached\":false,"));
     let waiter = agent.clone();
     let poll = tokio::spawn(async move { waiter.wait(0, Duration::from_secs(5)).await });
     tokio::time::timeout(Duration::from_secs(2), async {
-        while !buffer.contains("data: {\"attached\":true}") {
+        while !buffer.contains("data: {\"attached\":true,") {
             let chunk = stream.next().await.unwrap().unwrap();
             buffer.push_str(std::str::from_utf8(&chunk).unwrap());
         }
@@ -976,4 +985,69 @@ async fn test_delete_discussion_without_agent_and_public_mode() {
         StatusCode::NO_CONTENT
     );
     assert!(state.agent.discussions().is_empty());
+}
+
+#[tokio::test]
+async fn launch_validates_requests_and_refuses_public_untrusted_or_attached() {
+    let state = review_note_state();
+    let app = lrv::server::create_router(state.clone(), false);
+    let payload = serde_json::json!({"provider": "claude"});
+    let request = |host: &str, payload: serde_json::Value| {
+        Request::builder()
+            .method("POST")
+            .uri("/api/agent/launch")
+            .header("host", host)
+            .header("content-type", "application/json")
+            .body(Body::from(payload.to_string()))
+            .unwrap()
+    };
+    for host in [
+        "attacker.example",
+        "localhost.attacker.example",
+        "127.0.0.1.attacker.example",
+    ] {
+        assert_eq!(
+            app.clone()
+                .oneshot(request(host, payload.clone()))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::FORBIDDEN
+        );
+    }
+    for payload in [
+        serde_json::json!({"provider": "sh"}),
+        serde_json::json!({"provider": "claude", "model": "$(bad)"}),
+        serde_json::json!({"provider": "codex", "effort": "a b"}),
+    ] {
+        assert_eq!(
+            app.clone()
+                .oneshot(request("localhost:1234", payload))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::BAD_REQUEST
+        );
+    }
+    state.agent.touch();
+    for host in ["localhost", "127.0.0.1:1234", "[::1]:1234"] {
+        assert_eq!(
+            app.clone()
+                .oneshot(request(host, payload.clone()))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::CONFLICT
+        );
+    }
+    let mut state = review_note_state();
+    Arc::make_mut(&mut state.context).is_public = true;
+    let app = lrv::server::create_router(state, false);
+    assert_eq!(
+        app.oneshot(request("localhost", payload))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::FORBIDDEN
+    );
 }
