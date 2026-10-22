@@ -20,6 +20,7 @@ use std::io::{Read, Write};
 use std::process::Command;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex, Notify};
+use tracing_subscriber::{filter::Targets, layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::output::OutputFormat;
 use crate::phabricator::{PhabricatorClient, Publisher, RevisionStatusInfo};
@@ -957,7 +958,29 @@ fn recover_stored_review(selector: &str, format: &OutputFormat) -> Result<()> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt::init();
+    // Match fmt::init() without the env-filter feature, including its RUST_LOG
+    // fallbacks, while reserving stdout for review output.
+    let targets = match env::var("RUST_LOG") {
+        Ok(var) => var
+            .parse::<Targets>()
+            .map_err(|e| {
+                eprintln!("Ignoring `RUST_LOG={:?}`: {}", var, e);
+            })
+            .unwrap_or_default(),
+        Err(env::VarError::NotPresent) => {
+            Targets::new().with_default(tracing_subscriber::fmt::Subscriber::DEFAULT_MAX_LEVEL)
+        }
+        Err(e) => {
+            eprintln!("Ignoring `RUST_LOG`: {}", e);
+            Targets::new().with_default(tracing_subscriber::fmt::Subscriber::DEFAULT_MAX_LEVEL)
+        }
+    };
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::TRACE)
+        .with_writer(std::io::stderr)
+        .finish()
+        .with(targets)
+        .init();
 
     let version_checker = VersionChecker::new("lrv", env!("CARGO_PKG_VERSION"));
     version_checker.check_async();
