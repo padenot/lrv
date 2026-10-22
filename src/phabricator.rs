@@ -32,7 +32,7 @@ struct RevisionSearchData {
 
 #[derive(Debug, Deserialize)]
 struct RevisionData {
-    phid: String,
+    id: u32,
     fields: RevisionFields,
 }
 
@@ -135,14 +135,24 @@ impl PhabricatorClient {
         })
     }
 
+    pub fn with_base_url(&self, base_url: String) -> Self {
+        Self {
+            base_url: base_url.trim_end_matches('/').to_string(),
+            ..self.clone()
+        }
+    }
+
     pub async fn fetch_review_notes(
         &self,
         revision: &str,
         include_done: bool,
     ) -> Result<Vec<ReviewNote>> {
         let revision_id = parse_revision_id(revision).context("Invalid Phabricator revision")?;
-        let revision = self.fetch_revision(revision_id).await?;
-        let transactions = self.fetch_transactions(&revision.phid).await?;
+        let monogram = format!("D{revision_id}");
+        let (revision, transactions) = tokio::try_join!(
+            self.fetch_revision(revision_id),
+            self.fetch_transactions(&monogram),
+        )?;
         let users = self.fetch_user_names(&transactions).await;
 
         let mut notes = Vec::new();
@@ -199,7 +209,7 @@ impl PhabricatorClient {
             .with_context(|| format!("No Phabricator revision found for D{}", revision_id))
     }
 
-    async fn fetch_transactions(&self, object_phid: &str) -> Result<Vec<TransactionData>> {
+    async fn fetch_transactions(&self, object_identifier: &str) -> Result<Vec<TransactionData>> {
         let mut after: Option<String> = None;
         let mut all = Vec::new();
 
@@ -207,7 +217,10 @@ impl PhabricatorClient {
             let url = format!("{}/api/transaction.search", self.base_url);
             let mut params = vec![
                 ("api.token".to_string(), self.token.clone()),
-                ("objectIdentifier".to_string(), object_phid.to_string()),
+                (
+                    "objectIdentifier".to_string(),
+                    object_identifier.to_string(),
+                ),
             ];
             if let Some(cursor) = after.as_ref() {
                 params.push(("after".to_string(), cursor.clone()));
@@ -580,32 +593,95 @@ impl PhabricatorClient {
         })
     }
 
-    /// The revision and the files of its latest diff.
-    pub async fn fetch_active_diff(&self, revision: u32) -> Result<ActiveDiff> {
-        let revision = self.fetch_revision(revision).await?;
-        let diff_phid = revision
-            .fields
-            .diff_phid
-            .clone()
-            .context("Phabricator revision has no diff")?;
-
-        let search: serde_json::Value = self
+    /// The revisions and the files of their latest diffs, with per-revision failures preserved.
+    pub async fn fetch_active_diffs(
+        &self,
+        ids: &[u32],
+    ) -> Result<HashMap<u32, Result<ActiveDiff>>> {
+        if ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let revisions: RevisionSearchData = self
             .conduit(
-                "differential.diff.search",
-                vec![("constraints[phids][0]".to_string(), diff_phid)],
+                "differential.revision.search",
+                ids.iter()
+                    .enumerate()
+                    .map(|(i, id)| (format!("constraints[ids][{i}]"), id.to_string()))
+                    .collect(),
             )
             .await?;
-        let diff_id = search
-            .pointer("/data/0/id")
-            .and_then(|v| v.as_u64())
-            .context("Phabricator diff not found")?;
+        let mut revisions: HashMap<_, _> = revisions
+            .data
+            .into_iter()
+            .map(|revision| (revision.id, revision))
+            .collect();
+        let diff_phids: HashSet<_> = revisions
+            .values()
+            .filter_map(|revision| revision.fields.diff_phid.clone())
+            .collect();
+        let mut diff_ids = HashMap::new();
+        let mut queried = serde_json::Value::Null;
+        if !diff_phids.is_empty() {
+            let search: serde_json::Value = self
+                .conduit(
+                    "differential.diff.search",
+                    diff_phids
+                        .iter()
+                        .enumerate()
+                        .map(|(i, phid)| (format!("constraints[phids][{i}]"), phid.clone()))
+                        .collect(),
+                )
+                .await?;
+            if let Some(data) = search.get("data").and_then(|v| v.as_array()) {
+                for diff in data {
+                    if let (Some(phid), Some(id)) = (
+                        diff.get("phid").and_then(|v| v.as_str()),
+                        diff.get("id").and_then(|v| v.as_u64()),
+                    ) {
+                        diff_ids.insert(phid.to_string(), id);
+                    }
+                }
+            }
+            if !diff_ids.is_empty() {
+                queried = self
+                    .conduit(
+                        "differential.querydiffs",
+                        diff_ids
+                            .values()
+                            .enumerate()
+                            .map(|(i, id)| (format!("ids[{i}]"), id.to_string()))
+                            .collect(),
+                    )
+                    .await?;
+            }
+        }
+        Ok(ids
+            .iter()
+            .map(|&id| {
+                let active = (|| {
+                    let revision = revisions
+                        .remove(&id)
+                        .with_context(|| format!("No Phabricator revision found for D{id}"))?;
+                    let diff_phid = revision
+                        .fields
+                        .diff_phid
+                        .as_ref()
+                        .context("Phabricator revision has no diff")?;
+                    let diff_id = *diff_ids
+                        .get(diff_phid)
+                        .context("Phabricator diff not found")?;
+                    Self::parse_active_diff(revision, diff_id, &queried)
+                })();
+                (id, active)
+            })
+            .collect())
+    }
 
-        let queried: serde_json::Value = self
-            .conduit(
-                "differential.querydiffs",
-                vec![("ids[0]".to_string(), diff_id.to_string())],
-            )
-            .await?;
+    fn parse_active_diff(
+        revision: RevisionData,
+        diff_id: u64,
+        queried: &serde_json::Value,
+    ) -> Result<ActiveDiff> {
         let changes = queried
             .get(diff_id.to_string())
             .and_then(|d| d.get("changes"))
@@ -888,14 +964,10 @@ impl Publisher {
                             .then(|| "Revision is on a different server".into()),
                     });
                 }
-                let auth = async {
-                    let client = PhabricatorClient::new(base.clone(), phabricator_token(base)?)?;
-                    let viewer = client.whoami().await?;
-                    Ok::<_, anyhow::Error>((client, viewer))
-                }
-                .await;
-                let (client, viewer) = match auth {
-                    Ok(value) => value,
+                let client = phabricator_token(base)
+                    .and_then(|token| PhabricatorClient::new(base.clone(), token));
+                let client = match client {
+                    Ok(client) => client,
                     Err(e) => {
                         return Validation {
                             user: String::new(),
@@ -905,12 +977,35 @@ impl Publisher {
                         }
                     }
                 };
+                let ids: Vec<u32> = revisions
+                    .iter()
+                    .filter(|revision| revision.reason.is_none())
+                    .map(|revision| revision.id[1..].parse().expect("revision id"))
+                    .collect();
+                let (viewer, active_diffs) =
+                    tokio::join!(client.whoami(), client.fetch_active_diffs(&ids));
+                let viewer = match viewer {
+                    Ok(viewer) => viewer,
+                    Err(e) => {
+                        return Validation {
+                            user: String::new(),
+                            error: Some(format!("{e:#}")),
+                            revisions,
+                            client: None,
+                        }
+                    }
+                };
+                let mut active_diffs = active_diffs;
                 for revision in &mut revisions {
                     if revision.reason.is_some() {
                         continue;
                     }
                     let id = revision.id[1..].parse().expect("revision id");
-                    match client.fetch_active_diff(id).await {
+                    let active = match &mut active_diffs {
+                        Ok(diffs) => diffs.remove(&id).expect("requested revision"),
+                        Err(e) => Err(anyhow::anyhow!("{e:#}")),
+                    };
+                    match active {
                         Ok(active) => {
                             revision.reason = check_diff_matches(
                                 &revision.id,
@@ -1230,6 +1325,131 @@ mod tests {
                 None
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn validation_batches_revisions_and_preserves_individual_failures() {
+        use super::Publisher;
+        use axum::{
+            extract::{Path, State},
+            routing::post,
+            Form, Json, Router,
+        };
+        use std::sync::Arc;
+
+        // Give validation a token without changing the environment of other tests.
+        const TEST: &str =
+            "phabricator::tests::validation_batches_revisions_and_preserves_individual_failures";
+        if std::env::var_os("LRV_PHAB_BATCH_TEST").is_none() {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", TEST, "--nocapture"])
+                .env("LRV_PHAB_BATCH_TEST", "1")
+                .env("PHABRICATOR_API_KEY", "test-token")
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
+        type Calls = Arc<tokio::sync::Mutex<Vec<(String, HashMap<String, String>)>>>;
+        async fn conduit(
+            State((calls, missing)): State<(Calls, bool)>,
+            Path(method): Path<String>,
+            Form(params): Form<HashMap<String, String>>,
+        ) -> Json<serde_json::Value> {
+            calls.lock().await.push((method.clone(), params));
+            let revision = |id| {
+                serde_json::json!({
+                    "id": id,
+                    "fields": {
+                        "title": format!("Revision {id}"),
+                        "uri": format!("https://phab.example/D{id}"),
+                        "diffPHID": format!("PHID-DIFF-{id}"),
+                        "authorPHID": "PHID-USER-author",
+                        "status": {"value": "needs-review", "name": "Needs Review", "closed": false}
+                    }
+                })
+            };
+            let result = match method.as_str() {
+                "user.whoami" => {
+                    serde_json::json!({"phid": "PHID-USER-reviewer", "userName": "reviewer"})
+                }
+                "differential.revision.search" => serde_json::json!({
+                    "data": if missing { vec![revision(1)] } else { vec![revision(2), revision(1)] }
+                }),
+                "differential.diff.search" => serde_json::json!({"data": [
+                    {"id": 12, "phid": "PHID-DIFF-2"},
+                    {"id": 11, "phid": "PHID-DIFF-1"}
+                ]}),
+                "differential.querydiffs" => serde_json::json!({
+                    "11": {"changes": []}, "12": {"changes": []}
+                }),
+                _ => panic!("unexpected method {method}"),
+            };
+            Json(serde_json::json!({"error_code": null, "error_info": null, "result": result}))
+        }
+        for missing in [false, true] {
+            let calls: Calls = Default::default();
+            let app = Router::new()
+                .route("/api/{method}", post(conduit))
+                .with_state((calls.clone(), missing));
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let base = format!("http://{}", listener.local_addr().unwrap());
+            let server = tokio::spawn(async move {
+                axum::serve(listener, app).await.unwrap();
+            });
+            let publisher = Publisher::new(
+                (1..=2)
+                    .map(|id| {
+                        Some(PhabTarget {
+                            base_url: base.clone(),
+                            id,
+                        })
+                    })
+                    .collect(),
+                &[],
+            );
+            let publisher = Publisher {
+                stats: vec![HashMap::new(), HashMap::new()],
+                ..publisher
+            };
+            let validation = publisher.validate().await;
+            assert!(validation.error.is_none());
+            assert!(validation.revisions[0].publishable);
+            assert_eq!(validation.revisions[0].diff_id, 11);
+            if missing {
+                assert!(!validation.revisions[1].publishable);
+                assert_eq!(
+                    validation.revisions[1].reason.as_deref(),
+                    Some("No Phabricator revision found for D2")
+                );
+            } else {
+                assert!(validation.revisions[1].publishable);
+                assert_eq!(validation.revisions[1].diff_id, 12);
+            }
+            let calls = calls.lock().await;
+            assert_eq!(calls.len(), 4);
+            for method in [
+                "user.whoami",
+                "differential.revision.search",
+                "differential.diff.search",
+                "differential.querydiffs",
+            ] {
+                assert_eq!(calls.iter().filter(|(name, _)| name == method).count(), 1);
+            }
+            let params = &calls
+                .iter()
+                .find(|(name, _)| name == "differential.revision.search")
+                .unwrap()
+                .1;
+            assert_eq!(params["constraints[ids][0]"], "1");
+            assert_eq!(params["constraints[ids][1]"], "2");
+            server.abort();
+        }
     }
 
     #[tokio::test]
