@@ -235,6 +235,79 @@ test.describe('Series mode E2E', () => {
     await expect(commits).toHaveCount(2, { timeout: 5000 });
   });
 
+  test('Publish follows the selected commit and Finish excludes its published comments', async ({
+    page,
+  }) => {
+    await page.route('**/api/context', async (route) => {
+      const response = await route.fetch();
+      await route.fulfill({
+        response,
+        json: { ...(await response.json()), phabricator_available: true },
+      });
+    });
+    await page.route('**/api/phabricator', (route) =>
+      route.fulfill({
+        json: {
+          user: 'reviewer',
+          revisions: [
+            {
+              id: 'D123',
+              title: 'Second commit',
+              url: 'https://phab.example/D123',
+              commit_idxs: [1],
+              own: false,
+              closed: false,
+              publishable: true,
+              published: false,
+            },
+          ],
+        },
+      }),
+    );
+    let published: any;
+    await page.route('**/api/phabricator/publish', async (route) => {
+      published = route.request().postDataJSON();
+      await route.fulfill({ json: { url: 'https://phab.example/D123' } });
+    });
+    let finished: any;
+    await page.route('**/api/complete', async (route) => {
+      finished = route.request().postDataJSON();
+      await route.fulfill({ status: 200 });
+    });
+    await openApp(page);
+    await expect(page.locator('.series-revision-badge')).toHaveText('D123');
+    await expect(page.locator('#publish-commit')).toBeHidden();
+    await page.locator('.series-commit').nth(1).click();
+    await expect(page.locator('#publish-commit')).toHaveText('Publish D123');
+    await page.evaluate(() =>
+      window.__APP!.commentManager.addComment({
+        file: '(commit)',
+        line: 1,
+        side: 'new',
+        body: 'Publish this comment',
+        commit_idx: 1,
+      }),
+    );
+    await page.locator('#publish-commit').click();
+    const dialog = page.locator('.publish-dialog');
+    await expect(dialog.getByRole('tab')).toHaveCount(0);
+    await expect(dialog).toContainText('Publish this comment');
+    await dialog.locator('.publish-revision').click();
+    await expect(dialog).toHaveCount(0);
+    expect(published.comments).toHaveLength(1);
+    expect(published.comments[0].commit_idx).toBe(1);
+    await expect(page.locator('#publish-commit')).toHaveText('Published D123 ✓');
+    await expect(page.locator('#publish-commit')).toBeDisabled();
+    await expect(page.locator('.series-revision-badge')).toHaveText('D123 ✓');
+    await page.locator('.series-commit').nth(0).click();
+    await expect(page.locator('#publish-commit')).toBeHidden();
+    await page.locator('#submit-review').click();
+    await expect(page.locator('.submit-review-modal')).toContainText('Already published to D123');
+    await page.locator('.confirm-submit-btn').click();
+    await expect(page.locator('#submit-review')).toHaveText('Review finished');
+    expect(finished.comments).toEqual([]);
+  });
+
   test('first commit is active on load', async ({ page }) => {
     await openApp(page);
 
@@ -822,7 +895,7 @@ test.describe('Series: overall feedback is series-wide, not attached to a single
     await page.locator('#submit-review').click();
     await page.locator('.submit-summary-input').fill('Looks good across the whole series');
     await page.locator('.confirm-submit-btn').click();
-    await expect(page.locator('text=Review Submitted')).toBeVisible({ timeout: 3000 });
+    await expect(page.locator('text=Review finished')).toBeVisible({ timeout: 3000 });
 
     // Wait for the server process (which prints its JSON result to stdout on
     // shutdown) to exit, then inspect what it actually printed.

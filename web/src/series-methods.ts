@@ -28,6 +28,9 @@ export function prGroups(series: SeriesInfo): PrGroup[] {
 
 export class SeriesMethods {
   declare seriesInfo: AppContext['seriesInfo'];
+  declare phabRevisionStatus: import('./types/app').PhabStatus | null;
+  declare publishedRevisionIds: Set<string>;
+  declare updatePublishButton: () => void;
   declare currentCommitIdx: number;
   declare commitLoadGeneration: number;
   declare diff: AppContext['diff'];
@@ -102,6 +105,7 @@ export class SeriesMethods {
   }
 
   renderSeriesNav() {
+    this.updatePublishButton();
     const container = document.getElementById('commit-strip');
     const resizer = document.getElementById('commit-strip-resizer');
     if (!container) {
@@ -140,6 +144,17 @@ export class SeriesMethods {
       const titleRow = el('div', { className: 'series-commit-title-row' });
       const title = el('div', { className: 'series-commit-msg', text: msg });
       titleRow.appendChild(title);
+      const revision = this.phabRevisionStatus?.revisions.find((r) =>
+        r.commit_idxs.includes(commit.idx),
+      );
+      if (revision) {
+        titleRow.appendChild(
+          el('span', {
+            className: 'series-revision-badge',
+            text: `${revision.id}${this.publishedRevisionIds.has(revision.id) ? ' ✓' : ''}`,
+          }),
+        );
+      }
 
       if (commitCommentCount > 0) {
         titleRow.appendChild(

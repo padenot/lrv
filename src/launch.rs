@@ -290,6 +290,6 @@ pub fn build_prompt(req: &LaunchRequest, paths: &[PathBuf], diffs: &[DiffRespons
     } else {
         prompt.push_str("Skip the initial review and start listening immediately.\n");
     }
-    prompt.push_str("Then run lrv --listen --listen-timeout 540 in the foreground with a tool timeout of at least 550 seconds. Read its output directly. Reply to discussions by writing the JSON to a file and running lrv --add-notes <path> as described in the skill, then listen again. Repeat after timeout. On ended, exit. On a nonzero listen exit, report the error and exit. Never stop after merely posting review notes or answering a discussion.\n");
+    prompt.push_str("Then run lrv --listen --listen-timeout 540 in the foreground with a tool timeout of at least 550 seconds. Read its output directly. Reply to discussions by writing the JSON to a file and running lrv --add-notes <path> as described in the skill, then listen again. Repeat after timeout. On ended, exit. On a nonzero listen exit, report the error and exit. Never stop after merely posting review notes or answering a discussion. You only handle discussions: when the reviewer clicks Finish, their comments go to the terminal that started lrv, never to you.\n");
     prompt
 }
