@@ -373,11 +373,13 @@ fn make_state_from_patch(repo_dir: &std::path::Path, patch: &str) -> lrv::server
 
 #[tokio::test]
 async fn test_reviewing_non_working_copy_commit_uses_patch_blobs() {
+    // Hold the lock first: the fake-jj tests put a stub `jj` on PATH, which
+    // would make jj_available() succeed without a real jj installed.
+    let _guard = PATH_LOCK.lock().await;
     if !jj_available() {
         eprintln!("skipping: jj not installed");
         return;
     }
-    let _guard = PATH_LOCK.lock().await;
     let (repo_dir, patch, _rev) = build_issue_tree("issue6-blobs");
 
     let state = make_state_from_patch(&repo_dir, &patch);
@@ -404,11 +406,13 @@ async fn test_reviewing_non_working_copy_commit_uses_patch_blobs() {
 
 #[tokio::test]
 async fn test_non_working_copy_commit_raw_sides_use_patch_blobs() {
+    // Hold the lock first: the fake-jj tests put a stub `jj` on PATH, which
+    // would make jj_available() succeed without a real jj installed.
+    let _guard = PATH_LOCK.lock().await;
     if !jj_available() {
         eprintln!("skipping: jj not installed");
         return;
     }
-    let _guard = PATH_LOCK.lock().await;
     let (repo_dir, patch, _rev) = build_issue_tree("issue6-raw");
 
     let state = make_state_from_patch(&repo_dir, &patch);
@@ -429,11 +433,13 @@ async fn test_non_working_copy_commit_raw_sides_use_patch_blobs() {
 /// `.jj/repo/store/git`; the patch OIDs must still resolve there.
 #[tokio::test]
 async fn test_non_colocated_jj_store_resolves_patch_blobs() {
+    // Hold the lock first: the fake-jj tests put a stub `jj` on PATH, which
+    // would make jj_available() succeed without a real jj installed.
+    let _guard = PATH_LOCK.lock().await;
     if !jj_available() {
         eprintln!("skipping: jj not installed");
         return;
     }
-    let _guard = PATH_LOCK.lock().await;
     let repo_dir = unique_dir("issue6-no-colocate");
     let _ = fs::remove_dir_all(&repo_dir);
     fs::create_dir_all(&repo_dir).unwrap();
