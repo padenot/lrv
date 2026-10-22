@@ -3,27 +3,56 @@ import { openModal } from './modal';
 import { fetchJSON } from './api';
 import { commentKey } from './dialog-methods';
 import { isAddressRequest, type ReviewComment } from './comments';
-import type { AppContext, PhabStatus, PublishTabState, ReviewAction } from './types/app';
+import type { AppContext, PhabStatus, PublishState, ReviewAction } from './types/app';
 
 export class PublishDialogMethods {
   declare commentManager: AppContext['commentManager'];
   declare seriesInfo: AppContext['seriesInfo'];
   declare publishedCommentKeys: Set<string>;
   declare publishedRevisionIds: Set<string>;
-  declare publishTabStates: Map<string, PublishTabState>;
+  declare publishStates: Map<string, PublishState>;
+  declare currentCommitIdx: number;
+  declare phabRevisionStatus: PhabStatus | null;
+  declare renderSeriesNav: () => void;
   declare phabStatus: Promise<PhabStatus> | null;
   declare renderSubmitComments: (body: HTMLElement, comments: ReviewComment[]) => Promise<void>;
 
   prefetchPhabricator(): Promise<PhabStatus> {
-    this.phabStatus ??= fetchJSON<PhabStatus>('/api/phabricator').catch((error) => {
-      this.phabStatus = null;
-      throw error;
-    });
+    this.phabStatus ??= fetchJSON<PhabStatus>('/api/phabricator')
+      .then((status) => {
+        this.phabRevisionStatus = status;
+        status.revisions
+          .filter((r) => r.published)
+          .forEach((r) => this.publishedRevisionIds.add(r.id));
+        this.renderSeriesNav();
+        return status;
+      })
+      .catch((error) => {
+        this.phabStatus = null;
+        throw error;
+      });
     return this.phabStatus;
   }
 
-  async showPublishDialog() {
-    let active = '';
+  updatePublishButton() {
+    const button = document.getElementById('publish-commit') as HTMLButtonElement | null;
+    if (!button) {
+      return;
+    }
+    const revision = this.phabRevisionStatus?.revisions.find((r) =>
+      r.commit_idxs.includes(this.currentCommitIdx),
+    );
+    button.hidden = !revision;
+    if (!revision) {
+      return;
+    }
+    const published = this.publishedRevisionIds.has(revision.id);
+    button.textContent = published ? `Published ${revision.id} ✓` : `Publish ${revision.id}`;
+    button.disabled = published || !revision.publishable || !!this.phabRevisionStatus?.error;
+    button.title = this.phabRevisionStatus?.error ?? revision.reason ?? '';
+  }
+
+  async showPublishDialog(revisionId: string) {
     let publish: () => Promise<void> = async () => {};
     const closeButton = el('button', { className: 'btn-secondary', text: 'Close' });
     const publishButton = el('button', {
@@ -65,75 +94,35 @@ export class PublishDialogMethods {
         (c) => revision.commit_idxs.includes(c.commit_idx ?? 0) && !isAddressRequest(c),
       );
     };
+    const panel = el('div', { className: 'publish-panel' });
+    body.appendChild(panel);
+    const revision = status.revisions.find((r) => r.id === revisionId);
+    if (!revision) {
+      panel.appendChild(el('p', { text: 'Revision unavailable.' }));
+      return;
+    }
     const unassigned = originals.filter(
-      (c) =>
-        isAddressRequest(c) ||
-        !status.revisions.some((r) => r.commit_idxs.includes(c.commit_idx ?? 0)),
+      (c) => revision.commit_idxs.includes(c.commit_idx ?? 0) && isAddressRequest(c),
     );
-    const tabs = el('div', { className: 'publish-tabs', attrs: { role: 'tablist' } });
-    const panel = el('div', { className: 'publish-panel', attrs: { role: 'tabpanel' } });
-    body.append(tabs, panel);
-    active = status.revisions.find((r) => !r.published)?.id ?? status.revisions[0]?.id ?? '';
     let rendering = 0;
     const render = () => {
       const generation = ++rendering;
-      tabs.replaceChildren();
-      tabs.hidden = status.revisions.length + Number(unassigned.length > 0) <= 1;
-      for (const revision of status.revisions) {
-        const badge = revision.published
-          ? '✓'
-          : !revision.publishable
-            ? '⚠'
-            : `· ${forRevision(revision.id).length}`;
-        const tab = el('button', {
-          className: 'publish-tab',
-          text: `${revision.id} ${badge}`,
-          attrs: {
-            role: 'tab',
-            'aria-selected': String(active === revision.id),
-            title: revision.reason ?? '',
-          },
-        });
-        tab.onclick = () => {
-          active = revision.id;
-          render();
-        };
-        tabs.appendChild(tab);
-      }
-      if (unassigned.length) {
-        const tab = el('button', {
-          className: 'publish-tab',
-          text: `Not published · ${unassigned.length}`,
-          attrs: { role: 'tab', 'aria-selected': String(active === 'unassigned') },
-        });
-        tab.onclick = () => {
-          active = 'unassigned';
-          render();
-        };
-        tabs.appendChild(tab);
-      }
       panel.replaceChildren();
-      publishButton.hidden = active === 'unassigned';
-      if (active === 'unassigned') {
+      if (unassigned.length) {
         panel.appendChild(
           el('p', {
-            text: 'These comments are for the agent. Close this dialog and choose Submit To.. → Agent.',
+            className: 'submit-publish-note',
+            text: `${unassigned.length} ${unassigned.length === 1 ? 'comment stays' : 'comments stay'} in the review and ${unassigned.length === 1 ? 'is' : 'are'} printed on Finish.`,
           }),
         );
-        void this.renderSubmitComments(panel, unassigned);
-        return;
       }
-      const revision = status.revisions.find((r) => r.id === active);
-      if (!revision) {
-        return;
-      }
-      let state = this.publishTabStates.get(active);
+      let state = this.publishStates.get(revisionId);
       if (!state) {
         state = { action: 'comment', overall: '' };
-        this.publishTabStates.set(active, state);
+        this.publishStates.set(revisionId, state);
       }
       const tabState = state;
-      const comments = forRevision(active);
+      const comments = forRevision(revisionId);
       const updateButton = () => {
         publishButton.disabled =
           !!status.error ||
@@ -264,12 +253,8 @@ export class PublishDialogMethods {
           revision.published = true;
           comments.forEach((c) => this.publishedCommentKeys.add(commentKey(c)));
           this.publishedRevisionIds.add(revision.id);
-          const next = status.revisions.find((r) => r.publishable && !r.published);
-          if (!next) {
-            // Everything that can be published has been: there's nothing left to do here.
-            setTimeout(close, 1000);
-          }
-          active = next?.id ?? revision.id;
+          this.renderSeriesNav();
+          close();
         } catch (error) {
           tabState.error = `Failed to publish review: ${error instanceof Error ? error.message : error}`;
         } finally {

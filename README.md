@@ -92,7 +92,7 @@ Network exposure:
 
 Notes:
 
-- Submitted comments are written to stdout. When an agent runs `lrv`, that
+- Finish prints comments to stdout and ends lrv. When an agent runs `lrv`, that
   stdout is how the comments reach it, so the agent must not pipe, redirect,
   or background `lrv`'s output.
 - Every comment is also recorded in a SQLite database as it is made, so a
@@ -108,7 +108,7 @@ Notes:
 - For a local LLM pre-review, the agent should review the diff before starting
   `lrv`, write its findings as review notes JSON, and pass that file with
   `--review-notes-file`. The author can then Address, Reply, or Ignore those
-  local reviewer comments in the UI before submitting.
+  local reviewer comments in the UI before finishing.
 - Phabricator notes use `PHABRICATOR_API_KEY` or `PHABRICATOR_TOKEN`, falling back to the token in `~/.arcrc` (written by `moz-phab install-certificate`); set
   `PHABRICATOR_BASE_URL` or pass `--phab-base-url` for non-Mozilla instances.
 - `lrv --version` prints the current version and can warn if a newer release exists.
@@ -163,12 +163,18 @@ Delete removes a discussion thread and its agent replies; the agent receives a
 
 Agent replies are notes with `discussion_id` naming the root discussion
 (use `thread_id` from a follow-up event). Send them with `--add-notes`, not
-`--review-notes-file`. Submitting ends the review: comments go to the terminal
-that started lrv, and a pending listener reports `ended`.
+`--review-notes-file`. Finish ends the review: comments go to the terminal
+that started lrv, and a pending listener reports `ended`. Attached agents only handle discussions and never receive the final review.
+
+When Phabricator is available, **Publish D123** beside Finish follows the selected
+commit. It opens a dialog for that revision's verdict and overall comment.
+Publishing keeps the review open; the commit strip marks published revisions
+with ✓. Finish excludes published comments and includes the published URLs.
+Convert discussions to comments before Finish to keep them.
 
 ### Connect Agent
 
-Click **Connect Agent** beside Submit to start a local `claude` or `codex`
+Click **Connect Agent** beside Finish to start a local `claude` or `codex`
 CLI (installed and authenticated on the server machine). Choose a provider and
 optionally a model and effort; empty fields use the CLI defaults. **Perform
 initial review** posts findings before the agent starts listening for discussions.

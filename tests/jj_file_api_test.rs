@@ -346,8 +346,8 @@ fn make_state_from_patch(repo_dir: &std::path::Path, patch: &str) -> lrv::server
     let (shutdown_tx, _rx) = mpsc::channel::<()>(1);
     lrv::server::AppState {
         notes_version: Arc::new(tokio::sync::watch::channel(0).0),
-        agent: lrv::agent::AgentChannel::new(lrv::agent::lease_from_env()),
         agent_token: Arc::from("test-token"),
+        agent: lrv::agent::AgentChannel::new(lrv::agent::lease_from_env()),
         launcher: lrv::launch::AgentLauncher::new(),
         raw_diffs: Arc::new(Vec::new()),
         diffs: Arc::new(vec![parsed]),
@@ -361,10 +361,10 @@ fn make_state_from_patch(repo_dir: &std::path::Path, patch: &str) -> lrv::server
             git_branch: None,
             title: None,
             is_public: false,
+            launch_available: true,
             claude_skill_installed: false,
             comment_store_error: None,
             phabricator_available: false,
-            launch_available: true,
         }),
         old_caches: Arc::new(vec![tokio::sync::Mutex::new(
             std::collections::HashMap::new(),

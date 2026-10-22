@@ -550,6 +550,9 @@ var DiscussionManager = class {
 	discussions = [];
 	listeners = [];
 	currentCommitIdx = null;
+	getOpenThreadCount() {
+		return this.discussions.filter((d) => !d.thread_id).length;
+	}
 	getForFile(file) {
 		return this.discussions.filter((d) => !d.thread_id && d.file === file && (this.currentCommitIdx === null || d.commit_idx === this.currentCommitIdx));
 	}
@@ -11558,7 +11561,7 @@ const KEYBOARD_SHORTCUTS = [
 	{
 		keys: ["Mod+Shift+Enter"],
 		action: "submitReview",
-		description: "Submit review"
+		description: "Finish review"
 	},
 	{
 		keys: ["?"],
@@ -12935,7 +12938,7 @@ var DialogMethods = class {
 			id: "auto-close-tab",
 			name: "auto_close_tab",
 			checked: currentAutoCloseTab
-		} }), el("span", { text: "Automatically close tab after submitting review" })])]);
+		} }), el("span", { text: "Automatically close tab after finishing review" })])]);
 		const wordWrapField = el("div", { className: "settings-field" }, [el("label", {
 			attrs: { for: "word-wrap" },
 			text: "Word Wrap"
@@ -13017,20 +13020,19 @@ var DialogMethods = class {
 	async showSubmitConfirmation() {
 		const submissionComments = this.commentManager.getComments().filter((c) => !this.publishedCommentKeys.has(commentKey(c)));
 		const comments = submissionComments;
-		const submitLabel = "Submit Review";
+		const submitLabel = "Finish";
 		let submit = () => {};
-		const footerContent = [el("button", {
-			className: "btn-secondary cancel-submit-btn",
-			text: "Cancel"
-		}), el("button", {
-			className: "btn-primary confirm-submit-btn",
-			text: submitLabel
-		})];
 		const { overlay, modal, body, footer, close } = openModal({
-			title: submissionComments.length === 0 ? "Submit Review" : `Review Comments (${submissionComments.length})`,
+			title: "Finish review",
 			titleId: "submit-title",
 			modalClass: "submit-review-modal",
-			footerContent,
+			footerContent: [el("button", {
+				className: "btn-secondary cancel-submit-btn",
+				text: "Cancel"
+			}), el("button", {
+				className: "btn-primary confirm-submit-btn",
+				text: submitLabel
+			})],
 			onKeydown: (e) => {
 				if (e.key === "Enter" && e.shiftKey && (e.ctrlKey || e.metaKey)) {
 					e.preventDefault();
@@ -13039,19 +13041,25 @@ var DialogMethods = class {
 			}
 		});
 		if (submissionComments.length === 0) {
-			const noCommentsMsg = el("p", { text: "No comments. Submit to approve this review." });
+			const noCommentsMsg = el("p", { text: "No comments. Finish to approve this review." });
 			noCommentsMsg.style.padding = "20px";
 			noCommentsMsg.style.textAlign = "center";
 			noCommentsMsg.style.color = "var(--text-secondary)";
 			body.appendChild(noCommentsMsg);
 		}
+		const discussionCount = this.discussionManager.getOpenThreadCount();
+		if (discussionCount) body.appendChild(el("p", {
+			className: "submit-discussion-warning",
+			text: `${discussionCount} ${discussionCount === 1 ? "discussion" : "discussions"} will be discarded. Convert them first to keep them.`
+		}));
+		if (!submissionComments.length) body.appendChild(el("p", { text: "Comments will be printed to the terminal and lrv will exit." }));
 		const summaryField = el("div", { className: "submit-summary-field" }, [el("label", {
 			className: "submit-summary-label",
 			text: "Overall feedback"
 		})]);
 		const summaryInput = el("textarea", {
 			className: "submit-summary-input",
-			attrs: { placeholder: "Final global comment before submit…" }
+			attrs: { placeholder: "Final global comment before finishing…" }
 		});
 		summaryInput.value = this.overallReviewComment;
 		summaryField.appendChild(summaryInput);
@@ -13072,7 +13080,7 @@ var DialogMethods = class {
 				el("div", { className: "submit-review-summary-item" }, [el("strong", { text: fileCount }), el("span", { text: fileCount === 1 ? "location" : "locations" })]),
 				el("div", {
 					className: "submit-review-summary-hint",
-					text: "These comments will be sent to the agent when you submit."
+					text: "Comments will be printed to the terminal and lrv will exit."
 				})
 			]));
 		}
@@ -13083,7 +13091,7 @@ var DialogMethods = class {
 			errorBox.hidden = true;
 			this.overallReviewComment = summaryInput.value.trim();
 			submitBtn.disabled = true;
-			submitBtn.textContent = "Submitting...";
+			submitBtn.textContent = "Finishing…";
 			try {
 				const resp = await fetch("/api/complete", {
 					method: "POST",
@@ -13104,18 +13112,18 @@ var DialogMethods = class {
 				this.updateDecorations();
 				this.renderFileList();
 				if (this.currentFileIsCommit) this.loadCommitView();
-				submitBtn.textContent = "Submitted!";
+				submitBtn.textContent = "Finished";
 				const submitReviewBtn = document.getElementById("submit-review");
 				if (submitReviewBtn) {
 					submitReviewBtn.disabled = true;
-					submitReviewBtn.textContent = "Review Submitted";
+					submitReviewBtn.textContent = "Review finished";
 				}
 				setTimeout(() => {
 					close();
 					if (this.config.auto_close_tab) window.close();
 				}, 1e3);
 			} catch (error) {
-				errorBox.textContent = `Failed to submit review: ${error instanceof Error ? error.message : error}`;
+				errorBox.textContent = `Failed to finish review: ${error instanceof Error ? error.message : error}`;
 				errorBox.hidden = false;
 				submitBtn.disabled = false;
 				submitBtn.textContent = submitLabel;
@@ -13235,14 +13243,29 @@ var DialogMethods = class {
 //#region web/src/publish-dialog-methods.ts
 var PublishDialogMethods = class {
 	prefetchPhabricator() {
-		this.phabStatus ??= fetchJSON("/api/phabricator").catch((error) => {
+		this.phabStatus ??= fetchJSON("/api/phabricator").then((status) => {
+			this.phabRevisionStatus = status;
+			status.revisions.filter((r) => r.published).forEach((r) => this.publishedRevisionIds.add(r.id));
+			this.renderSeriesNav();
+			return status;
+		}).catch((error) => {
 			this.phabStatus = null;
 			throw error;
 		});
 		return this.phabStatus;
 	}
-	async showPublishDialog() {
-		let active = "";
+	updatePublishButton() {
+		const button = document.getElementById("publish-commit");
+		if (!button) return;
+		const revision = this.phabRevisionStatus?.revisions.find((r) => r.commit_idxs.includes(this.currentCommitIdx));
+		button.hidden = !revision;
+		if (!revision) return;
+		const published = this.publishedRevisionIds.has(revision.id);
+		button.textContent = published ? `Published ${revision.id} ✓` : `Publish ${revision.id}`;
+		button.disabled = published || !revision.publishable || !!this.phabRevisionStatus?.error;
+		button.title = this.phabRevisionStatus?.error ?? revision.reason ?? "";
+	}
+	async showPublishDialog(revisionId) {
 		let publish = async () => {};
 		const closeButton = el("button", {
 			className: "btn-secondary",
@@ -13287,73 +13310,32 @@ var PublishDialogMethods = class {
 			const revision = status.revisions.find((r) => r.id === id);
 			return originals.filter((c) => revision.commit_idxs.includes(c.commit_idx ?? 0) && !isAddressRequest(c));
 		};
-		const unassigned = originals.filter((c) => isAddressRequest(c) || !status.revisions.some((r) => r.commit_idxs.includes(c.commit_idx ?? 0)));
-		const tabs = el("div", {
-			className: "publish-tabs",
-			attrs: { role: "tablist" }
-		});
-		const panel = el("div", {
-			className: "publish-panel",
-			attrs: { role: "tabpanel" }
-		});
-		body.append(tabs, panel);
-		active = status.revisions.find((r) => !r.published)?.id ?? status.revisions[0]?.id ?? "";
+		const panel = el("div", { className: "publish-panel" });
+		body.appendChild(panel);
+		const revision = status.revisions.find((r) => r.id === revisionId);
+		if (!revision) {
+			panel.appendChild(el("p", { text: "Revision unavailable." }));
+			return;
+		}
+		const unassigned = originals.filter((c) => revision.commit_idxs.includes(c.commit_idx ?? 0) && isAddressRequest(c));
 		let rendering = 0;
 		const render = () => {
 			const generation = ++rendering;
-			tabs.replaceChildren();
-			tabs.hidden = status.revisions.length + Number(unassigned.length > 0) <= 1;
-			for (const revision of status.revisions) {
-				const badge = revision.published ? "✓" : !revision.publishable ? "⚠" : `· ${forRevision(revision.id).length}`;
-				const tab = el("button", {
-					className: "publish-tab",
-					text: `${revision.id} ${badge}`,
-					attrs: {
-						role: "tab",
-						"aria-selected": String(active === revision.id),
-						title: revision.reason ?? ""
-					}
-				});
-				tab.onclick = () => {
-					active = revision.id;
-					render();
-				};
-				tabs.appendChild(tab);
-			}
-			if (unassigned.length) {
-				const tab = el("button", {
-					className: "publish-tab",
-					text: `Not published · ${unassigned.length}`,
-					attrs: {
-						role: "tab",
-						"aria-selected": String(active === "unassigned")
-					}
-				});
-				tab.onclick = () => {
-					active = "unassigned";
-					render();
-				};
-				tabs.appendChild(tab);
-			}
 			panel.replaceChildren();
-			publishButton.hidden = active === "unassigned";
-			if (active === "unassigned") {
-				panel.appendChild(el("p", { text: "These comments are for the agent. Close this dialog and choose Submit To.. → Agent." }));
-				this.renderSubmitComments(panel, unassigned);
-				return;
-			}
-			const revision = status.revisions.find((r) => r.id === active);
-			if (!revision) return;
-			let state = this.publishTabStates.get(active);
+			if (unassigned.length) panel.appendChild(el("p", {
+				className: "submit-publish-note",
+				text: `${unassigned.length} ${unassigned.length === 1 ? "comment stays" : "comments stay"} in the review and ${unassigned.length === 1 ? "is" : "are"} printed on Finish.`
+			}));
+			let state = this.publishStates.get(revisionId);
 			if (!state) {
 				state = {
 					action: "comment",
 					overall: ""
 				};
-				this.publishTabStates.set(active, state);
+				this.publishStates.set(revisionId, state);
 			}
 			const tabState = state;
-			const comments = forRevision(active);
+			const comments = forRevision(revisionId);
 			const updateButton = () => {
 				publishButton.disabled = !!status.error || !revision.publishable || revision.published || !!tabState.busy || !comments.length && !tabState.overall.trim() && tabState.action === "comment";
 				publishButton.textContent = revision.published ? "Published ✓" : tabState.busy ? "Publishing…" : `Publish ${revision.id}`;
@@ -13456,9 +13438,8 @@ var PublishDialogMethods = class {
 					revision.published = true;
 					comments.forEach((c) => this.publishedCommentKeys.add(commentKey(c)));
 					this.publishedRevisionIds.add(revision.id);
-					const next = status.revisions.find((r) => r.publishable && !r.published);
-					if (!next) setTimeout(close, 1e3);
-					active = next?.id ?? revision.id;
+					this.renderSeriesNav();
+					close();
 				} catch (error) {
 					tabState.error = `Failed to publish review: ${error instanceof Error ? error.message : error}`;
 				} finally {
@@ -13531,6 +13512,7 @@ var SeriesMethods = class {
 		return row;
 	}
 	renderSeriesNav() {
+		this.updatePublishButton();
 		const container = document.getElementById("commit-strip");
 		const resizer = document.getElementById("commit-strip-resizer");
 		if (!container) return;
@@ -13561,6 +13543,11 @@ var SeriesMethods = class {
 				text: msg
 			});
 			titleRow.appendChild(title);
+			const revision = this.phabRevisionStatus?.revisions.find((r) => r.commit_idxs.includes(commit.idx));
+			if (revision) titleRow.appendChild(el("span", {
+				className: "series-revision-badge",
+				text: `${revision.id}${this.publishedRevisionIds.has(revision.id) ? " ✓" : ""}`
+			}));
 			if (commitCommentCount > 0) titleRow.appendChild(el("span", {
 				className: "series-comment-badge",
 				text: String(commitCommentCount)
@@ -14377,8 +14364,9 @@ var MonacoApp = class {
 	agentAttached = false;
 	publishedCommentKeys = /* @__PURE__ */ new Set();
 	publishedRevisionIds = /* @__PURE__ */ new Set();
-	publishTabStates = /* @__PURE__ */ new Map();
+	publishStates = /* @__PURE__ */ new Map();
 	phabStatus = null;
+	phabRevisionStatus = null;
 	commentManager;
 	reviewNoteManager;
 	discussionManager;
@@ -14787,55 +14775,14 @@ var MonacoApp = class {
 		});
 		$$1("#help-btn")?.addEventListener("click", () => this.showKeyboardHelp());
 		this.setupConnectAgent();
-		const submitBtn = $$1("#submit-review");
-		const menu = $$1("#submit-menu");
-		const menuItems = Array.from(menu.querySelectorAll("[role=\"menuitem\"]"));
-		const hasMenu = !!this.context.phabricator_available;
-		if (hasMenu) {
-			submitBtn.textContent = "Submit To..";
-			submitBtn.setAttribute("aria-haspopup", "menu");
-			submitBtn.setAttribute("aria-expanded", "false");
-		}
-		const closeMenu = () => {
-			menu.hidden = true;
-			submitBtn.setAttribute("aria-expanded", "false");
-		};
-		submitBtn.addEventListener("click", () => {
-			if (!hasMenu) {
-				this.showSubmitConfirmation();
-				return;
-			}
-			menu.hidden = !menu.hidden;
-			submitBtn.setAttribute("aria-expanded", String(!menu.hidden));
-			if (!menu.hidden) {
-				menuItems[0]?.focus();
-				this.prefetchPhabricator().catch(() => {});
-			}
-		});
-		menu.addEventListener("keydown", (event) => {
-			if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
-			event.preventDefault();
-			const step = event.key === "ArrowDown" ? 1 : -1;
-			const current = menuItems.indexOf(document.activeElement);
-			menuItems[(current + step + menuItems.length) % menuItems.length]?.focus();
-		});
-		document.addEventListener("click", (event) => {
-			if (!(event.target instanceof Node) || !submitBtn.parentElement?.contains(event.target)) closeMenu();
-		});
-		document.addEventListener("keydown", (event) => {
-			if (event.key === "Escape" && !menu.hidden) {
-				closeMenu();
-				submitBtn.focus();
-			}
-		});
-		$$1("#send-to-agent")?.addEventListener("click", () => {
-			closeMenu();
+		$$1("#submit-review")?.addEventListener("click", () => {
 			this.showSubmitConfirmation();
 		});
-		$$1("#publish-to-phabricator")?.addEventListener("click", () => {
-			closeMenu();
-			this.showPublishDialog();
+		$$1("#publish-commit")?.addEventListener("click", () => {
+			const revision = this.phabRevisionStatus?.revisions.find((r) => r.commit_idxs.includes(this.currentCommitIdx));
+			if (revision) this.showPublishDialog(revision.id);
 		});
+		if (this.context.phabricator_available) this.prefetchPhabricator().catch((error) => console.error(error));
 		$$1("#toggle-view")?.addEventListener("click", () => {
 			this.toggleView();
 		});
