@@ -2269,43 +2269,6 @@ body {
   display: none;
 }
 
-.submit-split {
-  position: relative;
-  display: flex;
-}
-
-/* Pseudo-element, so the arrow isn't part of the button's text. */
-#submit-review[aria-haspopup='menu']::after {
-  content: '▾';
-  margin-left: 6px;
-}
-
-#submit-menu {
-  position: absolute;
-  top: 100%;
-  right: 0;
-  z-index: 100;
-  min-width: 140px;
-  padding: 4px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-color);
-  box-shadow: var(--shadow-md);
-}
-
-#submit-menu button {
-  display: block;
-  width: 100%;
-  text-align: left;
-  background: var(--bg-elevated);
-  color: var(--text-primary);
-}
-
-#submit-menu button:hover,
-#submit-menu button:focus-visible {
-  background: var(--bg-secondary);
-}
-
-.publish-tabs,
 .publish-verdict {
   display: flex;
   gap: 4px;
@@ -2313,11 +2276,6 @@ body {
   flex-wrap: wrap;
 }
 
-.publish-tabs[hidden] {
-  display: none;
-}
-
-.publish-tab,
 .publish-verdict button {
   background: var(--bg-secondary);
   color: var(--text-primary);
@@ -2326,7 +2284,6 @@ body {
   cursor: pointer;
 }
 
-.publish-tab[aria-selected='true'],
 .publish-verdict button[aria-pressed='true'] {
   border-color: var(--accent-color);
   background: var(--bg-elevated);
@@ -2500,4 +2457,44 @@ body:not(.agent-attached) .discuss-hint {
 }
 #agent-launch-error:empty {
   display: none;
+}
+
+.series-revision-badge {
+  color: var(--text-secondary);
+  white-space: nowrap;
+  font-size: 11px;
+}
+
+#publish-commit.verifying {
+  background: var(--text-tertiary);
+}
+
+#publish-commit.verifying::before {
+  content: '';
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: 6px;
+  vertical-align: -1px;
+  border: 2px solid color-mix(in srgb, white, transparent 60%);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: fetch-spin 0.8s linear infinite;
+}
+
+/* The state colour stays when the button is disabled; dimming marks it unavailable. */
+#publish-commit.revision-accepted {
+  background: var(--success-color);
+}
+
+#publish-commit.revision-needs-review {
+  background: #2f81f7;
+}
+
+#publish-commit.revision-waiting {
+  background: var(--text-tertiary);
+}
+
+#publish-commit:disabled:not(.verifying) {
+  opacity: 0.6;
 }

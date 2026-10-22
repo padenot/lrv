@@ -27,6 +27,10 @@ export class DiscussionManager {
   private listeners: Array<() => void> = [];
   currentCommitIdx: number | null = null;
 
+  getOpenThreadCount(): number {
+    return this.discussions.filter((d) => !d.thread_id).length;
+  }
+
   getForFile(file: string): Discussion[] {
     return this.discussions.filter(
       (d) =>

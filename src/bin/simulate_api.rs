@@ -71,6 +71,7 @@ fn get_project_context(cwd: Option<&PathBuf>) -> lrv::types::ProjectContext {
         claude_skill_installed: false,
         comment_store_error: None,
         phabricator_available: false,
+        phabricator_revisions: Vec::new(),
     }
 }
 

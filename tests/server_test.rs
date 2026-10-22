@@ -35,6 +35,7 @@ fn test_app_state_construction() {
         claude_skill_installed: false,
         comment_store_error: None,
         phabricator_available: false,
+        phabricator_revisions: Vec::new(),
     };
 
     let (shutdown_tx, _rx) = tokio::sync::mpsc::channel::<()>(1);
@@ -96,6 +97,7 @@ fn test_create_router() {
         claude_skill_installed: false,
         comment_store_error: None,
         phabricator_available: false,
+        phabricator_revisions: Vec::new(),
     };
 
     let (shutdown_tx, _rx) = tokio::sync::mpsc::channel::<()>(1);
@@ -157,6 +159,7 @@ fn review_note_state() -> lrv::server::AppState {
         claude_skill_installed: false,
         comment_store_error: None,
         phabricator_available: false,
+        phabricator_revisions: Vec::new(),
     };
 
     let (shutdown_tx, _rx) = tokio::sync::mpsc::channel::<()>(1);

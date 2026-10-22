@@ -5,8 +5,9 @@ description: show diffs for human code review in lrv
 
 # lrv
 
-Run `lrv` to open a diff in a browser UI for code review. The user submits
-comments which are returned as JSON or text. Apply all comments as code fixes.
+Run `lrv` to open a diff in a browser UI for code review. The user finishes
+the review and comments are returned as JSON or text. Apply all comments as
+code fixes.
 
 ## NEVER pipe or redirect lrv's output
 
@@ -85,7 +86,7 @@ lrv --phab-mcp-comments /tmp/phab.md ...
 - Never pipe, redirect, background, or capture `lrv`'s output. Read the comments
   from its stdout in the tool result.
 - Always print the URL(s) so the user can open them.
-- Wait for the user to submit comments.
+- Wait for the user to finish the review.
 - Plan one fix per comment before touching any code. Never skip a comment.
 - Apply all fixes directly. No explanations or commentary.
 - A comment with `in_reply_to` responds to a review note (`author`, `body`,
@@ -149,7 +150,7 @@ The output defaults to JSON (`--format json`), with a `status` field:
     deleted. Stop any work on that thread and don't reply; a late reply is
     skipped.
 - `timeout`: run `lrv --listen` again straight away.
-- `ended`: stop and tell the user the review is over. Submitted comments went
+- `ended`: stop and tell the user the review is over. Final comments went
   to whoever started lrv, not the listener. To apply them, ask the user to
   paste them or name a session from `lrv --list-reviews`.
 

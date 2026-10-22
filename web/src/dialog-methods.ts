@@ -25,6 +25,7 @@ export class DialogMethods {
   declare config: AppContext['config'];
   declare isInline: boolean;
   declare currentFileIndex: number;
+  declare discussionManager: AppContext['discussionManager'];
   declare commentManager: AppContext['commentManager'];
   declare clearPersistedComments: () => Promise<void>;
   declare updateDecorations: () => void;
@@ -233,7 +234,7 @@ export class DialogMethods {
             checked: currentAutoCloseTab,
           },
         }),
-        el('span', { text: 'Automatically close tab after submitting review' }),
+        el('span', { text: 'Automatically close tab after finishing review' }),
       ]),
     ]);
 
@@ -357,7 +358,7 @@ export class DialogMethods {
       .getComments()
       .filter((c) => !this.publishedCommentKeys.has(commentKey(c)));
     const comments = submissionComments;
-    const submitLabel = 'Submit Review';
+    const submitLabel = 'Finish';
     let submit: () => void | Promise<void> = () => {};
 
     const footerContent = [
@@ -366,10 +367,7 @@ export class DialogMethods {
     ];
 
     const { overlay, modal, body, footer, close } = openModal({
-      title:
-        submissionComments.length === 0
-          ? 'Submit Review'
-          : `Review Comments (${submissionComments.length})`,
+      title: 'Finish review',
       titleId: 'submit-title',
       modalClass: 'submit-review-modal',
       footerContent,
@@ -382,11 +380,26 @@ export class DialogMethods {
     });
 
     if (submissionComments.length === 0) {
-      const noCommentsMsg = el('p', { text: 'No comments. Submit to approve this review.' });
+      const noCommentsMsg = el('p', { text: 'No comments. Finish to approve this review.' });
       noCommentsMsg.style.padding = '20px';
       noCommentsMsg.style.textAlign = 'center';
       noCommentsMsg.style.color = 'var(--text-secondary)';
       body.appendChild(noCommentsMsg);
+    }
+
+    const discussionCount = this.discussionManager.getOpenThreadCount();
+    if (discussionCount) {
+      body.appendChild(
+        el('p', {
+          className: 'submit-discussion-warning',
+          text: `${discussionCount} ${discussionCount === 1 ? 'discussion' : 'discussions'} will be discarded. Convert them first to keep them.`,
+        }),
+      );
+    }
+    if (!submissionComments.length) {
+      body.appendChild(
+        el('p', { text: 'Comments will be printed to the terminal and lrv will exit.' }),
+      );
     }
 
     const summaryField = el('div', { className: 'submit-summary-field' }, [
@@ -394,7 +407,7 @@ export class DialogMethods {
     ]);
     const summaryInput = el('textarea', {
       className: 'submit-summary-input',
-      attrs: { placeholder: 'Final global comment before submit…' },
+      attrs: { placeholder: 'Final global comment before finishing…' },
     }) as HTMLTextAreaElement;
     summaryInput.value = this.overallReviewComment;
     summaryField.appendChild(summaryInput);
@@ -432,7 +445,7 @@ export class DialogMethods {
           ]),
           el('div', {
             className: 'submit-review-summary-hint',
-            text: 'These comments will be sent to the agent when you submit.',
+            text: 'Comments will be printed to the terminal and lrv will exit.',
           }),
         ]),
       );
@@ -448,7 +461,7 @@ export class DialogMethods {
       errorBox.hidden = true;
       this.overallReviewComment = summaryInput.value.trim();
       submitBtn.disabled = true;
-      submitBtn.textContent = 'Submitting...';
+      submitBtn.textContent = 'Finishing…';
 
       try {
         const resp = await fetch('/api/complete', {
@@ -474,13 +487,13 @@ export class DialogMethods {
           this.loadCommitView();
         }
 
-        submitBtn.textContent = 'Submitted!';
+        submitBtn.textContent = 'Finished';
         const submitReviewBtn = document.getElementById(
           'submit-review',
         ) as HTMLButtonElement | null;
         if (submitReviewBtn) {
           submitReviewBtn.disabled = true;
-          submitReviewBtn.textContent = 'Review Submitted';
+          submitReviewBtn.textContent = 'Review finished';
         }
 
         setTimeout(() => {
@@ -490,7 +503,7 @@ export class DialogMethods {
           }
         }, 1000);
       } catch (error) {
-        errorBox.textContent = `Failed to submit review: ${error instanceof Error ? error.message : error}`;
+        errorBox.textContent = `Failed to finish review: ${error instanceof Error ? error.message : error}`;
         errorBox.hidden = false;
         submitBtn.disabled = false;
         submitBtn.textContent = submitLabel;

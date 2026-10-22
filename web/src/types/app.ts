@@ -55,13 +55,15 @@ export type PhabRevisionStatus = {
   commit_idxs: number[];
   own: boolean;
   closed: boolean;
+  status?: string | null;
+  status_name?: string | null;
   publishable: boolean;
   reason?: string;
   published: boolean;
 };
 
 export type PhabStatus = { user: string; error?: string; revisions: PhabRevisionStatus[] };
-export type PublishTabState = {
+export type PublishState = {
   action: ReviewAction;
   overall: string;
   error?: string;
@@ -77,6 +79,7 @@ export type AppContextData = {
   claude_skill_installed?: boolean;
   comment_store_error?: string | null;
   phabricator_available?: boolean;
+  phabricator_revisions?: (string | null)[];
 };
 
 export type UserTheme = {
