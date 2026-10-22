@@ -99,6 +99,8 @@ pub struct ReplyTarget {
 pub struct ReviewNote {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub discussion_id: Option<String>,
     pub file: String,
     pub line: CommentLine,
     pub side: Side,
@@ -184,6 +186,7 @@ impl ReviewNote {
             date,
             source_url,
             commit_idx,
+            discussion_id: None,
             read_only: true,
         }
     }
@@ -311,9 +314,44 @@ pub fn assign_note_ids(notes: &mut [ReviewNote]) {
     }
 }
 
+/// Format server timestamps using the same clock as discussion creation.
+pub fn rfc3339_utc(time: std::time::SystemTime) -> String {
+    let elapsed = time
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    let seconds = elapsed.as_secs();
+    let days = (seconds / 86400) as i64 + 719468;
+    let era = days / 146097;
+    let doe = days - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let mut year = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = mp + if mp < 10 { 3 } else { -9 };
+    year += i64::from(month <= 2);
+    format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}.{:03}Z",
+        seconds / 3600 % 24,
+        seconds / 60 % 60,
+        seconds % 60,
+        elapsed.subsec_millis()
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn server_timestamp_format() {
+        use std::time::{Duration, UNIX_EPOCH};
+        assert_eq!(rfc3339_utc(UNIX_EPOCH), "1970-01-01T00:00:00.000Z");
+        assert_eq!(
+            rfc3339_utc(UNIX_EPOCH + Duration::from_millis(1709210096789)),
+            "2024-02-29T12:34:56.789Z"
+        );
+    }
 
     fn note(file: &str, commit_idx: Option<usize>) -> ReviewNote {
         ReviewNote {
@@ -326,6 +364,7 @@ mod tests {
             date: None,
             source_url: None,
             commit_idx,
+            discussion_id: None,
             read_only: false,
         }
     }

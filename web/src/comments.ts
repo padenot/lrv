@@ -32,11 +32,11 @@ export function commentDisplayText(comment: ReviewComment): string {
   return `Address review comment${author ? ` from ${author}` : ''}`;
 }
 
-export function commentStartLine(comment: ReviewComment): number {
+export function commentStartLine(comment: Pick<ReviewComment, 'line'>): number {
   return Array.isArray(comment.line) ? comment.line[0] : comment.line;
 }
 
-export function commentEndLine(comment: ReviewComment): number {
+export function commentEndLine(comment: Pick<ReviewComment, 'line'>): number {
   return Array.isArray(comment.line) ? comment.line[1] : comment.line;
 }
 

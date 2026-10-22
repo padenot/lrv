@@ -1,3 +1,4 @@
+use crate::agent::{Discussion, DiscussionRequest};
 use crate::config::UserConfig;
 use crate::repository;
 use crate::skill::{skill_install_paths, EMBEDDED_SKILL};
@@ -27,7 +28,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 use tokio::sync::{mpsc, Mutex, Semaphore};
 use tokio::task::JoinSet;
 use tokio_stream::{wrappers::WatchStream, StreamExt};
@@ -58,6 +59,7 @@ pub struct AppState {
     pub overall_comment: Arc<Mutex<Option<String>>>,
     pub notes_version: Arc<tokio::sync::watch::Sender<u64>>,
     pub agent_token: Arc<str>,
+    pub agent: Arc<crate::agent::AgentChannel>,
     pub review_notes: Arc<Mutex<Vec<ReviewNote>>>,
     pub shutdown_tx: Arc<Mutex<Option<mpsc::Sender<()>>>>,
     pub config: Arc<Mutex<UserConfig>>,
@@ -804,6 +806,11 @@ pub fn create_router(state: AppState, enable_trace: bool) -> Router {
         .route("/api/comments/sync", post(sync_comments))
         .route("/api/events", get(events))
         .route(
+            "/api/discussions",
+            get(get_discussions).post(add_discussion),
+        )
+        .route("/api/agent/events", get(agent_events))
+        .route(
             "/api/review-notes",
             get(get_review_notes).post(add_review_note),
         )
@@ -1478,7 +1485,12 @@ async fn events(
             .event("notes")
             .data(serde_json::json!({"version": version}).to_string()))
     });
-    Sse::new(stream).keep_alive(KeepAlive::default())
+    let presence = WatchStream::new(state.agent.presence()).map(|attached| {
+        Ok(Event::default()
+            .event("agent")
+            .data(serde_json::json!({"attached": attached}).to_string()))
+    });
+    Sse::new(stream.merge(presence)).keep_alive(KeepAlive::default())
 }
 
 async fn get_review_notes(State(state): State<AppState>) -> Json<Vec<ReviewNote>> {
@@ -1486,23 +1498,92 @@ async fn get_review_notes(State(state): State<AppState>) -> Json<Vec<ReviewNote>
     Json(notes.clone())
 }
 
+async fn get_discussions(State(state): State<AppState>) -> Json<Vec<Discussion>> {
+    Json(state.agent.discussions())
+}
+
+async fn add_discussion(
+    State(state): State<AppState>,
+    Json(mut req): Json<DiscussionRequest>,
+) -> Response {
+    if state.context.is_public {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    if !req.is_valid() {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+    if req.thread_id.is_none() {
+        if req.commit_idx.is_some_and(|idx| idx >= state.diffs.len()) {
+            return StatusCode::BAD_REQUEST.into_response();
+        }
+        if state.is_series && state.diffs.len() == 1 && req.commit_idx.is_none() {
+            req.commit_idx = Some(0);
+        }
+    }
+    if !state.agent.attached() {
+        return StatusCode::CONFLICT.into_response();
+    }
+    match state.agent.add_discussion(req) {
+        Some(discussion) => Json(discussion).into_response(),
+        None => StatusCode::BAD_REQUEST.into_response(),
+    }
+}
+
+fn agent_authorized(state: &AppState, headers: &HeaderMap) -> bool {
+    headers
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        == Some(format!("Bearer {}", state.agent_token).as_str())
+}
+
+#[derive(Deserialize)]
+struct AgentEventsQuery {
+    after: Option<u64>,
+    timeout: Option<u64>,
+}
+
+async fn agent_events(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<AgentEventsQuery>,
+) -> Response {
+    if !agent_authorized(&state, &headers) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let timeout = Duration::from_secs(query.timeout.unwrap_or(60).clamp(1, 600));
+    Json(state.agent.wait(query.after.unwrap_or(0), timeout).await).into_response()
+}
+
 async fn add_review_note(
     State(state): State<AppState>,
     headers: HeaderMap,
     Json(mut batch): Json<Vec<ReviewNote>>,
 ) -> Response {
-    if headers
-        .get(header::AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
-        != Some(format!("Bearer {}", state.agent_token).as_str())
-    {
+    if !agent_authorized(&state, &headers) {
         return StatusCode::UNAUTHORIZED.into_response();
     }
+    state.agent.touch();
     if batch
         .iter()
         .any(|note| !note.is_valid() || note.commit_idx.is_some_and(|idx| idx >= state.diffs.len()))
     {
         return StatusCode::BAD_REQUEST.into_response();
+    }
+    for note in &mut batch {
+        if let Some(id) = &note.discussion_id {
+            let Some(root) = state.agent.root_discussion(id) else {
+                return StatusCode::BAD_REQUEST.into_response();
+            };
+            note.file = root.file;
+            note.line = root.line;
+            note.side = root.side;
+            note.commit_idx = root.commit_idx;
+            note.read_only = true;
+            note.date = Some(rfc3339_utc(SystemTime::now()));
+            if note.id.is_none() {
+                note.id = Some(state.agent.reply_id());
+            }
+        }
     }
     tag_single_commit_notes(&mut batch, state.is_series, state.diffs.len());
     assign_note_ids(&mut batch);

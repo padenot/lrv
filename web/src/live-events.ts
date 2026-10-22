@@ -1,7 +1,10 @@
 import { fetchJSON } from './api';
-import type { ReviewNote, ReviewNoteManager } from './review-notes';
+import type { ReviewNote } from './review-notes';
+import type { AppContext } from './types/app';
 
-export function startLiveEvents(app: { reviewNoteManager: ReviewNoteManager }): void {
+export function startLiveEvents(
+  app: Pick<AppContext, 'reviewNoteManager' | 'setAgentAttached'>,
+): void {
   const source = new EventSource('/api/events');
   let pending: ReviewNote[] | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -13,7 +16,7 @@ export function startLiveEvents(app: { reviewNoteManager: ReviewNoteManager }): 
     if (!pending) {
       return;
     }
-    if (document.querySelector('.review-note-reply')) {
+    if (document.querySelector('.review-note-reply, .discussion-reply')) {
       timer = setTimeout(merge, 500);
       return;
     }
@@ -42,6 +45,10 @@ export function startLiveEvents(app: { reviewNoteManager: ReviewNoteManager }): 
     }
   };
 
+  source.addEventListener('agent', (e) =>
+    app.setAgentAttached(JSON.parse(e.data).attached === true),
+  );
+  source.addEventListener('error', () => app.setAgentAttached(false));
   source.addEventListener('notes', () => void refresh());
   window.addEventListener(
     'pagehide',

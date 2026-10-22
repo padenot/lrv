@@ -1,24 +1,24 @@
 mod config;
 mod diff;
 mod github;
-mod output;
 mod phab_mcp;
 mod phabricator;
 mod server;
 mod skill;
 mod store;
 mod themes;
-mod types;
 
 use anyhow::{Context, Result};
 use clap::{ArgAction, Parser};
-use lrv::{discovery, netutil};
+use lrv::{agent, discovery, netutil, output, types};
 use moz_cli_version_check::VersionChecker;
 use std::collections::HashMap;
 use std::env;
 use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::{mpsc, Mutex, Notify};
 use tracing_subscriber::{filter::Targets, layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -268,6 +268,16 @@ struct Args {
     /// Add review notes to the running review for this repository (- reads stdin)
     #[arg(long, value_name = "PATH|-")]
     add_notes: Option<String>,
+
+    /// Wait for discussion comments from the running review for this repository and
+    /// print them (one listener per review: the read position is shared)
+    #[arg(long, conflicts_with = "add_notes")]
+    listen: bool,
+
+    /// Seconds --listen waits before reporting that nothing happened
+    #[arg(long, value_name = "SECS", default_value_t = 90, requires = "listen",
+          value_parser = clap::value_parser!(u64).range(1..=600))]
+    listen_timeout: u64,
 
     /// List review sessions stored in the local comment database and exit
     #[arg(long)]
@@ -580,22 +590,95 @@ fn load_review_notes_file(path: &str) -> Result<Vec<ReviewNote>> {
     Ok(notes)
 }
 
-async fn add_notes_to_review(path: &str) -> Result<()> {
+fn load_startup_review_notes_file(path: &str) -> Result<Vec<ReviewNote>> {
     let notes = load_review_notes_file(path)?;
+    validate_startup_review_notes(&notes)?;
+    Ok(notes)
+}
+
+fn validate_startup_review_notes(notes: &[ReviewNote]) -> Result<()> {
+    if let Some(note) = notes.iter().find(|note| note.discussion_id.is_some()) {
+        anyhow::bail!(
+            "Invalid review note for {}:{}: discussion_id is only accepted by a running review (--add-notes / POST /api/review-notes)",
+            note.file,
+            note.line
+        );
+    }
+    Ok(())
+}
+
+fn find_review() -> Result<(PathBuf, discovery::ServerInfo)> {
     let cwd = env::current_dir()?;
     let root = repository::root(&cwd).unwrap_or_else(|| cwd.clone());
-    let missing = || format!("No running lrv found for {}", root.display());
-    let info = discovery::find(&cwd).with_context(missing)?;
+    let info = discovery::find(&cwd)
+        .with_context(|| format!("No running lrv found for {}", root.display()))?;
+    Ok((root, info))
+}
+
+fn check_review_auth(response: &reqwest::Response, root: &Path, flag: &str) -> Result<()> {
+    if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+        anyhow::bail!("Another lrv now holds the port advertised for {}; run {flag} again after restarting the review", root.display());
+    }
+    Ok(())
+}
+
+async fn listen_to_review(timeout_secs: u64, format: &OutputFormat) -> Result<()> {
+    let (root, info) = find_review()?;
+    let after = discovery::read_cursor(&info);
+    let response = reqwest::Client::builder()
+        .timeout(Duration::from_secs(timeout_secs + 15))
+        .build()?
+        .get(format!(
+            "{}/api/agent/events?after={after}&timeout={timeout_secs}",
+            info.url
+        ))
+        .bearer_auth(&info.token)
+        .send()
+        .await;
+    let poll = match response {
+        Ok(response) => {
+            check_review_auth(&response, &root, "--listen")?;
+            let response = response.error_for_status()?;
+            match response.bytes().await {
+                Ok(bytes) => serde_json::from_slice::<agent::Poll>(&bytes)?,
+                Err(error) => ended_on_disconnect(error, after)?,
+            }
+        }
+        Err(error) => ended_on_disconnect(error, after)?,
+    };
+    let mut stdout = std::io::stdout().lock();
+    writeln!(stdout, "{}", output::format_listen(&poll, format))?;
+    stdout.flush()?;
+    if poll.cursor > after {
+        if let Err(error) = discovery::write_cursor(&info, poll.cursor) {
+            tracing::warn!("Failed to save listen cursor: {error}");
+        }
+    }
+    Ok(())
+}
+
+fn ended_on_disconnect(error: reqwest::Error, after: u64) -> Result<agent::Poll> {
+    if error.is_timeout() {
+        return Err(error.into());
+    }
+    Ok(agent::Poll {
+        events: vec![],
+        cursor: after,
+        ended: true,
+    })
+}
+
+async fn add_notes_to_review(path: &str) -> Result<()> {
+    let notes = load_review_notes_file(path)?;
+    let (root, info) = find_review()?;
     let response = reqwest::Client::new()
         .post(format!("{}/api/review-notes", info.url))
         .bearer_auth(&info.token)
         .json(&notes)
         .send()
         .await
-        .with_context(missing)?;
-    if response.status() == reqwest::StatusCode::UNAUTHORIZED {
-        anyhow::bail!("Another lrv now holds the port advertised for {}; run --add-notes again after restarting the review", root.display());
-    }
+        .with_context(|| format!("No running lrv found for {}", root.display()))?;
+    check_review_auth(&response, &root, "--add-notes")?;
     let result: serde_json::Value = response
         .error_for_status()
         .context("Running lrv rejected review notes")?
@@ -607,14 +690,7 @@ async fn add_notes_to_review(path: &str) -> Result<()> {
 
 fn validate_review_notes(notes: &[ReviewNote]) -> Result<()> {
     if let Some(note) = notes.iter().find(|note| !note.is_valid()) {
-        anyhow::bail!(
-            "Invalid review note for {}:{}",
-            note.file,
-            match &note.line {
-                CommentLine::Single(line) => line.to_string(),
-                CommentLine::Range((start, end)) => format!("{}-{}", start, end),
-            }
-        );
+        anyhow::bail!("Invalid review note for {}:{}", note.file, note.line);
     }
     Ok(())
 }
@@ -1009,8 +1085,11 @@ async fn main() -> Result<()> {
     if let Some(path) = &args.add_notes {
         return add_notes_to_review(path).await;
     }
+    if args.listen {
+        return listen_to_review(args.listen_timeout, &args.format.parse()?).await;
+    }
     if let Some(path) = args.validate_review_notes {
-        match load_review_notes_file(&path) {
+        match load_startup_review_notes_file(&path) {
             Ok(notes) => {
                 eprintln!(
                     "OK: {} note{}",
@@ -1159,7 +1238,7 @@ async fn main() -> Result<()> {
 
     let mut review_notes = Vec::new();
     for path in &args.review_notes_file {
-        review_notes.extend(load_review_notes_file(path)?);
+        review_notes.extend(load_startup_review_notes_file(path)?);
     }
 
     let phab_base_url = args
@@ -1269,6 +1348,7 @@ async fn main() -> Result<()> {
             }
         }
     }
+    validate_startup_review_notes(&review_notes)?;
     tag_single_commit_notes(&mut review_notes, is_series, diffs.len());
     assign_note_ids(&mut review_notes);
 
@@ -1329,6 +1409,7 @@ async fn main() -> Result<()> {
     let state = AppState {
         notes_version: std::sync::Arc::new(tokio::sync::watch::channel(0).0),
         agent_token: Arc::from(agent_token.clone()),
+        agent: agent::AgentChannel::new(agent::lease_from_env()),
         diffs: Arc::new(diffs),
         comments: Arc::new(Mutex::new(Vec::new())),
         overall_comment: Arc::new(Mutex::new(None)),
@@ -1462,6 +1543,11 @@ async fn main() -> Result<()> {
     // Prefer loopback when opening browser
     let url = format!("http://127.0.0.1:{}", actual_port);
 
+    tokio::spawn({
+        let agent = state.agent.clone();
+        async move { agent.track_presence().await }
+    });
+
     // Run servers with graceful shutdown
     let shutdown_notify = Arc::new(Notify::new());
     let mut handles = Vec::new();
@@ -1510,6 +1596,11 @@ async fn main() -> Result<()> {
             server_result = result.context("Server error");
         }
     }
+
+    state.agent.close();
+    state.agent.drain(std::time::Duration::from_secs(1)).await;
+    // Let hyper flush the final poll response after the handler returns.
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
     discovery::remove_if_ours(&discovery_root, std::process::id());
     if let Some(code) = signal_exit_code {

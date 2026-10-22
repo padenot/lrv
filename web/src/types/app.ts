@@ -1,4 +1,5 @@
 import type { CommentLine, ReviewComment } from '../comments';
+import type { DiscussionManager } from '../discussions';
 import type { ReviewNote } from '../review-notes';
 import type { editor } from 'monaco-editor';
 
@@ -121,6 +122,9 @@ export type DiffStats = {
 };
 
 export interface AppContext {
+  discussionManager: DiscussionManager;
+  agentAttached: boolean;
+  setAgentAttached(attached: boolean): void;
   commentManager: {
     comments: ReviewComment[];
     currentCommitIdx: number | null;
@@ -137,9 +141,11 @@ export interface AppContext {
   reviewNoteManager: {
     currentCommitIdx: number | null;
     setNotes(notes: ReviewNote[]): void;
+    mergeNotes(notes: ReviewNote[]): void;
     addNote(note: ReviewNote): void;
     updateNote(note: ReviewNote, patch: Partial<ReviewNote>): void;
     getNotes(): ReviewNote[];
+    getDiscussionReplies(discussionId: string): ReviewNote[];
     getNotesForFile(file: string): ReviewNote[];
     findNote(file: string, line: number, side: Side): number;
     onChange(listener: () => void): void;

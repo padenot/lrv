@@ -1,3 +1,5 @@
+import type { Discussion } from './discussions';
+import type { CommentLine } from './comments';
 import { el } from './dom';
 import { appendLinkifiedText } from './linkify';
 import {
@@ -11,11 +13,23 @@ import type { AppContext } from './types/app';
 import type { ReviewNote } from './review-notes';
 import type { editor } from 'monaco-editor';
 
+type InlineThread = {
+  file: string;
+  line: CommentLine;
+  side: 'old' | 'new';
+  node: HTMLElement;
+  height: () => number;
+  hover: string;
+  discussion?: boolean;
+};
+
 export class ReviewNoteMethods {
   declare editor: AppContext['editor'];
   declare files: AppContext['files'];
   declare currentFileIndex: number;
   declare reviewNoteManager: AppContext['reviewNoteManager'];
+  declare discussionManager: AppContext['discussionManager'];
+  declare buildDiscussionNode: (discussion: Discussion) => HTMLElement;
   declare commentManager: AppContext['commentManager'];
   declare modifiedReviewNoteDecorations: string[];
   declare originalReviewNoteDecorations: string[];
@@ -39,7 +53,38 @@ export class ReviewNoteMethods {
       return;
     }
 
-    const notes = this.reviewNoteManager.getNotesForFile(file.path);
+    const notes: InlineThread[] = [
+      ...this.reviewNoteManager.getNotesForFile(file.path).map((note) => ({
+        file: note.file,
+        line: note.line,
+        side: note.side,
+        height: () => this.reviewNoteHeightPx(note.body),
+        hover: note.body,
+        node: this.buildReviewNoteNode(note),
+      })),
+      ...this.discussionManager.getForFile(file.path).map((discussion) => {
+        const node = this.buildDiscussionNode(discussion);
+        return {
+          file: discussion.file,
+          line: discussion.line,
+          side: discussion.side,
+          node,
+          hover: discussion.body,
+          height: () => {
+            const bodies = Array.from(node.querySelectorAll('.discussion-body'));
+            const entries = bodies.reduce(
+              (total, body) => total + this.reviewNoteHeightPx(body.textContent || '') - 48,
+              0,
+            );
+            return Math.min(
+              460,
+              52 + entries + (node.querySelector('.discussion-reply') ? 200 : 0),
+            );
+          },
+          discussion: true,
+        };
+      }),
+    ];
     const modifiedEditor = this.editor.getModifiedEditor();
     const originalEditor = this.editor.getOriginalEditor();
 
@@ -72,7 +117,7 @@ export class ReviewNoteMethods {
   private replaceReviewNoteZones(
     targetEditor: editor.IStandaloneCodeEditor,
     existingIds: string[],
-    notes: ReviewNote[],
+    notes: InlineThread[],
   ) {
     const model = targetEditor.getModel();
     if (!model) {
@@ -88,12 +133,19 @@ export class ReviewNoteMethods {
         const node = el('div', {
           className: `review-note-zone review-note-zone-${note.side}`,
         });
-        node.appendChild(this.buildReviewNoteNode(note));
-        const id = accessor.addZone({
+        node.appendChild(note.node);
+        const zone: editor.IViewZone = {
           afterLineNumber: line,
           domNode: node,
-          heightInPx: this.reviewNoteHeightPx(note),
-        });
+          heightInPx: note.height(),
+        };
+        const id = accessor.addZone(zone);
+        if (note.discussion) {
+          note.node.addEventListener('discussion-layout', () => {
+            zone.heightInPx = note.height();
+            targetEditor.changeViewZones((zones) => zones.layoutZone(id));
+          });
+        }
         newIds.push(id);
       });
     });
@@ -103,7 +155,7 @@ export class ReviewNoteMethods {
   private replaceReviewNoteDecorations(
     targetEditor: editor.IStandaloneCodeEditor,
     existingIds: string[],
-    notes: ReviewNote[],
+    notes: InlineThread[],
   ) {
     const model = targetEditor.getModel();
     if (!model) {
@@ -118,9 +170,13 @@ export class ReviewNoteMethods {
         range: new monaco.Range(start, 1, end, 1),
         options: {
           isWholeLine: true,
-          glyphMarginClassName: 'codicon codicon-comment-discussion review-note-glyph',
-          glyphMarginHoverMessage: { value: note.body },
-          linesDecorationsClassName: 'review-note-line-decoration',
+          glyphMarginClassName: note.discussion
+            ? 'codicon codicon-hubot discussion-glyph'
+            : 'codicon codicon-comment-discussion review-note-glyph',
+          glyphMarginHoverMessage: { value: note.hover },
+          linesDecorationsClassName: note.discussion
+            ? 'discussion-line-decoration'
+            : 'review-note-line-decoration',
         },
       };
     });
@@ -336,8 +392,8 @@ export class ReviewNoteMethods {
     }
   }
 
-  private reviewNoteHeightPx(note: ReviewNote) {
-    const visualLines = note.body
+  private reviewNoteHeightPx(body: string) {
+    const visualLines = body
       .split('\n')
       .reduce((total, line) => total + Math.max(1, Math.ceil(line.length / 86)), 0);
     return Math.max(124, Math.min(460, 88 + visualLines * 18));

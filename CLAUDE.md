@@ -34,11 +34,14 @@ Comment form has two independent implementations:
 - `comments-ui-methods.ts` — Monaco diff view
 - `stacked-view-methods.ts` — stacked table view
 
+Discuss (button + Mod+Alt+Enter, shown via `body.agent-attached`) belongs in both forms; discussions render from `discussionManager`, never `commentManager`.
 Any comment UX change (shortcuts, edit, delete, validation) must go in both.
 
 ## Key Behaviours
 
-- **Live review notes**: `/api/events` sends a `notes` SSE event on connection and after notes are added. The page refetches and merges new notes while preserving dispositions; it delays merging while a Reply form is open, checking every 500 ms.
+- **Live review notes**: `/api/events` sends a `notes` SSE event on connection and after notes are added. The page refetches and merges new notes while preserving dispositions; it delays merging while a Reply form is open, checking every 500 ms. `/api/events` also sends an `agent` `{attached}` event on connect and whenever presence changes (including lease expiry), and the header shows "Agent listening" while attached.
+- **Agent events**: events are queued in memory and served by the token-authenticated long poll `GET /api/agent/events?after=&timeout=`, where `timeout` is in seconds (default 60, clamped to 1–600). The agent counts as attached while a poll is open, or within `LRV_AGENT_LEASE_SECS` (default 300) of its last poll or authenticated note write. On shutdown the channel closes and pending polls return `ended: true`.
+- **Discussions**: `POST /api/discussions` queues a discussion for the listening agent and returns it with a `lrv-discussion-<seq>` id. It refuses with 409 when no agent is attached and with 403 in public mode (`--public`/`0.0.0.0`, not `--tailscale`). Discussions live only in the agent channel (in memory, listed by `GET /api/discussions`) and never enter comments, drafts, submit or publish.
 - **Agent discovery**: advertise the repository root, PID, URL and bearer token in `LRV_SERVER_DIR` (otherwise the runtime/cache directory under `lrv/servers`), keyed by an FNV64 root hash. Files are mode 0600 on Unix and removed on shutdown (including Ctrl-C and SIGTERM, which exit 130 and 143) only if still owned by this process. Posting review notes requires the token.
 - **Port**: derived from CWD hash (32768–40959); falls back to ephemeral if taken.
 - **Comment drafts**: IndexedDB, keyed by `working_directory + git_branch + jj_change_id` (stable across amends). On reload, a banner prompts to restore rather than auto-restoring.
@@ -59,6 +62,7 @@ Any comment UX change (shortcuts, edit, delete, validation) must go in both.
 --review-notes-file <path>         load review notes JSON
 --validate-review-notes <path>     validate and exit
 --add-notes <path|->              add notes to the running review for this repository
+--listen [--listen-timeout <secs>]    wait for discussion comments from this repo's running review; prints {"status": events|timeout|ended}
 --github-pr-comments <path>        pipe output of: gh api repos/OWNER/REPO/pulls/N/comments
 --github-pr [<N|O/R#N|url>]        fetch a PR's comments with gh; no value = detect PRs of every commit
 --phab-mcp-comments <path>         pipe output of: mcp__moz__get_phabricator_revision
@@ -71,7 +75,7 @@ Any comment UX change (shortcuts, edit, delete, validation) must go in both.
 ## Review Notes Schema
 
 Required: `file`, `line` (int or `[start, end]`), `side` (`"new"`/`"old"`), `body`.
-Optional: `id`, `author`, `date`, `source_url`, `commit_idx`, `read_only` (note is shown without Address/Reply/Ignore).
+Optional: `id`, `author`, `date`, `source_url`, `commit_idx`, `read_only` (note is shown without Address/Reply/Ignore), `discussion_id`. A note with `discussion_id` is an agent reply accepted only by a running review (`--add-notes` / POST /api/review-notes): it must name a root discussion, is moved to its location, becomes read-only, gets a server-stamped `date` and (if no `id`) a unique id, and renders inside the thread.
 Notes without `id` get one derived from their content (`assign_note_ids`), so ids alone decide which notes are the same, on the server and in the browser.
 Commit-message-level: `file: "(commit)"`, `line: 1`, `side: "new"`.
 Pull-request-level comments (`--github-pr` fills them from the PR conversation and review summaries) are read-only `file: "(commit)"` notes like Phabricator's general comments (`ReviewNote::overall`), placed on the last commit of a series. Notes without `commit_idx` in a one-commit series are pinned to commit 0 (`tag_single_commit_notes`).

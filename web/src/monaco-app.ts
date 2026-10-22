@@ -1,5 +1,7 @@
 import { $, clearEl, el } from './dom';
 import { CommentManager } from './comments';
+import { DiscussionManager, type Discussion } from './discussions';
+import { DiscussionMethods } from './discussion-methods';
 import { ReviewNoteManager } from './review-notes';
 import { fetchJSON } from './api';
 import { startLiveEvents } from './live-events';
@@ -60,6 +62,7 @@ function applyMixin(TargetClass: Constructor, MethodsClass: Constructor) {
 }
 
 export class MonacoApp {
+  agentAttached = false;
   publishedCommentKeys = new Set<string>();
   publishedRevisionIds = new Set<string>();
   publishTabStates = new Map<string, PublishTabState>();
@@ -68,6 +71,7 @@ export class MonacoApp {
   declare prefetchPhabricator: () => Promise<PhabStatus>;
   commentManager: CommentManager;
   reviewNoteManager: ReviewNoteManager;
+  discussionManager: DiscussionManager;
   currentFileIndex: number;
   editor: editor.IStandaloneDiffEditor | null;
   isInline: boolean;
@@ -140,9 +144,19 @@ export class MonacoApp {
   declare toggleView: () => void;
   declare updateViewToggleLabel: () => void;
 
+  setAgentAttached(attached: boolean): void {
+    this.agentAttached = attached;
+    document.body.classList.toggle('agent-attached', attached);
+    const badge = $<HTMLElement>('#agent-status');
+    if (badge) {
+      badge.hidden = !attached;
+    }
+  }
+
   constructor() {
     this.commentManager = new CommentManager();
     this.reviewNoteManager = new ReviewNoteManager();
+    this.discussionManager = new DiscussionManager();
     this.currentFileIndex = 0;
     this.editor = null;
     this.isInline = false;
@@ -190,6 +204,10 @@ export class MonacoApp {
         this.renderStackedComments();
       }
     });
+    this.discussionManager.onChange(() => {
+      this.renderReviewNotes();
+      this.renderFileList();
+    });
     this.reviewNoteManager.onChange(() => {
       this.renderReviewNotes();
       this.renderFileList();
@@ -211,21 +229,29 @@ export class MonacoApp {
     // Load config, context, diff data, series info, and ensure @font-face fonts are ready
     window.Perf.mark('init:fetch:start');
     const t0 = performance.now();
-    const [configData, contextData, diffData, seriesData, reviewNotesData, userThemesData] =
-      await Promise.all([
-        fetchJSON<AppConfigInput>('/api/config'),
-        fetchJSON<AppContextData>('/api/context'),
-        fetchJSON<{
-          files: DiffFile[];
-          stats: DiffStats;
-          commit_message?: string;
-          commit_hash?: string;
-        }>('/api/diff'),
-        fetchJSON<SeriesInfo>('/api/series'),
-        fetchJSON<ReviewNote[]>('/api/review-notes'),
-        fetchJSON<UserTheme[]>('/api/themes'),
-        document.fonts.ready,
-      ]);
+    const [
+      configData,
+      contextData,
+      diffData,
+      seriesData,
+      reviewNotesData,
+      userThemesData,
+      discussionsData,
+    ] = await Promise.all([
+      fetchJSON<AppConfigInput>('/api/config'),
+      fetchJSON<AppContextData>('/api/context'),
+      fetchJSON<{
+        files: DiffFile[];
+        stats: DiffStats;
+        commit_message?: string;
+        commit_hash?: string;
+      }>('/api/diff'),
+      fetchJSON<SeriesInfo>('/api/series'),
+      fetchJSON<ReviewNote[]>('/api/review-notes'),
+      fetchJSON<UserTheme[]>('/api/themes'),
+      fetchJSON<Discussion[]>('/api/discussions'),
+      document.fonts.ready,
+    ]);
     window.Perf.mark('init:fetch:end');
     window.Perf.measure('init:fetch', 'init:fetch:start', 'init:fetch:end');
     if (window.DEBUG) {
@@ -247,6 +273,8 @@ export class MonacoApp {
     this.currentCommitIdx = 0;
     this.commentManager.currentCommitIdx = seriesData.is_series ? 0 : null;
     this.reviewNoteManager.currentCommitIdx = seriesData.is_series ? 0 : null;
+    this.discussionManager.currentCommitIdx = seriesData.is_series ? 0 : null;
+    this.discussionManager.setDiscussions(discussionsData ?? []);
     this.reviewNoteManager.setNotes(reviewNotesData ?? []);
     this.files = sortDiffFiles(diffData.files);
     this.diff = { ...diffData, files: this.files };
@@ -745,6 +773,7 @@ applyMixin(MonacoApp, NavigationMethods);
 applyMixin(MonacoApp, CommitMethods);
 applyMixin(MonacoApp, CommentsUIMethods);
 applyMixin(MonacoApp, ReviewNoteMethods);
+applyMixin(MonacoApp, DiscussionMethods);
 applyMixin(MonacoApp, DialogMethods);
 applyMixin(MonacoApp, SeriesMethods);
 applyMixin(MonacoApp, StackedViewMethods);

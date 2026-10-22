@@ -369,6 +369,7 @@ impl PhabricatorClient {
                 date: None,
                 source_url: revision.fields.uri.clone(),
                 commit_idx: None,
+                discussion_id: None,
                 read_only: false,
             });
         }

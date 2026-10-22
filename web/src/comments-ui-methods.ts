@@ -1,3 +1,4 @@
+import { DiscussionError } from './discussions';
 import { el } from './dom';
 import { MOD_KEY_LABEL } from './platform';
 import {
@@ -17,6 +18,8 @@ export class CommentsUIMethods {
   declare files: AppContext['files'];
   declare currentFileIndex: number;
   declare commentManager: AppContext['commentManager'];
+  declare discussionManager: AppContext['discussionManager'];
+  declare agentAttached: boolean;
   declare modifiedDecorations: string[];
   declare originalDecorations: string[];
   declare currentWidget: AppContext['currentWidget'];
@@ -124,14 +127,26 @@ export class CommentsUIMethods {
       className: 'comment-textarea',
       attrs: { placeholder: 'Add your comment...', autofocus: true },
     });
+    const discuss = existingComment
+      ? null
+      : el('button', { className: 'btn-secondary discuss-btn', text: 'Discuss' });
+    const error = el('div', { className: 'comment-error', attrs: { hidden: true } });
     const actions = el('div', { className: 'comment-actions' }, [
       el('span', { className: 'shortcut-hint', text: `${modKey}+Enter to save` }),
       existingComment ? el('button', { className: 'btn-danger delete-btn', text: 'Delete' }) : null,
       el('button', { className: 'btn-secondary cancel-btn', text: 'Cancel' }),
+      existingComment
+        ? null
+        : el('span', {
+            className: 'shortcut-hint discuss-hint',
+            text: `${modKey}+Alt+Enter to discuss`,
+          }),
+      discuss,
       el('button', { className: 'btn-primary save-btn', text: 'Save' }),
     ]);
     domNode.appendChild(title);
     domNode.appendChild(textarea);
+    domNode.appendChild(error);
     domNode.appendChild(actions);
 
     const widget = {
@@ -179,6 +194,12 @@ export class CommentsUIMethods {
         cleanup();
       } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
+        if (e.altKey) {
+          if (this.agentAttached && !existingComment) {
+            void sendDiscussion();
+          }
+          return;
+        }
         saveComment();
       }
     };
@@ -212,6 +233,35 @@ export class CommentsUIMethods {
       this.updateDecorations();
       cleanup();
     };
+
+    const sendDiscussion = async () => {
+      const body = textarea.value.trim();
+      if (!body) {
+        textarea.focus();
+        return;
+      }
+      if (!discuss || discuss.disabled) {
+        return;
+      }
+      discuss.disabled = true;
+      error.hidden = true;
+      try {
+        await this.discussionManager.send({ file, line: commentLine, side, body });
+        cleanup();
+      } catch (err) {
+        error.textContent =
+          err instanceof DiscussionError && err.status === 409
+            ? 'No agent is listening any more'
+            : 'Failed to send discussion. Try again.';
+        error.hidden = false;
+        targetEditor.layoutContentWidget(widget);
+      } finally {
+        discuss.disabled = false;
+      }
+    };
+    if (discuss) {
+      discuss.onclick = () => void sendDiscussion();
+    }
 
     if (saveBtn) {
       saveBtn.onclick = saveComment;
