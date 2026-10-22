@@ -242,7 +242,11 @@ test.describe('Series mode E2E', () => {
       const response = await route.fetch();
       await route.fulfill({
         response,
-        json: { ...(await response.json()), phabricator_available: true },
+        json: {
+          ...(await response.json()),
+          phabricator_available: true,
+          phabricator_revisions: [null, 'D123'],
+        },
       });
     });
     await page.route('**/api/phabricator', (route) =>

@@ -13241,29 +13241,52 @@ var DialogMethods = class {
 };
 //#endregion
 //#region web/src/publish-dialog-methods.ts
+const REVISION_STATE_CLASSES = {
+	accepted: "revision-accepted",
+	"needs-review": "revision-needs-review",
+	"needs-revision": "revision-waiting",
+	"changes-planned": "revision-waiting",
+	draft: "revision-waiting"
+};
 var PublishDialogMethods = class {
 	prefetchPhabricator() {
 		this.phabStatus ??= fetchJSON("/api/phabricator").then((status) => {
 			this.phabRevisionStatus = status;
+			this.phabValidationError = null;
 			status.revisions.filter((r) => r.published).forEach((r) => this.publishedRevisionIds.add(r.id));
 			this.renderSeriesNav();
 			return status;
 		}).catch((error) => {
 			this.phabStatus = null;
+			this.phabValidationError = `Failed to verify revisions: ${error instanceof Error ? error.message : error}`;
+			this.updatePublishButton();
 			throw error;
 		});
 		return this.phabStatus;
 	}
+	/** The commit's revision id, known locally before Phabricator has been contacted. */
+	revisionIdFor(commitIdx) {
+		return this.context?.phabricator_revisions?.[commitIdx] ?? null;
+	}
 	updatePublishButton() {
 		const button = document.getElementById("publish-commit");
 		if (!button) return;
-		const revision = this.phabRevisionStatus?.revisions.find((r) => r.commit_idxs.includes(this.currentCommitIdx));
-		button.hidden = !revision;
-		if (!revision) return;
-		const published = this.publishedRevisionIds.has(revision.id);
-		button.textContent = published ? `Published ${revision.id} ✓` : `Publish ${revision.id}`;
-		button.disabled = published || !revision.publishable || !!this.phabRevisionStatus?.error;
-		button.title = this.phabRevisionStatus?.error ?? revision.reason ?? "";
+		const id = this.revisionIdFor(this.currentCommitIdx);
+		button.hidden = !id;
+		if (!id) return;
+		const status = this.phabRevisionStatus;
+		const revision = status?.revisions.find((r) => r.id === id);
+		const published = this.publishedRevisionIds.has(id);
+		const error = this.phabValidationError ?? status?.error;
+		const verifying = !status && !error;
+		button.classList.toggle("verifying", verifying);
+		for (const state of Object.values(REVISION_STATE_CLASSES)) button.classList.remove(state);
+		const stateClass = REVISION_STATE_CLASSES[revision?.status ?? ""];
+		if (stateClass) button.classList.add(stateClass);
+		const stateName = revision?.status_name ? ` · ${revision.status_name}` : "";
+		button.textContent = published ? `Published ${id} ✓` : `Publish ${id}${stateName}`;
+		button.disabled = verifying || published || !!error || !revision || !revision.publishable;
+		button.title = verifying ? `Verifying ${id}…` : error ?? revision?.reason ?? "";
 	}
 	async showPublishDialog(revisionId) {
 		let publish = async () => {};
@@ -13543,10 +13566,10 @@ var SeriesMethods = class {
 				text: msg
 			});
 			titleRow.appendChild(title);
-			const revision = this.phabRevisionStatus?.revisions.find((r) => r.commit_idxs.includes(commit.idx));
-			if (revision) titleRow.appendChild(el("span", {
+			const revisionId = this.revisionIdFor(commit.idx);
+			if (revisionId) titleRow.appendChild(el("span", {
 				className: "series-revision-badge",
-				text: `${revision.id}${this.publishedRevisionIds.has(revision.id) ? " ✓" : ""}`
+				text: `${revisionId}${this.publishedRevisionIds.has(revisionId) ? " ✓" : ""}`
 			}));
 			if (commitCommentCount > 0) titleRow.appendChild(el("span", {
 				className: "series-comment-badge",
@@ -14367,6 +14390,7 @@ var MonacoApp = class {
 	publishStates = /* @__PURE__ */ new Map();
 	phabStatus = null;
 	phabRevisionStatus = null;
+	phabValidationError = null;
 	commentManager;
 	reviewNoteManager;
 	discussionManager;
@@ -14779,9 +14803,10 @@ var MonacoApp = class {
 			this.showSubmitConfirmation();
 		});
 		$$1("#publish-commit")?.addEventListener("click", () => {
-			const revision = this.phabRevisionStatus?.revisions.find((r) => r.commit_idxs.includes(this.currentCommitIdx));
-			if (revision) this.showPublishDialog(revision.id);
+			const id = this.revisionIdFor(this.currentCommitIdx);
+			if (id) this.showPublishDialog(id);
 		});
+		this.updatePublishButton();
 		if (this.context.phabricator_available) this.prefetchPhabricator().catch((error) => console.error(error));
 		$$1("#toggle-view")?.addEventListener("click", () => {
 			this.toggleView();

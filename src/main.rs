@@ -70,6 +70,7 @@ fn get_project_context() -> ProjectContext {
         claude_skill_installed: skill::all_skills_installed(),
         comment_store_error: None,
         phabricator_available: false,
+        phabricator_revisions: Vec::new(),
     }
 }
 
@@ -1272,7 +1273,9 @@ async fn main() -> Result<()> {
     let targets = phabricator::resolve_phab_targets(&named_revisions, &phab_base_url, &messages);
     let publisher = if targets.iter().any(Option::is_some) {
         project_context.phabricator_available = true;
-        Some(Arc::new(phabricator::Publisher::new(targets, &diffs)))
+        let publisher = phabricator::Publisher::new(targets, &diffs);
+        project_context.phabricator_revisions = publisher.local_revisions();
+        Some(Arc::new(publisher))
     } else {
         None
     };

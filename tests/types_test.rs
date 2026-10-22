@@ -65,6 +65,7 @@ fn test_project_context() {
         claude_skill_installed: false,
         comment_store_error: None,
         phabricator_available: false,
+        phabricator_revisions: Vec::new(),
     };
 
     assert_eq!(context.working_directory, "/home/user/project");

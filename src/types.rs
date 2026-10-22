@@ -245,6 +245,10 @@ pub struct ProjectContext {
     pub comment_store_error: Option<String>,
     #[serde(default)]
     pub phabricator_available: bool,
+    /// Each commit's Phabricator revision id ("D123"), resolved locally so the UI
+    /// doesn't wait for Conduit validation to show it.
+    #[serde(default)]
+    pub phabricator_revisions: Vec<Option<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

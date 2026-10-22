@@ -49,6 +49,9 @@ struct RevisionFields {
 
 #[derive(Debug, Deserialize)]
 struct RevisionStatus {
+    /// e.g. `needs-review`, `accepted`, `needs-revision`, `changes-planned`.
+    value: Option<String>,
+    name: Option<String>,
     #[serde(default)]
     closed: bool,
 }
@@ -422,6 +425,9 @@ pub struct ActiveDiff {
     pub author_phid: Option<String>,
     /// Closed or abandoned revisions can still be commented on, but rarely should be.
     pub closed: bool,
+    /// The revision's status value (`accepted`, `needs-review`, ...) and display name.
+    pub status: Option<String>,
+    pub status_name: Option<String>,
     pub diff_id: u64,
     /// Lines added and deleted per path.
     pub files: HashMap<String, (usize, usize)>,
@@ -633,6 +639,8 @@ impl PhabricatorClient {
             author_phid: revision.fields.author_phid,
             // Phabricator marks abandoned revisions closed too.
             closed: status.is_some_and(|s| s.closed),
+            status: status.and_then(|s| s.value.clone()),
+            status_name: status.and_then(|s| s.name.clone()),
             diff_id,
             files,
         })
@@ -742,6 +750,8 @@ pub struct RevisionStatusInfo {
     pub commit_idxs: Vec<usize>,
     pub own: bool,
     pub closed: bool,
+    pub status: Option<String>,
+    pub status_name: Option<String>,
     pub publishable: bool,
     pub reason: Option<String>,
     pub published: bool,
@@ -794,6 +804,8 @@ impl Publisher {
                     commit_idxs: vec![0],
                     own: false,
                     closed: false,
+                    status: None,
+                    status_name: None,
                     publishable: true,
                     reason: None,
                     published: false,
@@ -823,6 +835,14 @@ impl Publisher {
             validation: Default::default(),
             attempts: Default::default(),
         }
+    }
+
+    /// Each commit's revision id, without contacting Phabricator.
+    pub fn local_revisions(&self) -> Vec<Option<String>> {
+        self.targets
+            .iter()
+            .map(|target| target.as_ref().map(|target| format!("D{}", target.id)))
+            .collect()
     }
 
     pub async fn validate(&self) -> &Validation {
@@ -858,6 +878,8 @@ impl Publisher {
                         commit_idxs: vec![idx],
                         own: false,
                         closed: false,
+                        status: None,
+                        status_name: None,
                         publishable: false,
                         published: false,
                         outdated: false,
@@ -903,6 +925,8 @@ impl Publisher {
                             revision.own =
                                 active.author_phid.as_deref() == Some(viewer.phid.as_str());
                             revision.closed = active.closed;
+                            revision.status = active.status;
+                            revision.status_name = active.status_name;
                             revision.diff_id = active.diff_id;
                             revision.publishable = revision.reason.is_none();
                         }
@@ -1112,6 +1136,8 @@ mod tests {
             commit_idxs: vec![0],
             own,
             closed: false,
+            status: None,
+            status_name: None,
             publishable: !outdated,
             reason: outdated.then(|| "Diff mismatch".into()),
             published: false,
@@ -1351,6 +1377,8 @@ mod tests {
             uri: String::new(),
             author_phid: None,
             closed: false,
+            status: None,
+            status_name: None,
             diff_id: 9,
             files: HashMap::from([("a.rs".to_string(), (2, 1)), ("b.rs".to_string(), (1, 1))]),
         };
