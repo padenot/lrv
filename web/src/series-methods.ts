@@ -28,7 +28,7 @@ export function prGroups(series: SeriesInfo): PrGroup[] {
 
 export class SeriesMethods {
   declare seriesInfo: AppContext['seriesInfo'];
-  declare phabRevisionStatus: import('./types/app').PhabStatus | null;
+  declare revisionIdFor: (commitIdx: number) => string | null;
   declare publishedRevisionIds: Set<string>;
   declare updatePublishButton: () => void;
   declare currentCommitIdx: number;
@@ -144,14 +144,12 @@ export class SeriesMethods {
       const titleRow = el('div', { className: 'series-commit-title-row' });
       const title = el('div', { className: 'series-commit-msg', text: msg });
       titleRow.appendChild(title);
-      const revision = this.phabRevisionStatus?.revisions.find((r) =>
-        r.commit_idxs.includes(commit.idx),
-      );
-      if (revision) {
+      const revisionId = this.revisionIdFor(commit.idx);
+      if (revisionId) {
         titleRow.appendChild(
           el('span', {
             className: 'series-revision-badge',
-            text: `${revision.id}${this.publishedRevisionIds.has(revision.id) ? ' ✓' : ''}`,
+            text: `${revisionId}${this.publishedRevisionIds.has(revisionId) ? ' ✓' : ''}`,
           }),
         );
       }

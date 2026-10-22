@@ -72,6 +72,8 @@ export class MonacoApp {
   declare showPublishDialog: (revisionId: string) => Promise<void>;
   declare updatePublishButton: () => void;
   phabRevisionStatus: PhabStatus | null = null;
+  phabValidationError: string | null = null;
+  declare revisionIdFor: (commitIdx: number) => string | null;
   declare prefetchPhabricator: () => Promise<PhabStatus>;
   commentManager: CommentManager;
   reviewNoteManager: ReviewNoteManager;
@@ -651,13 +653,12 @@ export class MonacoApp {
       void this.showSubmitConfirmation();
     });
     $('#publish-commit')?.addEventListener('click', () => {
-      const revision = this.phabRevisionStatus?.revisions.find((r) =>
-        r.commit_idxs.includes(this.currentCommitIdx),
-      );
-      if (revision) {
-        void this.showPublishDialog(revision.id);
+      const id = this.revisionIdFor(this.currentCommitIdx);
+      if (id) {
+        void this.showPublishDialog(id);
       }
     });
+    this.updatePublishButton();
     if (this.context.phabricator_available) {
       void this.prefetchPhabricator().catch((error) => console.error(error));
     }

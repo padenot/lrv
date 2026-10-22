@@ -642,7 +642,11 @@ test.describe('Review Workflow E2E', () => {
       const response = await route.fetch();
       await route.fulfill({
         response,
-        json: { ...(await response.json()), phabricator_available: true },
+        json: {
+          ...(await response.json()),
+          phabricator_available: true,
+          phabricator_revisions: ['D123', 'D124', 'D125'],
+        },
       });
     });
     await page.route('**/api/phabricator', (route) =>
@@ -729,7 +733,11 @@ test.describe('Review Workflow E2E', () => {
         const response = await route.fetch();
         await route.fulfill({
           response,
-          json: { ...(await response.json()), phabricator_available: true },
+          json: {
+            ...(await response.json()),
+            phabricator_available: true,
+            phabricator_revisions: ['D123'],
+          },
         });
       });
       await page.route('**/api/phabricator', (route) =>
@@ -771,6 +779,83 @@ test.describe('Review Workflow E2E', () => {
     });
   }
 
+  test('publish button shows while verifying, then the revision state', async ({ page }) => {
+    await page.route('**/api/context', async (route) => {
+      const response = await route.fetch();
+      await route.fulfill({
+        response,
+        json: {
+          ...(await response.json()),
+          phabricator_available: true,
+          phabricator_revisions: ['D123'],
+        },
+      });
+    });
+    let releaseStatus: (status: string) => void = () => {};
+    const status = new Promise<string>((resolve) => (releaseStatus = resolve));
+    await page.route('**/api/phabricator', async (route) => {
+      const value = await status;
+      if (value === 'error') {
+        await route.fulfill({ status: 500, body: 'no token' });
+        return;
+      }
+      await route.fulfill({
+        json: {
+          user: 'reviewer',
+          revisions: [
+            {
+              id: 'D123',
+              title: 'Revision',
+              url: 'https://phab.example/D123',
+              commit_idxs: [0],
+              own: false,
+              closed: false,
+              status: value,
+              status_name: value === 'accepted' ? 'Accepted' : 'Needs Review',
+              publishable: true,
+              published: false,
+            },
+          ],
+        },
+      });
+    });
+    await openApp(page);
+    const button = page.locator('#publish-commit');
+    await expect(button).toHaveText('Publish D123');
+    await expect(button).toBeDisabled();
+    await expect(button).toHaveClass(/verifying/);
+    await expect(button).toHaveAttribute('title', 'Verifying D123…');
+
+    releaseStatus('accepted');
+    await expect(button).toHaveText('Publish D123 · Accepted');
+    await expect(button).toBeEnabled();
+    await expect(button).not.toHaveClass(/verifying/);
+    await expect(button).toHaveClass(/revision-accepted/);
+  });
+
+  test('publish button reports a verification failure', async ({ page }) => {
+    await page.route('**/api/context', async (route) => {
+      const response = await route.fetch();
+      await route.fulfill({
+        response,
+        json: {
+          ...(await response.json()),
+          phabricator_available: true,
+          phabricator_revisions: ['D123'],
+        },
+      });
+    });
+    await page.route('**/api/phabricator', (route) =>
+      route.fulfill({ status: 500, body: 'no token' }),
+    );
+    await openApp(page);
+    const button = page.locator('#publish-commit');
+    await expect(button).toHaveText('Publish D123');
+    await expect(button).toBeDisabled();
+    await expect(button).not.toHaveClass(/verifying/);
+    await expect(button).toHaveAttribute('title', /Failed to verify revisions/);
+  });
+
   test('publishing sends only reply bodies, leaves Address items for Finish and omits published comments', async ({
     page,
   }) => {
@@ -778,7 +863,11 @@ test.describe('Review Workflow E2E', () => {
       const response = await route.fetch();
       await route.fulfill({
         response,
-        json: { ...(await response.json()), phabricator_available: true },
+        json: {
+          ...(await response.json()),
+          phabricator_available: true,
+          phabricator_revisions: ['D123'],
+        },
       });
     });
     await page.route('**/api/phabricator', (route) =>

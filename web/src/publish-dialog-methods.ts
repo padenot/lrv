@@ -5,6 +5,16 @@ import { commentKey } from './dialog-methods';
 import { isAddressRequest, type ReviewComment } from './comments';
 import type { AppContext, PhabStatus, PublishState, ReviewAction } from './types/app';
 
+// Phabricator status values: green when accepted, blue when it needs review, grey while
+// waiting on the author.
+const REVISION_STATE_CLASSES: Record<string, string> = {
+  accepted: 'revision-accepted',
+  'needs-review': 'revision-needs-review',
+  'needs-revision': 'revision-waiting',
+  'changes-planned': 'revision-waiting',
+  draft: 'revision-waiting',
+};
+
 export class PublishDialogMethods {
   declare commentManager: AppContext['commentManager'];
   declare seriesInfo: AppContext['seriesInfo'];
@@ -13,6 +23,8 @@ export class PublishDialogMethods {
   declare publishStates: Map<string, PublishState>;
   declare currentCommitIdx: number;
   declare phabRevisionStatus: PhabStatus | null;
+  declare phabValidationError: string | null;
+  declare context: AppContext['context'];
   declare renderSeriesNav: () => void;
   declare phabStatus: Promise<PhabStatus> | null;
   declare renderSubmitComments: (body: HTMLElement, comments: ReviewComment[]) => Promise<void>;
@@ -21,6 +33,7 @@ export class PublishDialogMethods {
     this.phabStatus ??= fetchJSON<PhabStatus>('/api/phabricator')
       .then((status) => {
         this.phabRevisionStatus = status;
+        this.phabValidationError = null;
         status.revisions
           .filter((r) => r.published)
           .forEach((r) => this.publishedRevisionIds.add(r.id));
@@ -29,9 +42,16 @@ export class PublishDialogMethods {
       })
       .catch((error) => {
         this.phabStatus = null;
+        this.phabValidationError = `Failed to verify revisions: ${error instanceof Error ? error.message : error}`;
+        this.updatePublishButton();
         throw error;
       });
     return this.phabStatus;
+  }
+
+  /** The commit's revision id, known locally before Phabricator has been contacted. */
+  revisionIdFor(commitIdx: number): string | null {
+    return this.context?.phabricator_revisions?.[commitIdx] ?? null;
   }
 
   updatePublishButton() {
@@ -39,17 +59,29 @@ export class PublishDialogMethods {
     if (!button) {
       return;
     }
-    const revision = this.phabRevisionStatus?.revisions.find((r) =>
-      r.commit_idxs.includes(this.currentCommitIdx),
-    );
-    button.hidden = !revision;
-    if (!revision) {
+    const id = this.revisionIdFor(this.currentCommitIdx);
+    button.hidden = !id;
+    if (!id) {
       return;
     }
-    const published = this.publishedRevisionIds.has(revision.id);
-    button.textContent = published ? `Published ${revision.id} ✓` : `Publish ${revision.id}`;
-    button.disabled = published || !revision.publishable || !!this.phabRevisionStatus?.error;
-    button.title = this.phabRevisionStatus?.error ?? revision.reason ?? '';
+    // Shown immediately and disabled until verification says whether it can be published.
+    const status = this.phabRevisionStatus;
+    const revision = status?.revisions.find((r) => r.id === id);
+    const published = this.publishedRevisionIds.has(id);
+    const error = this.phabValidationError ?? status?.error;
+    const verifying = !status && !error;
+    button.classList.toggle('verifying', verifying);
+    for (const state of Object.values(REVISION_STATE_CLASSES)) {
+      button.classList.remove(state);
+    }
+    const stateClass = REVISION_STATE_CLASSES[revision?.status ?? ''];
+    if (stateClass) {
+      button.classList.add(stateClass);
+    }
+    const stateName = revision?.status_name ? ` · ${revision.status_name}` : '';
+    button.textContent = published ? `Published ${id} ✓` : `Publish ${id}${stateName}`;
+    button.disabled = verifying || published || !!error || !revision || !revision.publishable;
+    button.title = verifying ? `Verifying ${id}…` : (error ?? revision?.reason ?? '');
   }
 
   async showPublishDialog(revisionId: string) {
