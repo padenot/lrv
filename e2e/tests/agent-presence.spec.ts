@@ -54,15 +54,66 @@ test('agent presence follows the listen poll and lease expiry', async ({ page })
     await expect(page.locator('.monaco-diff-editor')).toBeVisible();
     const badge = page.locator('#agent-status');
     await expect(badge).toBeHidden();
+    const connect = page.locator('#connect-agent');
+    const popover = page.locator('#connect-agent-popover');
+    await expect(connect).toBeVisible();
+    await connect.click();
+    await expect(popover).toBeVisible();
+    await expect(page.locator('#agent-provider')).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(popover).toBeHidden();
+    await expect(connect).toBeFocused();
+    await connect.click();
+    await page.locator('#agent-provider').selectOption('codex');
+    await page.locator('#agent-model').fill('test-model');
+    await page.locator('#agent-effort').fill('high');
+    await page.locator('#agent-initial-review').uncheck();
+    let payload: unknown;
+    await page.route('**/api/agent/launch', async (route) => {
+      payload = route.request().postDataJSON();
+      await route.fulfill({ status: 422, body: 'Test CLI missing' });
+    });
+    await page.locator('#agent-launch-submit').click();
+    await expect(page.locator('#agent-launch-error')).toContainText('Test CLI missing');
+    expect(payload).toEqual({
+      provider: 'codex',
+      model: 'test-model',
+      effort: 'high',
+      initial_review: false,
+    });
+    await page.locator('#settings-btn').click();
+    await expect(popover).toBeHidden();
+    await page.keyboard.press('Escape');
+    await page.reload();
+    await expect(connect).toBeVisible();
+    await connect.click();
+    await expect(page.locator('#agent-provider')).toHaveValue('codex');
+    await expect(page.locator('#agent-model')).toHaveValue('test-model');
+    await expect(page.locator('#agent-effort')).toHaveValue('high');
+    await expect(page.locator('#agent-initial-review')).not.toBeChecked();
+    await page.keyboard.press('Escape');
     const listening = execFileAsync(binary, ['--listen', '--listen-timeout', '2'], {
       cwd: root,
       env,
       timeout: 10000,
     });
     await expect(badge).toBeVisible();
+    await expect(connect).toBeHidden();
+    await expect(badge).not.toHaveClass(/busy/);
     const result = await listening;
     expect(JSON.parse(result.stdout).status).toBe('timeout');
     await expect(badge).toBeHidden({ timeout: 10000 });
+    await expect(connect).toBeVisible();
+    await page.route('**/api/agent/launch', async (route) => {
+      await route.fulfill({ status: 202, json: { launch: 'running' } });
+    });
+    await connect.click();
+    await page.locator('#agent-initial-review').check();
+    await page.locator('#agent-launch-submit').click();
+    await expect(connect).toBeHidden();
+    await expect(popover).toBeHidden();
+    await expect(badge).toHaveText('Connected');
+    await expect(badge).toHaveClass(/busy/);
     child.kill('SIGINT');
     await expect.poll(() => child?.exitCode).toBe(130);
   } finally {

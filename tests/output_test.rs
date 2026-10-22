@@ -278,11 +278,12 @@ fn listen_formats_events_even_when_ended() {
         }},
         {"seq": 2, "type": "discussion", "discussion": {
             "id": "second", "thread_id": "first", "created_at": 0, "file": "b.rs", "line": [10, 12], "side": "old", "body": "Range", "commit_idx": 0
-        }}
+        }},
+        {"seq": 3, "type": "discussion_deleted", "id": "first"}
     ]);
     let poll = Poll {
         events: serde_json::from_value(events.clone()).unwrap(),
-        cursor: 2,
+        cursor: 3,
         ended: true,
     };
     let value: serde_json::Value =
@@ -293,7 +294,7 @@ fn listen_formats_events_even_when_ended() {
     );
     assert_eq!(
         format_listen(&poll, &OutputFormat::Text),
-        "Discussion first on a.rs:3 (new)\n    First line\n    Second line\n\nFollow-up second in thread first on b.rs:10-12 (old) [commit 0]\n    Range"
+        "Discussion first on a.rs:3 (new)\n    First line\n    Second line\n\nFollow-up second in thread first on b.rs:10-12 (old) [commit 0]\n    Range\n\nDiscussion first was deleted by the reviewer; stop work on it and don't reply."
     );
 }
 

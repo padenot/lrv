@@ -9,6 +9,7 @@ const TIMEOUT: Duration = Duration::from_secs(60);
 fn discussion() -> AgentEvent {
     AgentEvent::Discussion {
         discussion: Discussion {
+            summarize: false,
             thread_id: None,
             id: "d1".into(),
             created_at: 0,
@@ -173,36 +174,37 @@ async fn presence_tracks_polls_touch_expiry_and_close() {
     let tracker = channel.clone();
     let tracker = tokio::spawn(async move { tracker.track_presence().await });
     let mut presence = channel.presence();
-    assert!(!*presence.borrow_and_update());
+    assert!(!presence.borrow_and_update().attached);
 
     let waiter = channel.clone();
     let poll = tokio::spawn(async move { waiter.wait(0, LEASE * 3).await });
     presence.changed().await.unwrap();
-    assert!(*presence.borrow_and_update());
+    assert!(presence.borrow_and_update().attached);
     advance(LEASE * 2).await;
     tokio::task::yield_now().await;
-    assert!(*presence.borrow());
+    assert!(presence.borrow().attached);
     channel.push(discussion());
     assert_eq!(poll.await.unwrap().events.len(), 1);
-    assert!(*presence.borrow());
+    presence.borrow_and_update();
+    assert!(presence.borrow().attached);
 
     advance(LEASE - Duration::from_secs(1)).await;
     channel.touch();
     tokio::task::yield_now().await;
     advance(Duration::from_secs(2)).await;
     tokio::task::yield_now().await;
-    assert!(*presence.borrow());
+    assert!(presence.borrow().attached);
     assert!(!presence.has_changed().unwrap());
     advance(LEASE).await;
     presence.changed().await.unwrap();
-    assert!(!*presence.borrow_and_update());
+    assert!(!presence.borrow_and_update().attached);
 
     channel.touch();
     presence.changed().await.unwrap();
-    assert!(*presence.borrow_and_update());
+    assert!(presence.borrow_and_update().attached);
     channel.close();
     presence.changed().await.unwrap();
-    assert!(!*presence.borrow_and_update());
+    assert!(!presence.borrow_and_update().attached);
     tracker.await.unwrap();
 }
 
@@ -217,6 +219,7 @@ async fn add_discussion_uses_shared_sequence_and_wakes_waiter() {
             file: Some("src/lib.rs".into()),
             line: Some(CommentLine::Single(3)),
             side: Some(Side::New),
+            summarize: false,
             thread_id: None,
             body: "A new discussion".into(),
             commit_idx: None,
@@ -238,6 +241,110 @@ async fn add_discussion_uses_shared_sequence_and_wakes_waiter() {
         serde_json::to_value(&discussions[1]).unwrap(),
         serde_json::to_value(&created).unwrap()
     );
-    let lrv::agent::AgentEvent::Discussion { discussion } = &poll.events[0].event;
+    let AgentEvent::Discussion { discussion } = &poll.events[0].event else {
+        panic!("expected discussion");
+    };
     assert_eq!(discussion.id, created.id);
+}
+
+#[tokio::test]
+async fn delete_discussion_removes_thread_and_queues_event() {
+    let channel = AgentChannel::new(LEASE);
+    channel.push(discussion());
+    let follow = channel
+        .add_discussion(lrv::agent::DiscussionRequest {
+            file: None,
+            line: None,
+            side: None,
+            summarize: false,
+            thread_id: Some("d1".into()),
+            body: "Follow up".into(),
+            commit_idx: None,
+        })
+        .unwrap();
+    assert!(!channel.delete_discussion("unknown"));
+    assert!(!channel.delete_discussion(&follow.id));
+    assert!(!channel.is_deleted("d1"));
+    assert!(channel.delete_discussion("d1"));
+    assert!(channel.is_deleted("d1"));
+    assert!(channel.discussions().is_empty());
+    assert!(!channel.delete_discussion("d1"));
+    for after in [0, 2] {
+        let poll = channel.wait(after, TIMEOUT).await;
+        assert_eq!(
+            serde_json::to_value(&poll).unwrap(),
+            serde_json::json!({
+                "events": [{"seq": 3, "type": "discussion_deleted", "id": "d1"}],
+                "cursor": 3, "ended": false
+            })
+        );
+    }
+    let next = channel
+        .add_discussion(lrv::agent::DiscussionRequest {
+            file: Some("a.rs".into()),
+            line: Some(CommentLine::Single(1)),
+            side: Some(Side::New),
+            summarize: false,
+            thread_id: None,
+            body: "New question".into(),
+            commit_idx: None,
+        })
+        .unwrap();
+    assert_eq!(next.id, "lrv-discussion-4");
+    assert_eq!(channel.discussions().len(), 1);
+}
+
+#[tokio::test]
+async fn summarize_is_only_valid_as_a_follow_up() {
+    let channel = AgentChannel::new(LEASE);
+    let mut request: lrv::agent::DiscussionRequest = serde_json::from_value(serde_json::json!({
+        "file": "a.rs", "line": 1, "side": "old", "body": "Summarize", "summarize": true
+    }))
+    .unwrap();
+    assert!(!request.is_valid());
+    channel.push(discussion());
+    request.thread_id = Some("d1".into());
+    let follow = channel.add_discussion(request).unwrap();
+    assert!(follow.summarize);
+    let poll = channel.wait(1, TIMEOUT).await;
+    let encoded = serde_json::to_value(&poll).unwrap();
+    assert_eq!(encoded["events"][0]["discussion"]["summarize"], true);
+    let decoded: lrv::agent::Poll = serde_json::from_value(encoded).unwrap();
+    let AgentEvent::Discussion { discussion } = &decoded.events[0].event else {
+        panic!("expected discussion");
+    };
+    assert!(discussion.summarize);
+    assert!(channel.discussions()[1].summarize);
+}
+
+#[tokio::test(start_paused = true)]
+async fn busy_until_next_poll_and_reset_on_expiry() {
+    let channel = AgentChannel::new(LEASE);
+    let tracker = channel.clone();
+    let tracker = tokio::spawn(async move { tracker.track_presence().await });
+    let presence = channel.presence();
+    channel.push(discussion());
+    channel.wait(0, TIMEOUT).await;
+    assert!(presence.borrow().attached);
+    assert!(presence.borrow().busy);
+    let next = channel.clone();
+    let poll = tokio::spawn(async move { next.wait(1, TIMEOUT).await });
+    tokio::task::yield_now().await;
+    assert!(!presence.borrow().busy);
+    assert!(presence.borrow().attached);
+    advance(TIMEOUT).await;
+    assert!(poll.await.unwrap().events.is_empty());
+    assert!(!presence.borrow().busy);
+    channel.wait(0, TIMEOUT).await;
+    assert!(presence.borrow().busy);
+    advance(LEASE).await;
+    tokio::task::yield_now().await;
+    assert!(!presence.borrow().attached);
+    assert!(!presence.borrow().busy);
+    channel.touch();
+    assert!(!presence.borrow().busy);
+    channel.close();
+    assert!(!presence.borrow().attached);
+    assert!(!presence.borrow().busy);
+    tracker.await.unwrap();
 }

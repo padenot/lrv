@@ -1,9 +1,9 @@
 import { fetchJSON } from './api';
 import type { ReviewNote } from './review-notes';
-import type { AppContext } from './types/app';
+import type { AgentState, AppContext } from './types/app';
 
 export function startLiveEvents(
-  app: Pick<AppContext, 'reviewNoteManager' | 'setAgentAttached'>,
+  app: Pick<AppContext, 'reviewNoteManager' | 'setAgentState' | 'agentState'>,
 ): void {
   const source = new EventSource('/api/events');
   let pending: ReviewNote[] | null = null;
@@ -45,10 +45,14 @@ export function startLiveEvents(
     }
   };
 
-  source.addEventListener('agent', (e) =>
-    app.setAgentAttached(JSON.parse(e.data).attached === true),
+  source.addEventListener('agent', (e) => app.setAgentState(JSON.parse(e.data) as AgentState));
+  source.addEventListener('error', () =>
+    app.setAgentState({
+      ...app.agentState,
+      attached: false,
+      busy: app.agentState.launch === 'running',
+    }),
   );
-  source.addEventListener('error', () => app.setAgentAttached(false));
   source.addEventListener('notes', () => void refresh());
   window.addEventListener(
     'pagehide',

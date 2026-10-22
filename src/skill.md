@@ -122,3 +122,69 @@ Notes appear in the open page without a reload. Re-running the same batch
 is a no-op; the command reports added and skipped counts. Use `-` instead
 of a file to read JSON from stdin. Never start a second lrv just to show
 notes in an existing review.
+
+## Listening for discussions
+
+Use this when the user already has lrv open and asks you to listen or discuss.
+If you started lrv yourself, you are blocked on it and can't listen. Never
+start a second lrv, and never background the one you started to listen.
+
+Run `lrv --listen` from the repository in the foreground. Set the tool timeout
+above `--listen-timeout` (default 90 seconds), allowing for request overhead.
+Never pipe, redirect, or capture its output; read it in the tool result.
+Use one listener per review: the read position is shared.
+
+The output defaults to JSON (`--format json`), with a `status` field:
+
+- `events`: the `events` array contains objects with `seq` and `type`.
+  Handle every event in the batch, then listen again.
+  - `type: "discussion"` has `discussion` containing `id`, `created_at`,
+    `file`, `line`, `side`, `body`, and optional `thread_id`, `summarize` and
+    `commit_idx`. Reply with `lrv --add-notes <file>`, setting `discussion_id` to
+    `thread_id` if present, otherwise `id`. It must name the root discussion;
+    using a follow-up's own id is rejected. Copy `file`, `line`, and `side`
+    (required even though the server moves the reply to the thread), and set
+    `author` to your name.
+  - `type: "discussion_deleted"` has the `id` of a root discussion the user
+    deleted. Stop any work on that thread and don't reply; a late reply is
+    skipped.
+- `timeout`: run `lrv --listen` again straight away.
+- `ended`: stop and tell the user the review is over. Submitted comments went
+  to whoever started lrv, not the listener. To apply them, ask the user to
+  paste them or name a session from `lrv --list-reviews`.
+
+All three statuses exit 0. On a non-zero exit, stop and tell the user about
+the error; the review may be missing or have restarted. The header's
+"Connected" indicator stays on while a poll is open and for a lease
+after the last poll or authenticated note write (`LRV_AGENT_LEASE_SECS`,
+default 300 seconds).
+
+A follow-up with `summarize: true` asks for a summary of that thread as a
+standalone review comment. Reply the normal way with `discussion_id` naming
+the root and add `"summary": true`. Write only the comment body, with no preamble.
+The reviewer can edit it in Convert before saving it as an ordinary comment.
+
+The user is waiting in the page. Answer each discussion briefly and return
+to listening quickly. A discussion is a question or a request to talk;
+change code only if the user explicitly asks in the discussion.
+
+For example, to reply to a root discussion (or a follow-up whose `thread_id`
+is `lrv-discussion-1`), write this JSON to `/tmp/lrv-reply.json` with your
+file-writing tool:
+
+```json
+[{"file":"src/file.rs","line":42,"side":"new","body":"hi","discussion_id":"lrv-discussion-1","author":"Agent"}]
+```
+
+Then run:
+
+```bash
+lrv --add-notes /tmp/lrv-reply.json
+```
+
+Some harnesses statically reject shell commands that contain JSON (a brace
+next to a quote). Never inline JSON in a shell command (heredoc, `echo`, or
+otherwise), and don't retry inline after a rejection; write a file instead.
+
+`discussion_id` is accepted only by a running review, not by
+`--review-notes-file` or `--validate-review-notes`.

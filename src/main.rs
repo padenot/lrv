@@ -10,7 +10,7 @@ mod themes;
 
 use anyhow::{Context, Result};
 use clap::{ArgAction, Parser};
-use lrv::{agent, discovery, netutil, output, types};
+use lrv::{agent, discovery, launch, netutil, output, types};
 use moz_cli_version_check::VersionChecker;
 use std::collections::HashMap;
 use std::env;
@@ -66,6 +66,7 @@ fn get_project_context() -> ProjectContext {
         git_branch,
         title: None,
         is_public: false,
+        launch_available: true,
         claude_skill_installed: skill::all_skills_installed(),
         comment_store_error: None,
         phabricator_available: false,
@@ -385,7 +386,10 @@ impl Drop for Spinner {
 
 // Fetch all diffs for a jj series in one subprocess call and parse them.
 // Returns diffs in revset order (oldest first, matching --reversed).
-fn get_series_diffs_jj(revset: &str, working_dir: &str) -> Result<Vec<crate::types::DiffResponse>> {
+fn get_series_diffs_jj(
+    revset: &str,
+    working_dir: &str,
+) -> Result<Vec<(crate::types::DiffResponse, String)>> {
     let template = concat!(
         r#"concat("Commit ID: ", commit_id, "\nAuthor: ", author.name(), "#,
         r#"" <", author.email(), "> (", author.timestamp().format("%Y-%m-%d %H:%M:%S"), ")\n\n", indent("    ", description), "\n\n")"#
@@ -421,7 +425,10 @@ fn get_series_diffs_jj(revset: &str, working_dir: &str) -> Result<Vec<crate::typ
             } else {
                 format!("Commit ID: {}", part)
             };
-            diff::parse_diff(&chunk).context("Failed to parse commit diff")
+            Ok((
+                diff::parse_diff(&chunk).context("Failed to parse commit diff")?,
+                chunk,
+            ))
         })
         .collect()
 }
@@ -597,9 +604,12 @@ fn load_startup_review_notes_file(path: &str) -> Result<Vec<ReviewNote>> {
 }
 
 fn validate_startup_review_notes(notes: &[ReviewNote]) -> Result<()> {
-    if let Some(note) = notes.iter().find(|note| note.discussion_id.is_some()) {
+    if let Some(note) = notes
+        .iter()
+        .find(|note| note.discussion_id.is_some() || note.summary)
+    {
         anyhow::bail!(
-            "Invalid review note for {}:{}: discussion_id is only accepted by a running review (--add-notes / POST /api/review-notes)",
+            "Invalid review note for {}:{}: discussion_id and summary are only accepted by a running review (--add-notes / POST /api/review-notes)",
             note.file,
             note.line
         );
@@ -1139,11 +1149,12 @@ async fn main() -> Result<()> {
     // Precompute public flag from args
     let is_public_flag = args.public || args.bind.iter().any(|a| a == "0.0.0.0");
     project_context.is_public = is_public_flag;
+    project_context.launch_available = !is_public_flag;
 
     let working_dir = project_context.working_directory.clone();
 
     // Parse diffs: series mode or single commit
-    let (diffs, pre_old, pre_new, is_series) = if let Some(ref revset) = args.series {
+    let (diffs, raw_diffs, pre_old, pre_new, is_series) = if let Some(ref revset) = args.series {
         if args.cmd.is_some() || args.file.is_some() {
             anyhow::bail!("--series cannot be combined with --cmd or --file");
         }
@@ -1169,7 +1180,7 @@ async fn main() -> Result<()> {
                 handles.push(tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
                     let text = get_commit_diff_text(&id, &wd)?;
                     let d = diff::parse_diff(&text)?;
-                    Ok((i, d))
+                    Ok((i, (d, text)))
                 }));
             }
             let mut parsed_indexed = Vec::with_capacity(commits.len());
@@ -1179,10 +1190,11 @@ async fn main() -> Result<()> {
             parsed_indexed.sort_by_key(|(i, _)| *i);
             parsed_indexed.into_iter().map(|(_, d)| d).collect()
         };
+        let (parsed, raw): (Vec<_>, Vec<_>) = parsed.into_iter().unzip();
         let spinner = Spinner::start("Precomputing file content");
         let (pre_old, pre_new) = server::precompute_series_content(&parsed, &working_dir).await;
         spinner.finish("Ready");
-        (parsed, pre_old, pre_new, true)
+        (parsed, raw, pre_old, pre_new, true)
     } else {
         // Get diff text from stdin, file, or command
         let cmd_for_revision = args.cmd.clone();
@@ -1233,7 +1245,7 @@ async fn main() -> Result<()> {
             return Ok(());
         }
 
-        (vec![diff], vec![], vec![], false)
+        (vec![diff], vec![diff_text], vec![], vec![], false)
     };
 
     let mut review_notes = Vec::new();
@@ -1410,6 +1422,8 @@ async fn main() -> Result<()> {
         notes_version: std::sync::Arc::new(tokio::sync::watch::channel(0).0),
         agent_token: Arc::from(agent_token.clone()),
         agent: agent::AgentChannel::new(agent::lease_from_env()),
+        launcher: lrv::launch::AgentLauncher::new(),
+        raw_diffs: Arc::new(raw_diffs),
         diffs: Arc::new(diffs),
         comments: Arc::new(Mutex::new(Vec::new())),
         overall_comment: Arc::new(Mutex::new(None)),
@@ -1509,6 +1523,19 @@ async fn main() -> Result<()> {
         }
     }
 
+    state
+        .launcher
+        .allowed_hosts
+        .lock()
+        .unwrap()
+        .extend(listeners.iter().map(|(host, _)| {
+            if host.contains(':') {
+                format!("[{host}]")
+            } else {
+                host.clone()
+            }
+        }));
+
     let discovery_root = repository::root(&env::current_dir()?).unwrap_or(env::current_dir()?);
     let first_addr = &listeners[0].0;
     let host = if first_addr == "0.0.0.0" {
@@ -1602,6 +1629,10 @@ async fn main() -> Result<()> {
     // Let hyper flush the final poll response after the handler returns.
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
+    state
+        .launcher
+        .shutdown(std::time::Duration::from_secs(3))
+        .await;
     discovery::remove_if_ours(&discovery_root, std::process::id());
     if let Some(code) = signal_exit_code {
         std::process::exit(code);

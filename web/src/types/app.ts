@@ -1,5 +1,5 @@
 import type { CommentLine, ReviewComment } from '../comments';
-import type { DiscussionManager } from '../discussions';
+import type { Discussion, DiscussionManager } from '../discussions';
 import type { ReviewNote } from '../review-notes';
 import type { editor } from 'monaco-editor';
 
@@ -73,6 +73,7 @@ export type AppContextData = {
   working_directory?: string;
   git_branch?: string;
   is_public?: boolean;
+  launch_available?: boolean;
   claude_skill_installed?: boolean;
   comment_store_error?: string | null;
   phabricator_available?: boolean;
@@ -124,7 +125,9 @@ export type DiffStats = {
 export interface AppContext {
   discussionManager: DiscussionManager;
   agentAttached: boolean;
-  setAgentAttached(attached: boolean): void;
+  agentState: AgentState;
+  setAgentState(state: AgentState): void;
+  setupConnectAgent(): void;
   commentManager: {
     comments: ReviewComment[];
     currentCommitIdx: number | null;
@@ -145,7 +148,9 @@ export interface AppContext {
     addNote(note: ReviewNote): void;
     updateNote(note: ReviewNote, patch: Partial<ReviewNote>): void;
     getNotes(): ReviewNote[];
+    nextSummary(rootId: string): Promise<ReviewNote>;
     getDiscussionReplies(discussionId: string): ReviewNote[];
+    removeDiscussionReplies(id: string): void;
     getNotesForFile(file: string): ReviewNote[];
     findNote(file: string, line: number, side: Side): number;
     onChange(listener: () => void): void;
@@ -227,7 +232,16 @@ export interface AppContext {
   showKeyboardHelp(): void;
   updateDecorations(): void;
   renderReviewNotes(): void;
-  showCommentDialog(file: string, fileLine: CommentLine, monacoLine: number, side: Side): void;
+  showCommentDialog(
+    file: string,
+    fileLine: CommentLine,
+    monacoLine: number,
+    side: Side,
+    discussion?: Discussion,
+  ): void;
+  showStackedDiscussionDraft(discussion: Discussion): void;
+  deleteDiscussion(discussion: Discussion): Promise<void>;
+  summarizeDiscussion(discussion: Discussion): Promise<string>;
   showCommitSummaryDialog(): void;
   initFileHunks(file: DiffFile): void;
   isAddedFile(file: DiffFile): boolean;
@@ -242,3 +256,17 @@ export interface AppContext {
   clearFocusedHunk(): void;
   openCommentOnCurrentFocus(): void;
 }
+
+export type AgentState = {
+  attached: boolean;
+  busy: boolean;
+  launch: 'idle' | 'running' | 'failed';
+  initial_review?: boolean;
+  error?: string | null;
+};
+export type LaunchRequest = {
+  provider: 'claude' | 'codex';
+  model: string;
+  effort: string;
+  initial_review: boolean;
+};

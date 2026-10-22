@@ -1,6 +1,7 @@
 import { $, clearEl, el } from './dom';
 import { CommentManager } from './comments';
 import { DiscussionManager, type Discussion } from './discussions';
+import { ConnectAgentMethods } from './connect-agent-methods';
 import { DiscussionMethods } from './discussion-methods';
 import { ReviewNoteManager } from './review-notes';
 import { fetchJSON } from './api';
@@ -31,6 +32,7 @@ import { DialogMethods } from './dialog-methods';
 import { SeriesMethods } from './series-methods';
 import { StackedViewMethods } from './stacked-view-methods';
 import type {
+  AgentState,
   PhabStatus,
   PublishTabState,
   AppConfig,
@@ -144,14 +146,9 @@ export class MonacoApp {
   declare toggleView: () => void;
   declare updateViewToggleLabel: () => void;
 
-  setAgentAttached(attached: boolean): void {
-    this.agentAttached = attached;
-    document.body.classList.toggle('agent-attached', attached);
-    const badge = $<HTMLElement>('#agent-status');
-    if (badge) {
-      badge.hidden = !attached;
-    }
-  }
+  agentState: AgentState = { attached: false, busy: false, launch: 'idle' };
+  declare setAgentState: (state: AgentState) => void;
+  declare setupConnectAgent: () => void;
 
   constructor() {
     this.commentManager = new CommentManager();
@@ -497,6 +494,8 @@ export class MonacoApp {
 
     const fromTheme = (token: string) => themeColors[token] ?? '';
 
+    setVar('--success-color', fromTheme('testing.iconPassed') || '#3fb950');
+    setVar('--warning-color', fromTheme('editorWarning.foreground') || '#d29922');
     setVar('--bg-primary', fromTheme('editor.background'));
     setVar(
       '--bg-secondary',
@@ -644,6 +643,8 @@ export class MonacoApp {
     // Help button
     $('#help-btn')?.addEventListener('click', () => this.showKeyboardHelp());
 
+    this.setupConnectAgent();
+
     // Submit button: a plain button, or a menu of destinations when there's a revision to publish to.
     const submitBtn = $<HTMLButtonElement>('#submit-review')!;
     const menu = $<HTMLElement>('#submit-menu')!;
@@ -779,3 +780,5 @@ applyMixin(MonacoApp, SeriesMethods);
 applyMixin(MonacoApp, StackedViewMethods);
 
 applyMixin(MonacoApp, PublishDialogMethods);
+
+applyMixin(MonacoApp, ConnectAgentMethods);

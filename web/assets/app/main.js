@@ -554,7 +554,7 @@ var DiscussionManager = class {
 		return this.discussions.filter((d) => !d.thread_id && d.file === file && (this.currentCommitIdx === null || d.commit_idx === this.currentCommitIdx));
 	}
 	getFollowUps(rootId) {
-		return this.discussions.filter((d) => d.thread_id === rootId);
+		return this.discussions.filter((d) => d.thread_id === rootId && !d.summarize);
 	}
 	onChange(listener) {
 		this.listeners.push(listener);
@@ -576,9 +576,183 @@ var DiscussionManager = class {
 		const discussion = await response.json();
 		this.discussions.push(discussion);
 		this.notifyListeners();
+		return discussion;
+	}
+	async delete(id, onDeleted) {
+		const response = await fetch(`/api/discussions/${encodeURIComponent(id)}`, { method: "DELETE" });
+		if (!response.ok) throw new DiscussionError(response.status);
+		this.discussions = this.discussions.filter((d) => d.id !== id && d.thread_id !== id);
+		onDeleted?.();
+		this.notifyListeners();
 	}
 	notifyListeners() {
 		this.listeners.forEach((listener) => listener());
+	}
+};
+//#endregion
+//#region web/src/api.ts
+let fileFetchPending = 0;
+let fileFetchDelayTimer = null;
+let fetchSpinnerEl = null;
+function ensureFetchSpinner() {
+	if (!fetchSpinnerEl) {
+		const host = document.querySelector(".header .header-actions");
+		if (!host) return;
+		const spinner = el("span", {
+			className: "fetch-spinner",
+			attrs: { id: "fetch-spinner" }
+		});
+		host.insertBefore(spinner, host.firstChild);
+		fetchSpinnerEl = spinner;
+	}
+}
+function showFetchSpinnerDelayed() {
+	ensureFetchSpinner();
+	if (!fetchSpinnerEl) return;
+	if (fileFetchDelayTimer) return;
+	fileFetchDelayTimer = setTimeout(() => {
+		if (fileFetchPending > 0) {
+			fetchSpinnerEl?.classList.add("visible");
+			const app = window.__APP;
+			if (app && typeof app.eagerPrefetchAllFiles === "function") app.eagerPrefetchAllFiles();
+		}
+		fileFetchDelayTimer = null;
+	}, 400);
+}
+function hideFetchSpinnerMaybe() {
+	if (fileFetchPending === 0) {
+		if (fileFetchDelayTimer) {
+			clearTimeout(fileFetchDelayTimer);
+			fileFetchDelayTimer = null;
+		}
+		if (fetchSpinnerEl) fetchSpinnerEl.classList.remove("visible");
+	}
+}
+async function fetchJSON(url, options) {
+	const isFile = url.startsWith("/api/file");
+	if (isFile) {
+		fileFetchPending++;
+		if (fileFetchPending === 1) showFetchSpinnerDelayed();
+	}
+	try {
+		const res = await fetch(url, options);
+		if (!res.ok) {
+			const text = await res.text();
+			throw new Error(`Request failed ${res.status} ${res.statusText} at ${url}${text ? `: ${text.slice(0, 200)}` : ""}`);
+		}
+		return await res.json();
+	} finally {
+		if (isFile) {
+			fileFetchPending = Math.max(0, fileFetchPending - 1);
+			hideFetchSpinnerMaybe();
+		}
+	}
+}
+function launchAgent(request) {
+	return fetchJSON("/api/agent/launch", {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify(request)
+	});
+}
+//#endregion
+//#region web/src/connect-agent-methods.ts
+const storageKey = "lrv.connect-agent";
+var ConnectAgentMethods = class {
+	setAgentState(state) {
+		this.agentState = state;
+		this.agentAttached = state.attached;
+		document.body.classList.toggle("agent-attached", state.attached);
+		const available = this.context?.launch_available === true;
+		const active = state.attached || state.launch === "running";
+		const button = $$1("#connect-agent");
+		const badge = $$1("#agent-status");
+		button.hidden = !available || active;
+		badge.hidden = !available || !active;
+		const busy = state.busy || state.initial_review || !state.attached && state.launch === "running";
+		badge.classList.toggle("busy", busy);
+		badge.title = busy ? "The agent is working" : "The agent is waiting for discussion comments";
+		if (active) {
+			$$1("#connect-agent-popover").hidden = true;
+			button.setAttribute("aria-expanded", "false");
+		}
+	}
+	setupConnectAgent() {
+		const button = $$1("#connect-agent");
+		const popover = $$1("#connect-agent-popover");
+		const form = $$1("#connect-agent-form");
+		const provider = $$1("#agent-provider");
+		const model = $$1("#agent-model");
+		const effort = $$1("#agent-effort");
+		const review = $$1("#agent-initial-review");
+		const error = $$1("#agent-launch-error");
+		const submit = $$1("#agent-launch-submit");
+		try {
+			const saved = JSON.parse(localStorage.getItem(storageKey) || "null");
+			if (saved) {
+				provider.value = saved.provider === "codex" ? "codex" : "claude";
+				model.value = typeof saved.model === "string" ? saved.model : "";
+				effort.value = typeof saved.effort === "string" ? saved.effort : "";
+				review.checked = saved.initial_review !== false;
+			}
+		} catch {}
+		const values = () => ({
+			provider: provider.value,
+			model: model.value.trim(),
+			effort: effort.value.trim(),
+			initial_review: review.checked
+		});
+		const save = () => {
+			try {
+				localStorage.setItem(storageKey, JSON.stringify(values()));
+			} catch {}
+		};
+		form.addEventListener("input", save);
+		form.addEventListener("change", save);
+		const close = () => {
+			popover.hidden = true;
+			button.setAttribute("aria-expanded", "false");
+		};
+		button.addEventListener("click", () => {
+			popover.hidden = !popover.hidden;
+			button.setAttribute("aria-expanded", String(!popover.hidden));
+			if (!popover.hidden) {
+				error.textContent = this.agentState.error || "";
+				provider.focus();
+			}
+		});
+		document.addEventListener("click", (event) => {
+			if (!(event.target instanceof Node) || !button.parentElement?.contains(event.target)) close();
+		});
+		document.addEventListener("keydown", (event) => {
+			if (event.key === "Escape" && !popover.hidden) {
+				event.stopPropagation();
+				close();
+				button.focus();
+			}
+		});
+		form.addEventListener("submit", (event) => {
+			event.preventDefault();
+			save();
+			submit.disabled = true;
+			error.textContent = "";
+			const req = values();
+			const previousState = this.agentState;
+			launchAgent(req).then(() => {
+				if (this.agentState === previousState) this.setAgentState({
+					attached: this.agentAttached,
+					busy: true,
+					launch: "running",
+					initial_review: req.initial_review
+				});
+				close();
+			}).catch((reason) => {
+				error.textContent = reason instanceof Error ? reason.message : String(reason);
+			}).finally(() => {
+				submit.disabled = false;
+			});
+		});
+		this.setAgentState(this.agentState);
 	}
 };
 //#endregion
@@ -671,6 +845,20 @@ function linkifyText(text) {
 //#endregion
 //#region web/src/discussion-methods.ts
 var DiscussionMethods = class {
+	deleteDiscussion(root) {
+		return this.discussionManager.delete(root.id, () => {
+			this.reviewNoteManager.removeDiscussionReplies(root.id);
+		});
+	}
+	async summarizeDiscussion(root) {
+		const summary = this.reviewNoteManager.nextSummary(root.id);
+		await this.discussionManager.send({
+			thread_id: root.id,
+			body: "Summarize this thread as a review comment.",
+			summarize: true
+		});
+		return (await summary).body;
+	}
 	buildDiscussionNode(root) {
 		const box = el("div", { className: "discussion" });
 		for (const eventName of [
@@ -780,7 +968,35 @@ var DiscussionMethods = class {
 			resize();
 			textarea.focus();
 		});
-		box.appendChild(reply);
+		const actions = el("div", { className: "discussion-actions" });
+		const deleteButton = el("button", {
+			className: "btn-danger discussion-delete-btn",
+			text: "Delete"
+		});
+		const deleteError = el("div", { className: "comment-error" });
+		deleteError.hidden = true;
+		deleteButton.addEventListener("click", async () => {
+			deleteButton.disabled = true;
+			deleteError.hidden = true;
+			try {
+				await this.deleteDiscussion(root);
+			} catch (err) {
+				deleteButton.disabled = false;
+				deleteError.textContent = err instanceof Error ? err.message : "Failed to delete discussion";
+				deleteError.hidden = false;
+				box.dispatchEvent(new Event("discussion-layout"));
+			}
+		});
+		const convert = el("button", {
+			className: "btn-secondary discussion-convert-btn",
+			text: "Convert"
+		});
+		convert.addEventListener("click", () => {
+			if (this.isStacked) this.showStackedDiscussionDraft(root);
+			else this.showCommentDialog(root.file, root.line, commentEndLine(root), root.side, root);
+		});
+		actions.append(reply, convert, deleteButton);
+		box.append(actions, deleteError);
 		requestAnimationFrame(() => {
 			box.scrollTop = box.scrollHeight;
 		});
@@ -792,6 +1008,7 @@ var DiscussionMethods = class {
 var ReviewNoteManager = class {
 	notes;
 	listeners;
+	summaryWaiters = [];
 	currentCommitIdx;
 	constructor() {
 		this.notes = [];
@@ -825,7 +1042,22 @@ var ReviewNoteManager = class {
 		return this.notes.filter((n) => !n.discussion_id && n.file === file && (this.currentCommitIdx === null || n.commit_idx === this.currentCommitIdx));
 	}
 	getDiscussionReplies(discussionId) {
-		return this.notes.filter((n) => n.discussion_id === discussionId);
+		return this.notes.filter((n) => n.discussion_id === discussionId && !n.summary);
+	}
+	nextSummary(rootId) {
+		const isSummary = (note) => note.discussion_id === rootId && note.summary;
+		const known = new Set(this.notes.filter(isSummary));
+		return new Promise((resolve) => {
+			const check = () => {
+				const summary = this.notes.find((note) => isSummary(note) && !known.has(note));
+				if (summary) resolve(summary);
+				return !!summary;
+			};
+			this.summaryWaiters.push(check);
+		});
+	}
+	removeDiscussionReplies(id) {
+		this.notes = this.notes.filter((note) => note.discussion_id !== id);
 	}
 	updateNote(target, patch) {
 		const idx = this.notes.findIndex((note) => this.isSameNote(note, target));
@@ -843,71 +1075,13 @@ var ReviewNoteManager = class {
 		this.listeners.push(listener);
 	}
 	notifyListeners() {
+		this.summaryWaiters = this.summaryWaiters.filter((check) => !check());
 		this.listeners.forEach((l) => l());
 	}
 	isSameNote(a, b) {
 		return a === b || a.id !== void 0 && a.id === b.id;
 	}
 };
-//#endregion
-//#region web/src/api.ts
-let fileFetchPending = 0;
-let fileFetchDelayTimer = null;
-let fetchSpinnerEl = null;
-function ensureFetchSpinner() {
-	if (!fetchSpinnerEl) {
-		const host = document.querySelector(".header .header-actions");
-		if (!host) return;
-		const spinner = el("span", {
-			className: "fetch-spinner",
-			attrs: { id: "fetch-spinner" }
-		});
-		host.insertBefore(spinner, host.firstChild);
-		fetchSpinnerEl = spinner;
-	}
-}
-function showFetchSpinnerDelayed() {
-	ensureFetchSpinner();
-	if (!fetchSpinnerEl) return;
-	if (fileFetchDelayTimer) return;
-	fileFetchDelayTimer = setTimeout(() => {
-		if (fileFetchPending > 0) {
-			fetchSpinnerEl?.classList.add("visible");
-			const app = window.__APP;
-			if (app && typeof app.eagerPrefetchAllFiles === "function") app.eagerPrefetchAllFiles();
-		}
-		fileFetchDelayTimer = null;
-	}, 400);
-}
-function hideFetchSpinnerMaybe() {
-	if (fileFetchPending === 0) {
-		if (fileFetchDelayTimer) {
-			clearTimeout(fileFetchDelayTimer);
-			fileFetchDelayTimer = null;
-		}
-		if (fetchSpinnerEl) fetchSpinnerEl.classList.remove("visible");
-	}
-}
-async function fetchJSON(url, options) {
-	const isFile = url.startsWith("/api/file");
-	if (isFile) {
-		fileFetchPending++;
-		if (fileFetchPending === 1) showFetchSpinnerDelayed();
-	}
-	try {
-		const res = await fetch(url, options);
-		if (!res.ok) {
-			const text = await res.text();
-			throw new Error(`Request failed ${res.status} ${res.statusText} at ${url}${text ? `: ${text.slice(0, 200)}` : ""}`);
-		}
-		return await res.json();
-	} finally {
-		if (isFile) {
-			fileFetchPending = Math.max(0, fileFetchPending - 1);
-			hideFetchSpinnerMaybe();
-		}
-	}
-}
 //#endregion
 //#region web/src/live-events.ts
 function startLiveEvents(app) {
@@ -944,8 +1118,12 @@ function startLiveEvents(app) {
 			fetching = false;
 		}
 	};
-	source.addEventListener("agent", (e) => app.setAgentAttached(JSON.parse(e.data).attached === true));
-	source.addEventListener("error", () => app.setAgentAttached(false));
+	source.addEventListener("agent", (e) => app.setAgentState(JSON.parse(e.data)));
+	source.addEventListener("error", () => app.setAgentState({
+		...app.agentState,
+		attached: false,
+		busy: app.agentState.launch === "running"
+	}));
 	source.addEventListener("notes", () => void refresh());
 	window.addEventListener("pagehide", () => {
 		source.close();
@@ -12119,10 +12297,10 @@ var CommentsUIMethods = class {
 		this.modifiedDecorations = modifiedEditor.deltaDecorations(this.modifiedDecorations, modifiedDecorations);
 		this.originalDecorations = originalEditor.deltaDecorations(this.originalDecorations, originalDecorations);
 	}
-	showCommentDialog(file, commentLine, monacoLineNumber, side) {
+	showCommentDialog(file, commentLine, monacoLineNumber, side, discussion) {
 		if (!this.editor) return;
 		const targetEditor = side === "new" ? this.editor.getModifiedEditor() : this.editor.getOriginalEditor();
-		if (!Array.isArray(commentLine)) {
+		if (!discussion && !Array.isArray(commentLine)) {
 			const resolvedCommentLine = this.commentLineFromEditorSelection(targetEditor, monacoLineNumber, side === "new" ? this.lastModifiedRangeSelection : this.lastOriginalRangeSelection);
 			if (Array.isArray(resolvedCommentLine)) commentLine = resolvedCommentLine;
 		}
@@ -12131,7 +12309,7 @@ var CommentsUIMethods = class {
 			this.currentWidget = null;
 			this.currentWidgetEditor = null;
 		}
-		const existingIndex = this.commentManager.findComment(file, monacoLineNumber, side);
+		const existingIndex = discussion ? -1 : this.commentManager.findComment(file, monacoLineNumber, side);
 		const existingComment = existingIndex >= 0 ? this.commentManager.comments[existingIndex] : null;
 		const domNode = el("div", { className: "inline-comment-box" });
 		const updateMaxWidth = () => {
@@ -12149,10 +12327,14 @@ var CommentsUIMethods = class {
 				autofocus: true
 			}
 		});
-		const discuss = existingComment ? null : el("button", {
+		const discuss = existingComment || discussion ? null : el("button", {
 			className: "btn-secondary discuss-btn",
 			text: "Discuss"
 		});
+		const summarize = discussion ? el("button", {
+			className: "btn-secondary summarize-btn",
+			text: "Summarize"
+		}) : null;
 		const error = el("div", {
 			className: "comment-error",
 			attrs: { hidden: true }
@@ -12170,11 +12352,12 @@ var CommentsUIMethods = class {
 				className: "btn-secondary cancel-btn",
 				text: "Cancel"
 			}),
-			existingComment ? null : el("span", {
+			discuss ? el("span", {
 				className: "shortcut-hint discuss-hint",
 				text: `${modKey}+Alt+Enter to discuss`
-			}),
+			}) : null,
 			discuss,
+			summarize,
 			el("button", {
 				className: "btn-primary save-btn",
 				text: "Save"
@@ -12233,9 +12416,17 @@ var CommentsUIMethods = class {
 			textarea.removeEventListener("keydown", handleKeydown);
 			textarea.removeEventListener("input", autoResize);
 		};
-		const saveComment = () => {
+		const saveComment = async () => {
 			if (!textarea.value.trim()) {
 				textarea.focus();
+				return;
+			}
+			if (discussion) try {
+				await this.deleteDiscussion(discussion);
+			} catch (err) {
+				error.textContent = err instanceof Error ? err.message : "Failed to delete discussion";
+				error.hidden = false;
+				targetEditor.layoutContentWidget(widget);
 				return;
 			}
 			if (existingIndex >= 0) this.commentManager.updateComment(existingIndex, textarea.value);
@@ -12277,7 +12468,23 @@ var CommentsUIMethods = class {
 			}
 		};
 		if (discuss) discuss.onclick = () => void sendDiscussion();
-		if (saveBtn) saveBtn.onclick = saveComment;
+		if (summarize && discussion) summarize.onclick = async () => {
+			summarize.disabled = true;
+			summarize.textContent = "Summarizing…";
+			error.hidden = true;
+			try {
+				textarea.value = await this.summarizeDiscussion(discussion);
+				autoResize();
+			} catch (err) {
+				error.textContent = err instanceof DiscussionError && err.status === 409 ? "No agent is listening any more" : "Failed to request a summary. Try again.";
+				error.hidden = false;
+			} finally {
+				summarize.disabled = false;
+				summarize.textContent = "Summarize";
+				targetEditor.layoutContentWidget(widget);
+			}
+		};
+		if (saveBtn) saveBtn.onclick = () => void saveComment();
 		if (cancelBtn) cancelBtn.onclick = cleanup;
 		const deleteBtnEl = domNode.querySelector(".delete-btn");
 		if (deleteBtnEl) deleteBtnEl.onclick = () => {
@@ -13764,6 +13971,15 @@ var StackedViewMethods = class {
 		};
 		this.renderStackedComments();
 	}
+	showStackedDiscussionDraft(discussion) {
+		this.stackedDraft = {
+			file: discussion.file,
+			line: discussion.line,
+			side: discussion.side,
+			discussion
+		};
+		this.renderStackedComments();
+	}
 	showStackedDraftFromSelection(file, range) {
 		if (!file || !range) return;
 		const startSide = range.side ? this.fromAnnotationSide(range.side) : null;
@@ -13833,6 +14049,12 @@ var StackedViewMethods = class {
 		ta.className = "stacked-comment-ta";
 		ta.placeholder = "Add a comment...";
 		ta.rows = 3;
+		const state = this.stackedDraft ?? draft;
+		ta.value = state.body ?? "";
+		ta.addEventListener("input", () => {
+			state.body = ta.value;
+		});
+		const { discussion } = draft;
 		const save = el("button", {
 			className: "stacked-comment-save btn-primary",
 			text: "Save"
@@ -13851,14 +14073,26 @@ var StackedViewMethods = class {
 			className: "stacked-comment-discuss btn-secondary discuss-btn",
 			text: "Discuss"
 		});
+		const summarize = discussion ? el("button", {
+			className: "stacked-comment-summarize btn-secondary summarize-btn",
+			text: state.summarizing ? "Summarizing…" : "Summarize",
+			attrs: { disabled: state.summarizing }
+		}) : null;
 		const error = el("div", {
 			className: "comment-error",
 			attrs: { hidden: true }
 		});
-		const doSave = () => {
+		const doSave = async () => {
 			const body = ta.value.trim();
 			if (!body) {
 				ta.focus();
+				return;
+			}
+			if (discussion) try {
+				await this.deleteDiscussion(discussion);
+			} catch (err) {
+				error.textContent = err instanceof Error ? err.message : "Failed to delete discussion";
+				error.hidden = false;
 				return;
 			}
 			const comment = {
@@ -13898,7 +14132,27 @@ var StackedViewMethods = class {
 			}
 		};
 		discuss.addEventListener("click", () => void sendDiscussion());
-		save.addEventListener("click", doSave);
+		summarize?.addEventListener("click", async () => {
+			state.summarizing = true;
+			summarize.disabled = true;
+			summarize.textContent = "Summarizing…";
+			error.hidden = true;
+			try {
+				const body = await this.summarizeDiscussion(discussion);
+				delete state.summarizing;
+				if (this.stackedDraft === state) {
+					state.body = body;
+					this.renderStackedComments();
+				}
+			} catch (err) {
+				delete state.summarizing;
+				summarize.disabled = false;
+				summarize.textContent = "Summarize";
+				error.textContent = err instanceof DiscussionError && err.status === 409 ? "No agent is listening any more" : "Failed to request a summary. Try again.";
+				error.hidden = false;
+			}
+		});
+		save.addEventListener("click", () => void doSave());
 		cancel.addEventListener("click", () => {
 			reset();
 		});
@@ -13906,14 +14160,14 @@ var StackedViewMethods = class {
 			if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
 				event.preventDefault();
 				if (event.altKey) {
-					if (this.agentAttached) sendDiscussion();
+					if (this.agentAttached && !discussion) sendDiscussion();
 					return;
 				}
 				doSave();
 			} else if (event.key === "Escape") reset();
 		});
 		form.append(ta, error, el("div", { className: "stacked-comment-actions" }, [
-			discuss,
+			discussion ? summarize : discuss,
 			save,
 			cancel
 		]));
@@ -14167,12 +14421,11 @@ var MonacoApp = class {
 	commitLoadGeneration;
 	commentDraftKey;
 	commentDraftWrite;
-	setAgentAttached(attached) {
-		this.agentAttached = attached;
-		document.body.classList.toggle("agent-attached", attached);
-		const badge = $$1("#agent-status");
-		if (badge) badge.hidden = !attached;
-	}
+	agentState = {
+		attached: false,
+		busy: false,
+		launch: "idle"
+	};
 	constructor() {
 		this.commentManager = new CommentManager();
 		this.reviewNoteManager = new ReviewNoteManager();
@@ -14417,6 +14670,8 @@ var MonacoApp = class {
 		}
 		const themeColors = defs[themeName]?.colors ?? {};
 		const fromTheme = (token) => themeColors[token] ?? "";
+		setVar("--success-color", fromTheme("testing.iconPassed") || "#3fb950");
+		setVar("--warning-color", fromTheme("editorWarning.foreground") || "#d29922");
 		setVar("--bg-primary", fromTheme("editor.background"));
 		setVar("--bg-secondary", fromTheme("editorGutter.background") || fromTheme("editor.lineHighlightBackground") || fromTheme("editor.background"));
 		setVar("--bg-elevated", fromTheme("editorGutter.background") || fromTheme("editor.lineHighlightBackground") || fromTheme("editor.background"));
@@ -14531,6 +14786,7 @@ var MonacoApp = class {
 			this.showSettingsModal();
 		});
 		$$1("#help-btn")?.addEventListener("click", () => this.showKeyboardHelp());
+		this.setupConnectAgent();
 		const submitBtn = $$1("#submit-review");
 		const menu = $$1("#submit-menu");
 		const menuItems = Array.from(menu.querySelectorAll("[role=\"menuitem\"]"));
@@ -14637,6 +14893,7 @@ applyMixin(MonacoApp, DialogMethods);
 applyMixin(MonacoApp, SeriesMethods);
 applyMixin(MonacoApp, StackedViewMethods);
 applyMixin(MonacoApp, PublishDialogMethods);
+applyMixin(MonacoApp, ConnectAgentMethods);
 //#endregion
 //#region web/src/main.ts
 document.title = "lrv — Loading…";

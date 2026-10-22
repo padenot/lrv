@@ -67,6 +67,7 @@ fn get_project_context(cwd: Option<&PathBuf>) -> lrv::types::ProjectContext {
         git_branch,
         title: None,
         is_public: false,
+        launch_available: true,
         claude_skill_installed: false,
         comment_store_error: None,
         phabricator_available: false,

@@ -34,6 +34,8 @@
   --text-tertiary: #6e6e6e;
   /* --accent-color is set from the theme (e.g., Firefox DevTools Dark uses pink) */
   --accent-color: #007acc;
+  --success-color: #3fb950;
+  --warning-color: #d29922;
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   --font-mono: 'JetBrains Mono', 'Monaco', 'Menlo', 'Consolas', monospace;
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
@@ -354,7 +356,7 @@ body {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--accent-color);
+  background: var(--success-color);
 }
 
 .agent-badge[hidden] {
@@ -2336,6 +2338,7 @@ body {
 }
 
 body:not(.agent-attached) .discuss-btn,
+body:not(.agent-attached) .summarize-btn,
 body:not(.agent-attached) .discussion-reply-btn,
 body:not(.agent-attached) .discuss-hint {
   display: none;
@@ -2409,6 +2412,12 @@ body:not(.agent-attached) .discuss-hint {
   padding-left: 8px;
 }
 
+.discussion-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+
 .discussion-reply {
   margin-top: 8px;
 }
@@ -2430,4 +2439,65 @@ body:not(.agent-attached) .discuss-hint {
   display: flex;
   gap: 8px;
   margin-top: 6px;
+}
+
+.agent-badge.busy::before {
+  background: var(--warning-color);
+  animation: agent-pulse 2.8s ease-in-out infinite;
+}
+@keyframes agent-pulse {
+  50% {
+    opacity: 0.4;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .agent-badge.busy::before {
+    animation: none;
+  }
+}
+.connect-agent-split {
+  position: relative;
+}
+#connect-agent[hidden],
+#connect-agent-popover[hidden] {
+  display: none;
+}
+#connect-agent-popover {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 1000;
+  width: 280px;
+  padding: 16px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  box-shadow: var(--shadow-md);
+}
+#connect-agent-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+#connect-agent-form input:not([type='checkbox']),
+#connect-agent-form select {
+  width: 100%;
+  padding: 6px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+}
+.agent-review-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+#agent-launch-error {
+  color: var(--warning-color);
+  overflow-wrap: anywhere;
+  margin: 0;
+}
+#agent-launch-error:empty {
+  display: none;
 }

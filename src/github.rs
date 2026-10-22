@@ -185,6 +185,7 @@ fn notes_from_comments(comments: Vec<GhComment>, diffs: &[DiffResponse]) -> Vec<
             date: comment.created_at.clone(),
             source_url: comment.html_url.clone(),
             commit_idx,
+            summary: false,
             discussion_id: None,
             read_only: false,
         });

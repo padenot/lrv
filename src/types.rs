@@ -101,6 +101,8 @@ pub struct ReviewNote {
     pub id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub discussion_id: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub summary: bool,
     pub file: String,
     pub line: CommentLine,
     pub side: Side,
@@ -186,6 +188,7 @@ impl ReviewNote {
             date,
             source_url,
             commit_idx,
+            summary: false,
             discussion_id: None,
             read_only: true,
         }
@@ -234,6 +237,8 @@ pub struct ProjectContext {
     pub git_branch: Option<String>,
     pub title: Option<String>,
     pub is_public: bool,
+    #[serde(default)]
+    pub launch_available: bool,
     pub claude_skill_installed: bool,
     /// Set when no comment database could be opened, so comments are not
     /// saved for recovery.
@@ -364,6 +369,7 @@ mod tests {
             date: None,
             source_url: None,
             commit_idx,
+            summary: false,
             discussion_id: None,
             read_only: false,
         }

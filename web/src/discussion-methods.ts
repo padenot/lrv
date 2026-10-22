@@ -1,12 +1,32 @@
 import { el } from './dom';
 import { appendLinkifiedText } from './linkify';
-import { commentLineLabel } from './comments';
+import { commentEndLine, commentLineLabel } from './comments';
 import { DiscussionError, type Discussion } from './discussions';
 import type { AppContext } from './types/app';
 
 export class DiscussionMethods {
   declare discussionManager: AppContext['discussionManager'];
   declare reviewNoteManager: AppContext['reviewNoteManager'];
+  declare isStacked: AppContext['isStacked'];
+  declare showCommentDialog: AppContext['showCommentDialog'];
+  declare showStackedDiscussionDraft: AppContext['showStackedDiscussionDraft'];
+
+  deleteDiscussion(root: Discussion): Promise<void> {
+    return this.discussionManager.delete(root.id, () => {
+      this.reviewNoteManager.removeDiscussionReplies(root.id);
+    });
+  }
+
+  async summarizeDiscussion(root: Discussion): Promise<string> {
+    // Wait from before sending, so a fast reply can't be missed.
+    const summary = this.reviewNoteManager.nextSummary(root.id);
+    await this.discussionManager.send({
+      thread_id: root.id,
+      body: 'Summarize this thread as a review comment.',
+      summarize: true,
+    });
+    return (await summary).body;
+  }
 
   buildDiscussionNode(root: Discussion) {
     const box = el('div', { className: 'discussion' });
@@ -107,7 +127,39 @@ export class DiscussionMethods {
       resize();
       textarea.focus();
     });
-    box.appendChild(reply);
+    const actions = el('div', { className: 'discussion-actions' });
+    const deleteButton = el('button', {
+      className: 'btn-danger discussion-delete-btn',
+      text: 'Delete',
+    });
+    const deleteError = el('div', { className: 'comment-error' });
+    deleteError.hidden = true;
+    deleteButton.addEventListener('click', async () => {
+      deleteButton.disabled = true;
+      deleteError.hidden = true;
+      try {
+        await this.deleteDiscussion(root);
+      } catch (err) {
+        deleteButton.disabled = false;
+        deleteError.textContent =
+          err instanceof Error ? err.message : 'Failed to delete discussion';
+        deleteError.hidden = false;
+        box.dispatchEvent(new Event('discussion-layout'));
+      }
+    });
+    const convert = el('button', {
+      className: 'btn-secondary discussion-convert-btn',
+      text: 'Convert',
+    });
+    convert.addEventListener('click', () => {
+      if (this.isStacked) {
+        this.showStackedDiscussionDraft(root);
+      } else {
+        this.showCommentDialog(root.file, root.line, commentEndLine(root), root.side, root);
+      }
+    });
+    actions.append(reply, convert, deleteButton);
+    box.append(actions, deleteError);
     requestAnimationFrame(() => {
       box.scrollTop = box.scrollHeight;
     });
