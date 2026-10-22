@@ -731,6 +731,53 @@ async fn shutdown_signal() -> i32 {
     }
 }
 
+async fn fetch_phab_notes(
+    client: &PhabricatorClient,
+    revisions: Vec<(usize, String)>,
+    include_done: bool,
+    diffs: &[DiffResponse],
+) -> Vec<(usize, String, Result<Vec<ReviewNote>>)> {
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(4));
+    let mut tasks = tokio::task::JoinSet::new();
+    for (idx, revision) in revisions {
+        let client = client.clone();
+        let semaphore = semaphore.clone();
+        tasks.spawn(async move {
+            let _permit = semaphore.acquire_owned().await.expect("semaphore open");
+            eprintln!("Loading review comments from Phabricator {revision}...");
+            let fetched = tokio::time::timeout(
+                Duration::from_secs(30),
+                client.fetch_review_notes(&revision, include_done),
+            )
+            .await
+            .context("timed out")
+            .and_then(|result| result);
+            (idx, revision, fetched)
+        });
+    }
+    let mut results = Vec::new();
+    while let Some(result) = tasks.join_next().await {
+        let (idx, revision, mut fetched) = result.expect("Phabricator fetch task panicked");
+        if let Ok(notes) = &mut fetched {
+            for note in notes.iter_mut() {
+                if note.file != "(commit)" {
+                    note.side = infer_review_note_side(note, diffs, Some(idx));
+                }
+                note.commit_idx = Some(idx);
+            }
+            eprintln!(
+                "Loaded {} active review note{} from {}",
+                notes.len(),
+                if notes.len() == 1 { "" } else { "s" },
+                revision
+            );
+        }
+        results.push((idx, revision, fetched));
+    }
+    results.sort_by_key(|(idx, _, _)| *idx);
+    results
+}
+
 async fn load_phabricator_notes(
     revisions: &[String],
     base_url: &str,
@@ -744,37 +791,23 @@ async fn load_phabricator_notes(
     let token = phabricator::phabricator_token(base_url)?;
     let client = PhabricatorClient::new(base_url.to_string(), token)?;
     let mut notes = Vec::new();
-
-    for (idx, revision) in revisions.iter().enumerate() {
-        eprintln!("Loading review comments from Phabricator {}...", revision);
-        let mut revision_notes = client.fetch_review_notes(revision, include_done).await?;
-        let commit_idx = Some(idx);
-        for note in &mut revision_notes {
-            if note.file != "(commit)" {
-                note.side = infer_review_note_side(note, diffs, commit_idx);
-            }
-            note.commit_idx = commit_idx;
-        }
-        eprintln!(
-            "Loaded {} active review note{} from {}",
-            revision_notes.len(),
-            if revision_notes.len() == 1 { "" } else { "s" },
-            revision
-        );
-        notes.extend(revision_notes);
+    for (_, _, fetched) in fetch_phab_notes(
+        &client,
+        revisions.iter().cloned().enumerate().collect(),
+        include_done,
+        diffs,
+    )
+    .await
+    {
+        notes.extend(fetched?);
     }
-
     validate_review_notes(&notes)?;
     Ok(notes)
 }
 
 /// Load the comments of the Phabricator revision(s) named by the commits' `Differential Revision:`
 /// trailers. `None` when no commit has one. Failures are warnings: the review must open regardless.
-async fn auto_fetch_phab(
-    diffs: &[DiffResponse],
-    include_done: bool,
-    skip: &HashMap<usize, &RevisionStatusInfo>,
-) -> Option<Vec<ReviewNote>> {
+async fn auto_fetch_phab(diffs: &[DiffResponse], include_done: bool) -> Option<Vec<ReviewNote>> {
     let messages: Vec<Option<&str>> = diffs.iter().map(|d| d.commit_message.as_deref()).collect();
     let revisions: Vec<(usize, String, u32)> =
         phabricator::resolve_phab_targets(&[], "", &messages)
@@ -786,50 +819,38 @@ async fn auto_fetch_phab(
         return None;
     }
 
-    let token = match phabricator::phabricator_token(&revisions[0].1) {
-        Ok(token) => token,
+    let client = (|| {
+        let base = &revisions[0].1;
+        let token = phabricator::phabricator_token(base)?;
+        PhabricatorClient::new(base.clone(), token)
+    })();
+    let client = match client {
+        Ok(client) => client,
         Err(e) => {
             eprintln!("warning: not loading Phabricator comments: {e:#}");
             return Some(Vec::new());
         }
     };
+    let mut hosts: Vec<(String, Vec<(usize, String)>)> = Vec::new();
+    for (idx, base, id) in revisions {
+        if let Some((_, revisions)) = hosts.iter_mut().find(|(host, _)| host == &base) {
+            revisions.push((idx, format!("D{id}")));
+        } else {
+            hosts.push((base, vec![(idx, format!("D{id}"))]));
+        }
+    }
+    let mut results = Vec::new();
+    for (base, revisions) in hosts {
+        results.extend(
+            fetch_phab_notes(&client.with_base_url(base), revisions, include_done, diffs).await,
+        );
+    }
+    results.sort_by_key(|(idx, _, _)| *idx);
     let mut notes = Vec::new();
-    for (i, base, id) in revisions {
-        if let Some(revision) = skip.get(&i) {
-            eprintln!(
-                "warning: not loading comments from D{id}: {}; update your checkout (e.g. moz-phab patch D{id})",
-                revision.reason.as_deref().unwrap_or_default()
-            );
-            continue;
-        }
-        eprintln!("Loading review comments from Phabricator D{id}...");
-        let fetched = async {
-            let client = PhabricatorClient::new(base, token.clone())?;
-            tokio::time::timeout(
-                std::time::Duration::from_secs(30),
-                client.fetch_review_notes(&format!("D{id}"), include_done),
-            )
-            .await
-            .context("timed out")?
-        }
-        .await;
+    for (_, revision, fetched) in results {
         match fetched {
-            Ok(mut revision_notes) => {
-                let commit_idx = Some(i);
-                for note in &mut revision_notes {
-                    if note.file != "(commit)" {
-                        note.side = infer_review_note_side(note, diffs, commit_idx);
-                    }
-                    note.commit_idx = commit_idx;
-                }
-                eprintln!(
-                    "Loaded {} active review note{} from D{id}",
-                    revision_notes.len(),
-                    if revision_notes.len() == 1 { "" } else { "s" },
-                );
-                notes.extend(revision_notes);
-            }
-            Err(e) => eprintln!("warning: failed to load comments from D{id}: {e:#}"),
+            Ok(revision_notes) => notes.extend(revision_notes),
+            Err(e) => eprintln!("warning: failed to load comments from {revision}: {e:#}"),
         }
     }
     Some(notes)
@@ -1285,12 +1306,31 @@ async fn main() -> Result<()> {
         || args.github_pr_comments.is_some()
         || args.github_pr.is_some();
     let config_fetch = user_config.auto_fetch_comments && !explicit_comments;
-    let outdated = match &publisher {
-        Some(publisher) if !args.phab_revisions.is_empty() || config_fetch => {
-            outdated_phab_revisions(publisher).await
+    let validation = async {
+        match &publisher {
+            Some(publisher) if !args.phab_revisions.is_empty() || config_fetch => {
+                outdated_phab_revisions(publisher).await
+            }
+            _ => Vec::new(),
         }
-        _ => Vec::new(),
     };
+    let fetch_notes = async {
+        let named = load_phabricator_notes(
+            &named_revisions,
+            &phab_base_url,
+            args.phab_include_done,
+            &diffs,
+        );
+        let trailers = async {
+            if named_revisions.len() < args.phab_revisions.len() || config_fetch {
+                auto_fetch_phab(&diffs, args.phab_include_done).await
+            } else {
+                None
+            }
+        };
+        tokio::join!(named, trailers)
+    };
+    let (outdated, (named_notes, trailer_notes)) = tokio::join!(validation, fetch_notes);
     // An explicit --phab-revision aborts; comments fetched because of the config are skipped.
     if !args.phab_revisions.is_empty() && !outdated.is_empty() {
         let reasons = outdated
@@ -1303,22 +1343,27 @@ async fn main() -> Result<()> {
             outdated[0].id
         );
     }
-    let skip = outdated
+    let skip: HashMap<_, _> = outdated
         .iter()
         .flat_map(|revision| revision.commit_idxs.iter().map(move |&idx| (idx, revision)))
         .collect();
-    review_notes.extend(
-        load_phabricator_notes(
-            &named_revisions,
-            &phab_base_url,
-            args.phab_include_done,
-            &diffs,
-        )
-        .await?,
-    );
+    review_notes.extend(named_notes?);
+    let trailer_notes = trailer_notes.map(|mut notes| {
+        for revision in &outdated {
+            let id = &revision.id;
+            for _ in &revision.commit_idxs {
+                eprintln!(
+                    "warning: not loading comments from {id}: {}; update your checkout (e.g. moz-phab patch {id})",
+                    revision.reason.as_deref().unwrap_or_default()
+                );
+            }
+        }
+        notes.retain(|note| !note.commit_idx.is_some_and(|idx| skip.contains_key(&idx)));
+        notes
+    });
     if named_revisions.len() < args.phab_revisions.len() {
-        match auto_fetch_phab(&diffs, args.phab_include_done, &skip).await {
-            Some(notes) => review_notes.extend(notes),
+        match trailer_notes.as_ref() {
+            Some(notes) => review_notes.extend(notes.iter().cloned()),
             None => eprintln!("warning: no commit has a Differential Revision trailer"),
         }
     }
@@ -1353,7 +1398,7 @@ async fn main() -> Result<()> {
         None => {}
     }
     if config_fetch {
-        match auto_fetch_phab(&diffs, args.phab_include_done, &skip).await {
+        match trailer_notes {
             Some(notes) => review_notes.extend(notes),
             None => {
                 if let Some((notes, prs)) = auto_fetch_github(&diffs).await {
