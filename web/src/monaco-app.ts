@@ -34,7 +34,7 @@ import { StackedViewMethods } from './stacked-view-methods';
 import type {
   AgentState,
   PhabStatus,
-  PublishTabState,
+  PublishState,
   AppConfig,
   AppConfigInput,
   AppContextData,
@@ -67,9 +67,13 @@ export class MonacoApp {
   agentAttached = false;
   publishedCommentKeys = new Set<string>();
   publishedRevisionIds = new Set<string>();
-  publishTabStates = new Map<string, PublishTabState>();
+  publishStates = new Map<string, PublishState>();
   phabStatus: Promise<PhabStatus> | null = null;
-  declare showPublishDialog: () => Promise<void>;
+  declare showPublishDialog: (revisionId: string) => Promise<void>;
+  declare updatePublishButton: () => void;
+  phabRevisionStatus: PhabStatus | null = null;
+  phabValidationError: string | null = null;
+  declare revisionIdFor: (commitIdx: number) => string | null;
   declare prefetchPhabricator: () => Promise<PhabStatus>;
   commentManager: CommentManager;
   reviewNoteManager: ReviewNoteManager;
@@ -645,60 +649,19 @@ export class MonacoApp {
 
     this.setupConnectAgent();
 
-    // Submit button: a plain button, or a menu of destinations when there's a revision to publish to.
-    const submitBtn = $<HTMLButtonElement>('#submit-review')!;
-    const menu = $<HTMLElement>('#submit-menu')!;
-    const menuItems = Array.from(menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'));
-    const hasMenu = !!this.context.phabricator_available;
-    if (hasMenu) {
-      submitBtn.textContent = 'Submit To..';
-      submitBtn.setAttribute('aria-haspopup', 'menu');
-      submitBtn.setAttribute('aria-expanded', 'false');
-    }
-    const closeMenu = () => {
-      menu.hidden = true;
-      submitBtn.setAttribute('aria-expanded', 'false');
-    };
-    submitBtn.addEventListener('click', () => {
-      if (!hasMenu) {
-        void this.showSubmitConfirmation();
-        return;
-      }
-      menu.hidden = !menu.hidden;
-      submitBtn.setAttribute('aria-expanded', String(!menu.hidden));
-      if (!menu.hidden) {
-        menuItems[0]?.focus();
-        void this.prefetchPhabricator().catch(() => {});
-      }
-    });
-    menu.addEventListener('keydown', (event) => {
-      if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') {
-        return;
-      }
-      event.preventDefault();
-      const step = event.key === 'ArrowDown' ? 1 : -1;
-      const current = menuItems.indexOf(document.activeElement as HTMLButtonElement);
-      menuItems[(current + step + menuItems.length) % menuItems.length]?.focus();
-    });
-    document.addEventListener('click', (event) => {
-      if (!(event.target instanceof Node) || !submitBtn.parentElement?.contains(event.target)) {
-        closeMenu();
-      }
-    });
-    document.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape' && !menu.hidden) {
-        closeMenu();
-        submitBtn.focus();
-      }
-    });
-    $('#send-to-agent')?.addEventListener('click', () => {
-      closeMenu();
+    $('#submit-review')?.addEventListener('click', () => {
       void this.showSubmitConfirmation();
     });
-    $('#publish-to-phabricator')?.addEventListener('click', () => {
-      closeMenu();
-      void this.showPublishDialog();
+    $('#publish-commit')?.addEventListener('click', () => {
+      const id = this.revisionIdFor(this.currentCommitIdx);
+      if (id) {
+        void this.showPublishDialog(id);
+      }
     });
+    this.updatePublishButton();
+    if (this.context.phabricator_available) {
+      void this.prefetchPhabricator().catch((error) => console.error(error));
+    }
 
     // Toggle view
     $('#toggle-view')?.addEventListener('click', () => {

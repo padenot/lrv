@@ -114,7 +114,10 @@ for (const stacked of [false, true]) {
       });
       await expect(page.locator('#comment-count')).toHaveText('0');
       await page.locator('#submit-review').click();
-      await expect(page.getByText('No comments. Submit to approve this review.')).toBeVisible();
+      await expect(page.getByText('No comments. Finish to approve this review.')).toBeVisible();
+      await expect(page.locator('.submit-review-modal')).toContainText(
+        '1 discussion will be discarded. Convert them first to keep them.',
+      );
       await expect(page.locator('.submit-review-modal')).not.toContainText('First discussion');
       await page.locator('.cancel-submit-btn').click();
       expect(await commentDraftCount(page)).toBe(0);
@@ -364,8 +367,19 @@ for (const stacked of [false, true]) {
       expect(await (await page.request.get(`${url}/api/discussions`)).json()).toEqual([]);
       const notes = await (await page.request.get(`${url}/api/review-notes`)).json();
       expect(notes.every((note: { discussion_id?: string }) => !note.discussion_id)).toBe(true);
+      const finalListener = (async () => {
+        for (;;) {
+          const result = await listen(30);
+          if (result.status === 'ended') {
+            return result;
+          }
+        }
+      })();
+      await expect(page.locator('#agent-status')).toBeVisible();
+      await expect(page.locator('#agent-status')).not.toHaveClass(/busy/);
       await page.locator('#submit-review').click();
       await page.locator('.confirm-submit-btn').click();
+      expect(await finalListener).toEqual({ status: 'ended' });
       await expect.poll(() => server.exitCode).toBe(0);
       const submitted = JSON.parse(stdout);
       expect(submitted.comments).toEqual([
