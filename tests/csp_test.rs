@@ -26,9 +26,11 @@ async fn test_csp_header_present() {
         git_branch: None,
         title: None,
         is_public: false,
+        launch_available: true,
         claude_skill_installed: false,
         comment_store_error: None,
         phabricator_available: false,
+        phabricator_revisions: Vec::new(),
     };
     let (shutdown_tx, _rx) = tokio::sync::mpsc::channel::<()>(1);
     let state = lrv::server::AppState {
@@ -37,6 +39,9 @@ async fn test_csp_header_present() {
         overall_comment: std::sync::Arc::new(tokio::sync::Mutex::new(None)),
         notes_version: std::sync::Arc::new(tokio::sync::watch::channel(0).0),
         agent_token: std::sync::Arc::from("test-token"),
+        agent: lrv::agent::AgentChannel::new(lrv::agent::lease_from_env()),
+        launcher: lrv::launch::AgentLauncher::new(),
+        raw_diffs: std::sync::Arc::new(Vec::new()),
         review_notes: std::sync::Arc::new(tokio::sync::Mutex::new(vec![])),
         shutdown_tx: std::sync::Arc::new(tokio::sync::Mutex::new(Some(shutdown_tx))),
         config: std::sync::Arc::new(tokio::sync::Mutex::new(config)),
@@ -90,9 +95,11 @@ async fn test_csp_on_assets_and_api() {
         git_branch: None,
         title: None,
         is_public: false,
+        launch_available: true,
         claude_skill_installed: false,
         comment_store_error: None,
         phabricator_available: false,
+        phabricator_revisions: Vec::new(),
     };
     let (shutdown_tx, _rx) = tokio::sync::mpsc::channel::<()>(1);
     let state = lrv::server::AppState {
@@ -101,6 +108,9 @@ async fn test_csp_on_assets_and_api() {
         overall_comment: std::sync::Arc::new(tokio::sync::Mutex::new(None)),
         notes_version: std::sync::Arc::new(tokio::sync::watch::channel(0).0),
         agent_token: std::sync::Arc::from("test-token"),
+        agent: lrv::agent::AgentChannel::new(lrv::agent::lease_from_env()),
+        launcher: lrv::launch::AgentLauncher::new(),
+        raw_diffs: std::sync::Arc::new(Vec::new()),
         review_notes: std::sync::Arc::new(tokio::sync::Mutex::new(vec![])),
         shutdown_tx: std::sync::Arc::new(tokio::sync::Mutex::new(Some(shutdown_tx))),
         config: std::sync::Arc::new(tokio::sync::Mutex::new(config)),

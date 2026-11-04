@@ -41,9 +41,11 @@ fn make_state_with_root(root: &str) -> lrv::server::AppState {
         git_branch: None,
         title: None,
         is_public: false,
+        launch_available: true,
         claude_skill_installed: false,
         comment_store_error: None,
         phabricator_available: false,
+        phabricator_revisions: Vec::new(),
     };
     let (shutdown_tx, _rx) = mpsc::channel::<()>(1);
     lrv::server::AppState {
@@ -52,6 +54,9 @@ fn make_state_with_root(root: &str) -> lrv::server::AppState {
         overall_comment: Arc::new(Mutex::new(None)),
         notes_version: std::sync::Arc::new(tokio::sync::watch::channel(0).0),
         agent_token: Arc::from("test-token"),
+        agent: lrv::agent::AgentChannel::new(lrv::agent::lease_from_env()),
+        launcher: lrv::launch::AgentLauncher::new(),
+        raw_diffs: std::sync::Arc::new(Vec::new()),
         review_notes: Arc::new(Mutex::new(vec![])),
         shutdown_tx: Arc::new(Mutex::new(Some(shutdown_tx))),
         config: Arc::new(Mutex::new(config)),

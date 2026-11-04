@@ -12,6 +12,7 @@ import type {
   FileContents,
   SelectedLineRange,
 } from '../../node_modules/@pierre/diffs/dist/types.js';
+import { DiscussionError, type Discussion } from './discussions';
 import { el, clearEl } from './dom';
 import {
   commentDisplayText,
@@ -27,7 +28,18 @@ import type { AppConfig, AppContext, DiffFile, DiffLine, Side } from './types/ap
 type StackedAnnotation =
   | { kind: 'comment'; comment: ReviewComment; index: number }
   | { kind: 'review-note'; note: ReviewNote }
-  | { kind: 'draft'; file: string; line: CommentLine; side: Side };
+  | { kind: 'discussion'; discussion: Discussion }
+  | ({ kind: 'draft' } & StackedDraft);
+
+// With `discussion`, saving converts that thread into the comment.
+type StackedDraft = {
+  file: string;
+  line: CommentLine;
+  side: Side;
+  discussion?: Discussion;
+  body?: string;
+  summarizing?: boolean;
+};
 
 const DIFFS_THEME = { dark: 'pierre-dark', light: 'pierre-light' } as const;
 
@@ -71,6 +83,8 @@ function createDiffsWorker() {
 export class StackedViewMethods {
   declare files: AppContext['files'];
   declare commentManager: AppContext['commentManager'];
+  declare discussionManager: AppContext['discussionManager'];
+  declare agentAttached: boolean;
   declare reviewNoteManager: AppContext['reviewNoteManager'];
   declare isStacked: boolean;
   declare currentCommitIdx: AppContext['currentCommitIdx'];
@@ -82,6 +96,9 @@ export class StackedViewMethods {
   declare renderFileList: () => void;
   declare currentFileIndex: number;
   declare currentFileIsCommit: boolean;
+  declare buildDiscussionNode: (discussion: Discussion) => HTMLElement;
+  declare deleteDiscussion: AppContext['deleteDiscussion'];
+  declare summarizeDiscussion: AppContext['summarizeDiscussion'];
   declare buildReviewNoteNode: (note: ReviewNote) => HTMLElement;
   declare editor: AppContext['editor'];
   declare _commitViewEl: HTMLElement | null;
@@ -93,7 +110,7 @@ export class StackedViewMethods {
   private stackedCodeView: CodeView<StackedAnnotation> | null;
   private stackedItems: Map<string, CodeViewDiffItem<StackedAnnotation>>;
   private stackedFileMetadata: Map<string, FileDiffMetadata>;
-  private stackedDraft: { file: string; line: CommentLine; side: Side } | null;
+  private stackedDraft: StackedDraft | null;
   private stackedItemVersion: number;
   private stackedScrollUnsubscribe: (() => void) | null;
   private stackedRenderToken: number;
@@ -495,6 +512,16 @@ export class StackedViewMethods {
     this.renderStackedComments();
   }
 
+  showStackedDiscussionDraft(discussion: Discussion) {
+    this.stackedDraft = {
+      file: discussion.file,
+      line: discussion.line,
+      side: discussion.side,
+      discussion,
+    };
+    this.renderStackedComments();
+  }
+
   private showStackedDraftFromSelection(file: string, range: SelectedLineRange | null) {
     if (!file || !range) {
       return;
@@ -601,6 +628,11 @@ export class StackedViewMethods {
     if (metadata.kind === 'draft') {
       return this.buildDraftAnnotation(metadata);
     }
+    if (metadata.kind === 'discussion') {
+      const wrap = el('div', { className: 'stacked-annotation' });
+      wrap.appendChild(this.buildDiscussionNode(metadata.discussion));
+      return wrap;
+    }
     if (metadata.kind === 'review-note') {
       const wrap = el('div', {
         className: `stacked-annotation stacked-review-note-${metadata.note.side}`,
@@ -616,17 +648,51 @@ export class StackedViewMethods {
     ta.className = 'stacked-comment-ta';
     ta.placeholder = 'Add a comment...';
     ta.rows = 3;
+    // Keep the text in the draft so a re-render doesn't lose it.
+    const state = this.stackedDraft ?? draft;
+    ta.value = state.body ?? '';
+    ta.addEventListener('input', () => {
+      state.body = ta.value;
+    });
+    const { discussion } = draft;
 
     const save = el('button', { className: 'stacked-comment-save btn-primary', text: 'Save' });
     const cancel = el('button', {
       className: 'stacked-comment-cancel btn-secondary',
       text: 'Cancel',
     });
-    const doSave = () => {
+    const reset = () => {
+      this.stackedDraft = null;
+      this.stackedLastRangeSelection = null;
+      this.stackedCodeView?.clearSelectedLines({ notify: false });
+      this.renderStackedComments();
+    };
+    const discuss = el('button', {
+      className: 'stacked-comment-discuss btn-secondary discuss-btn',
+      text: 'Discuss',
+    });
+    const summarize = discussion
+      ? el('button', {
+          className: 'stacked-comment-summarize btn-secondary summarize-btn',
+          text: state.summarizing ? 'Summarizing…' : 'Summarize',
+          attrs: { disabled: state.summarizing },
+        })
+      : null;
+    const error = el('div', { className: 'comment-error', attrs: { hidden: true } });
+    const doSave = async () => {
       const body = ta.value.trim();
       if (!body) {
         ta.focus();
         return;
+      }
+      if (discussion) {
+        try {
+          await this.deleteDiscussion(discussion);
+        } catch (err) {
+          error.textContent = err instanceof Error ? err.message : 'Failed to delete discussion';
+          error.hidden = false;
+          return;
+        }
       }
       const comment: ReviewComment = {
         file: draft.file,
@@ -637,31 +703,90 @@ export class StackedViewMethods {
       this.commentManager.addComment(
         this.seriesInfo?.is_series ? { ...comment, commit_idx: this.currentCommitIdx } : comment,
       );
-      this.stackedDraft = null;
-      this.stackedLastRangeSelection = null;
-      this.stackedCodeView?.clearSelectedLines({ notify: false });
-      this.renderStackedComments();
+      reset();
     };
-    save.addEventListener('click', doSave);
+    const sendDiscussion = async () => {
+      const body = ta.value.trim();
+      if (!body) {
+        ta.focus();
+        return;
+      }
+      if (discuss.disabled) {
+        return;
+      }
+      discuss.disabled = true;
+      error.hidden = true;
+      try {
+        await this.discussionManager.send({
+          file: draft.file,
+          line: draft.line,
+          side: draft.side,
+          body,
+        });
+        reset();
+      } catch (err) {
+        error.textContent =
+          err instanceof DiscussionError && err.status === 409
+            ? 'No agent is listening any more'
+            : 'Failed to send discussion. Try again.';
+        error.hidden = false;
+      } finally {
+        discuss.disabled = false;
+      }
+    };
+    discuss.addEventListener('click', () => void sendDiscussion());
+    summarize?.addEventListener('click', async () => {
+      state.summarizing = true;
+      summarize.disabled = true;
+      summarize.textContent = 'Summarizing…';
+      error.hidden = true;
+      try {
+        const body = await this.summarizeDiscussion(discussion!);
+        delete state.summarizing;
+        if (this.stackedDraft === state) {
+          state.body = body;
+          // Sending the request re-rendered the draft, so render it again with the summary.
+          this.renderStackedComments();
+        }
+      } catch (err) {
+        delete state.summarizing;
+        summarize.disabled = false;
+        summarize.textContent = 'Summarize';
+        error.textContent =
+          err instanceof DiscussionError && err.status === 409
+            ? 'No agent is listening any more'
+            : 'Failed to request a summary. Try again.';
+        error.hidden = false;
+      }
+    });
+    save.addEventListener('click', () => void doSave());
     cancel.addEventListener('click', () => {
-      this.stackedDraft = null;
-      this.stackedLastRangeSelection = null;
-      this.stackedCodeView?.clearSelectedLines({ notify: false });
-      this.renderStackedComments();
+      reset();
     });
     ta.addEventListener('keydown', (event) => {
       if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
         event.preventDefault();
-        doSave();
+        if (event.altKey) {
+          if (this.agentAttached && !discussion) {
+            void sendDiscussion();
+          }
+          return;
+        }
+        void doSave();
       } else if (event.key === 'Escape') {
-        this.stackedDraft = null;
-        this.stackedLastRangeSelection = null;
-        this.stackedCodeView?.clearSelectedLines({ notify: false });
-        this.renderStackedComments();
+        reset();
       }
     });
 
-    form.append(ta, el('div', { className: 'stacked-comment-actions' }, [save, cancel]));
+    form.append(
+      ta,
+      error,
+      el('div', { className: 'stacked-comment-actions' }, [
+        discussion ? summarize : discuss,
+        save,
+        cancel,
+      ]),
+    );
     queueMicrotask(() => ta.focus());
     return form;
   }
@@ -700,7 +825,9 @@ export class StackedViewMethods {
       ta.addEventListener('keydown', (event) => {
         if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
           event.preventDefault();
-          saveEdit();
+          if (!event.altKey) {
+            saveEdit();
+          }
         } else if (event.key === 'Escape') {
           this.renderStackedComments();
         }
@@ -733,6 +860,13 @@ export class StackedViewMethods {
         side: this.toAnnotationSide(note.side),
         lineNumber: commentEndLine(note),
         metadata: { kind: 'review-note', note },
+      });
+    });
+    this.discussionManager.getForFile(path).forEach((discussion) => {
+      annotations.push({
+        side: this.toAnnotationSide(discussion.side),
+        lineNumber: commentEndLine(discussion),
+        metadata: { kind: 'discussion', discussion },
       });
     });
     if (this.stackedDraft?.file === path) {

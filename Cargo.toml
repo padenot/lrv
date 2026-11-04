@@ -55,4 +55,5 @@ required-features = ["dev-tools"]
 dev-tools = []
 
 [dev-dependencies]
+tokio = { version = "1", features = ["full", "test-util"] }
 tower = "0.5"

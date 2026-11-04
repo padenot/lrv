@@ -1,25 +1,26 @@
 mod config;
 mod diff;
 mod github;
-mod output;
 mod phab_mcp;
 mod phabricator;
 mod server;
 mod skill;
 mod store;
 mod themes;
-mod types;
 
 use anyhow::{Context, Result};
 use clap::{ArgAction, Parser};
-use lrv::{discovery, netutil};
+use lrv::{agent, discovery, launch, netutil, output, types};
 use moz_cli_version_check::VersionChecker;
 use std::collections::HashMap;
 use std::env;
 use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::{mpsc, Mutex, Notify};
+use tracing_subscriber::{filter::Targets, layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::output::OutputFormat;
 use crate::phabricator::{PhabricatorClient, Publisher, RevisionStatusInfo};
@@ -65,9 +66,11 @@ fn get_project_context() -> ProjectContext {
         git_branch,
         title: None,
         is_public: false,
+        launch_available: true,
         claude_skill_installed: skill::all_skills_installed(),
         comment_store_error: None,
         phabricator_available: false,
+        phabricator_revisions: Vec::new(),
     }
 }
 
@@ -268,6 +271,16 @@ struct Args {
     #[arg(long, value_name = "PATH|-")]
     add_notes: Option<String>,
 
+    /// Wait for discussion comments from the running review for this repository and
+    /// print them (one listener per review: the read position is shared)
+    #[arg(long, conflicts_with = "add_notes")]
+    listen: bool,
+
+    /// Seconds --listen waits before reporting that nothing happened
+    #[arg(long, value_name = "SECS", default_value_t = 90, requires = "listen",
+          value_parser = clap::value_parser!(u64).range(1..=600))]
+    listen_timeout: u64,
+
     /// List review sessions stored in the local comment database and exit
     #[arg(long)]
     list_reviews: bool,
@@ -374,7 +387,10 @@ impl Drop for Spinner {
 
 // Fetch all diffs for a jj series in one subprocess call and parse them.
 // Returns diffs in revset order (oldest first, matching --reversed).
-fn get_series_diffs_jj(revset: &str, working_dir: &str) -> Result<Vec<crate::types::DiffResponse>> {
+fn get_series_diffs_jj(
+    revset: &str,
+    working_dir: &str,
+) -> Result<Vec<(crate::types::DiffResponse, String)>> {
     let template = concat!(
         r#"concat("Commit ID: ", commit_id, "\nAuthor: ", author.name(), "#,
         r#"" <", author.email(), "> (", author.timestamp().format("%Y-%m-%d %H:%M:%S"), ")\n\n", indent("    ", description), "\n\n")"#
@@ -410,7 +426,10 @@ fn get_series_diffs_jj(revset: &str, working_dir: &str) -> Result<Vec<crate::typ
             } else {
                 format!("Commit ID: {}", part)
             };
-            diff::parse_diff(&chunk).context("Failed to parse commit diff")
+            Ok((
+                diff::parse_diff(&chunk).context("Failed to parse commit diff")?,
+                chunk,
+            ))
         })
         .collect()
 }
@@ -579,22 +598,98 @@ fn load_review_notes_file(path: &str) -> Result<Vec<ReviewNote>> {
     Ok(notes)
 }
 
-async fn add_notes_to_review(path: &str) -> Result<()> {
+fn load_startup_review_notes_file(path: &str) -> Result<Vec<ReviewNote>> {
     let notes = load_review_notes_file(path)?;
+    validate_startup_review_notes(&notes)?;
+    Ok(notes)
+}
+
+fn validate_startup_review_notes(notes: &[ReviewNote]) -> Result<()> {
+    if let Some(note) = notes
+        .iter()
+        .find(|note| note.discussion_id.is_some() || note.summary)
+    {
+        anyhow::bail!(
+            "Invalid review note for {}:{}: discussion_id and summary are only accepted by a running review (--add-notes / POST /api/review-notes)",
+            note.file,
+            note.line
+        );
+    }
+    Ok(())
+}
+
+fn find_review() -> Result<(PathBuf, discovery::ServerInfo)> {
     let cwd = env::current_dir()?;
     let root = repository::root(&cwd).unwrap_or_else(|| cwd.clone());
-    let missing = || format!("No running lrv found for {}", root.display());
-    let info = discovery::find(&cwd).with_context(missing)?;
+    let info = discovery::find(&cwd)
+        .with_context(|| format!("No running lrv found for {}", root.display()))?;
+    Ok((root, info))
+}
+
+fn check_review_auth(response: &reqwest::Response, root: &Path, flag: &str) -> Result<()> {
+    if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+        anyhow::bail!("Another lrv now holds the port advertised for {}; run {flag} again after restarting the review", root.display());
+    }
+    Ok(())
+}
+
+async fn listen_to_review(timeout_secs: u64, format: &OutputFormat) -> Result<()> {
+    let (root, info) = find_review()?;
+    let after = discovery::read_cursor(&info);
+    let response = reqwest::Client::builder()
+        .timeout(Duration::from_secs(timeout_secs + 15))
+        .build()?
+        .get(format!(
+            "{}/api/agent/events?after={after}&timeout={timeout_secs}",
+            info.url
+        ))
+        .bearer_auth(&info.token)
+        .send()
+        .await;
+    let poll = match response {
+        Ok(response) => {
+            check_review_auth(&response, &root, "--listen")?;
+            let response = response.error_for_status()?;
+            match response.bytes().await {
+                Ok(bytes) => serde_json::from_slice::<agent::Poll>(&bytes)?,
+                Err(error) => ended_on_disconnect(error, after)?,
+            }
+        }
+        Err(error) => ended_on_disconnect(error, after)?,
+    };
+    let mut stdout = std::io::stdout().lock();
+    writeln!(stdout, "{}", output::format_listen(&poll, format))?;
+    stdout.flush()?;
+    if poll.cursor > after {
+        if let Err(error) = discovery::write_cursor(&info, poll.cursor) {
+            tracing::warn!("Failed to save listen cursor: {error}");
+        }
+    }
+    Ok(())
+}
+
+fn ended_on_disconnect(error: reqwest::Error, after: u64) -> Result<agent::Poll> {
+    if error.is_timeout() {
+        return Err(error.into());
+    }
+    Ok(agent::Poll {
+        events: vec![],
+        cursor: after,
+        ended: true,
+    })
+}
+
+async fn add_notes_to_review(path: &str) -> Result<()> {
+    let notes = load_review_notes_file(path)?;
+    let (root, info) = find_review()?;
     let response = reqwest::Client::new()
         .post(format!("{}/api/review-notes", info.url))
         .bearer_auth(&info.token)
         .json(&notes)
         .send()
         .await
-        .with_context(missing)?;
-    if response.status() == reqwest::StatusCode::UNAUTHORIZED {
-        anyhow::bail!("Another lrv now holds the port advertised for {}; run --add-notes again after restarting the review", root.display());
-    }
+        .with_context(|| format!("No running lrv found for {}", root.display()))?;
+    check_review_auth(&response, &root, "--add-notes")?;
     let result: serde_json::Value = response
         .error_for_status()
         .context("Running lrv rejected review notes")?
@@ -606,14 +701,7 @@ async fn add_notes_to_review(path: &str) -> Result<()> {
 
 fn validate_review_notes(notes: &[ReviewNote]) -> Result<()> {
     if let Some(note) = notes.iter().find(|note| !note.is_valid()) {
-        anyhow::bail!(
-            "Invalid review note for {}:{}",
-            note.file,
-            match &note.line {
-                CommentLine::Single(line) => line.to_string(),
-                CommentLine::Range((start, end)) => format!("{}-{}", start, end),
-            }
-        );
+        anyhow::bail!("Invalid review note for {}:{}", note.file, note.line);
     }
     Ok(())
 }
@@ -643,6 +731,53 @@ async fn shutdown_signal() -> i32 {
     }
 }
 
+async fn fetch_phab_notes(
+    client: &PhabricatorClient,
+    revisions: Vec<(usize, String)>,
+    include_done: bool,
+    diffs: &[DiffResponse],
+) -> Vec<(usize, String, Result<Vec<ReviewNote>>)> {
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(4));
+    let mut tasks = tokio::task::JoinSet::new();
+    for (idx, revision) in revisions {
+        let client = client.clone();
+        let semaphore = semaphore.clone();
+        tasks.spawn(async move {
+            let _permit = semaphore.acquire_owned().await.expect("semaphore open");
+            eprintln!("Loading review comments from Phabricator {revision}...");
+            let fetched = tokio::time::timeout(
+                Duration::from_secs(30),
+                client.fetch_review_notes(&revision, include_done),
+            )
+            .await
+            .context("timed out")
+            .and_then(|result| result);
+            (idx, revision, fetched)
+        });
+    }
+    let mut results = Vec::new();
+    while let Some(result) = tasks.join_next().await {
+        let (idx, revision, mut fetched) = result.expect("Phabricator fetch task panicked");
+        if let Ok(notes) = &mut fetched {
+            for note in notes.iter_mut() {
+                if note.file != "(commit)" {
+                    note.side = infer_review_note_side(note, diffs, Some(idx));
+                }
+                note.commit_idx = Some(idx);
+            }
+            eprintln!(
+                "Loaded {} active review note{} from {}",
+                notes.len(),
+                if notes.len() == 1 { "" } else { "s" },
+                revision
+            );
+        }
+        results.push((idx, revision, fetched));
+    }
+    results.sort_by_key(|(idx, _, _)| *idx);
+    results
+}
+
 async fn load_phabricator_notes(
     revisions: &[String],
     base_url: &str,
@@ -656,37 +791,23 @@ async fn load_phabricator_notes(
     let token = phabricator::phabricator_token(base_url)?;
     let client = PhabricatorClient::new(base_url.to_string(), token)?;
     let mut notes = Vec::new();
-
-    for (idx, revision) in revisions.iter().enumerate() {
-        eprintln!("Loading review comments from Phabricator {}...", revision);
-        let mut revision_notes = client.fetch_review_notes(revision, include_done).await?;
-        let commit_idx = Some(idx);
-        for note in &mut revision_notes {
-            if note.file != "(commit)" {
-                note.side = infer_review_note_side(note, diffs, commit_idx);
-            }
-            note.commit_idx = commit_idx;
-        }
-        eprintln!(
-            "Loaded {} active review note{} from {}",
-            revision_notes.len(),
-            if revision_notes.len() == 1 { "" } else { "s" },
-            revision
-        );
-        notes.extend(revision_notes);
+    for (_, _, fetched) in fetch_phab_notes(
+        &client,
+        revisions.iter().cloned().enumerate().collect(),
+        include_done,
+        diffs,
+    )
+    .await
+    {
+        notes.extend(fetched?);
     }
-
     validate_review_notes(&notes)?;
     Ok(notes)
 }
 
 /// Load the comments of the Phabricator revision(s) named by the commits' `Differential Revision:`
 /// trailers. `None` when no commit has one. Failures are warnings: the review must open regardless.
-async fn auto_fetch_phab(
-    diffs: &[DiffResponse],
-    include_done: bool,
-    skip: &HashMap<usize, &RevisionStatusInfo>,
-) -> Option<Vec<ReviewNote>> {
+async fn auto_fetch_phab(diffs: &[DiffResponse], include_done: bool) -> Option<Vec<ReviewNote>> {
     let messages: Vec<Option<&str>> = diffs.iter().map(|d| d.commit_message.as_deref()).collect();
     let revisions: Vec<(usize, String, u32)> =
         phabricator::resolve_phab_targets(&[], "", &messages)
@@ -698,50 +819,38 @@ async fn auto_fetch_phab(
         return None;
     }
 
-    let token = match phabricator::phabricator_token(&revisions[0].1) {
-        Ok(token) => token,
+    let client = (|| {
+        let base = &revisions[0].1;
+        let token = phabricator::phabricator_token(base)?;
+        PhabricatorClient::new(base.clone(), token)
+    })();
+    let client = match client {
+        Ok(client) => client,
         Err(e) => {
             eprintln!("warning: not loading Phabricator comments: {e:#}");
             return Some(Vec::new());
         }
     };
+    let mut hosts: Vec<(String, Vec<(usize, String)>)> = Vec::new();
+    for (idx, base, id) in revisions {
+        if let Some((_, revisions)) = hosts.iter_mut().find(|(host, _)| host == &base) {
+            revisions.push((idx, format!("D{id}")));
+        } else {
+            hosts.push((base, vec![(idx, format!("D{id}"))]));
+        }
+    }
+    let mut results = Vec::new();
+    for (base, revisions) in hosts {
+        results.extend(
+            fetch_phab_notes(&client.with_base_url(base), revisions, include_done, diffs).await,
+        );
+    }
+    results.sort_by_key(|(idx, _, _)| *idx);
     let mut notes = Vec::new();
-    for (i, base, id) in revisions {
-        if let Some(revision) = skip.get(&i) {
-            eprintln!(
-                "warning: not loading comments from D{id}: {}; update your checkout (e.g. moz-phab patch D{id})",
-                revision.reason.as_deref().unwrap_or_default()
-            );
-            continue;
-        }
-        eprintln!("Loading review comments from Phabricator D{id}...");
-        let fetched = async {
-            let client = PhabricatorClient::new(base, token.clone())?;
-            tokio::time::timeout(
-                std::time::Duration::from_secs(30),
-                client.fetch_review_notes(&format!("D{id}"), include_done),
-            )
-            .await
-            .context("timed out")?
-        }
-        .await;
+    for (_, revision, fetched) in results {
         match fetched {
-            Ok(mut revision_notes) => {
-                let commit_idx = Some(i);
-                for note in &mut revision_notes {
-                    if note.file != "(commit)" {
-                        note.side = infer_review_note_side(note, diffs, commit_idx);
-                    }
-                    note.commit_idx = commit_idx;
-                }
-                eprintln!(
-                    "Loaded {} active review note{} from D{id}",
-                    revision_notes.len(),
-                    if revision_notes.len() == 1 { "" } else { "s" },
-                );
-                notes.extend(revision_notes);
-            }
-            Err(e) => eprintln!("warning: failed to load comments from D{id}: {e:#}"),
+            Ok(revision_notes) => notes.extend(revision_notes),
+            Err(e) => eprintln!("warning: failed to load comments from {revision}: {e:#}"),
         }
     }
     Some(notes)
@@ -957,7 +1066,29 @@ fn recover_stored_review(selector: &str, format: &OutputFormat) -> Result<()> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt::init();
+    // Match fmt::init() without the env-filter feature, including its RUST_LOG
+    // fallbacks, while reserving stdout for review output.
+    let targets = match env::var("RUST_LOG") {
+        Ok(var) => var
+            .parse::<Targets>()
+            .map_err(|e| {
+                eprintln!("Ignoring `RUST_LOG={:?}`: {}", var, e);
+            })
+            .unwrap_or_default(),
+        Err(env::VarError::NotPresent) => {
+            Targets::new().with_default(tracing_subscriber::fmt::Subscriber::DEFAULT_MAX_LEVEL)
+        }
+        Err(e) => {
+            eprintln!("Ignoring `RUST_LOG`: {}", e);
+            Targets::new().with_default(tracing_subscriber::fmt::Subscriber::DEFAULT_MAX_LEVEL)
+        }
+    };
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::TRACE)
+        .with_writer(std::io::stderr)
+        .finish()
+        .with(targets)
+        .init();
 
     let version_checker = VersionChecker::new("lrv", env!("CARGO_PKG_VERSION"));
     version_checker.check_async();
@@ -986,8 +1117,11 @@ async fn main() -> Result<()> {
     if let Some(path) = &args.add_notes {
         return add_notes_to_review(path).await;
     }
+    if args.listen {
+        return listen_to_review(args.listen_timeout, &args.format.parse()?).await;
+    }
     if let Some(path) = args.validate_review_notes {
-        match load_review_notes_file(&path) {
+        match load_startup_review_notes_file(&path) {
             Ok(notes) => {
                 eprintln!(
                     "OK: {} note{}",
@@ -1037,11 +1171,12 @@ async fn main() -> Result<()> {
     // Precompute public flag from args
     let is_public_flag = args.public || args.bind.iter().any(|a| a == "0.0.0.0");
     project_context.is_public = is_public_flag;
+    project_context.launch_available = !is_public_flag;
 
     let working_dir = project_context.working_directory.clone();
 
     // Parse diffs: series mode or single commit
-    let (diffs, pre_old, pre_new, is_series) = if let Some(ref revset) = args.series {
+    let (diffs, raw_diffs, pre_old, pre_new, is_series) = if let Some(ref revset) = args.series {
         if args.cmd.is_some() || args.file.is_some() {
             anyhow::bail!("--series cannot be combined with --cmd or --file");
         }
@@ -1067,7 +1202,7 @@ async fn main() -> Result<()> {
                 handles.push(tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
                     let text = get_commit_diff_text(&id, &wd)?;
                     let d = diff::parse_diff(&text)?;
-                    Ok((i, d))
+                    Ok((i, (d, text)))
                 }));
             }
             let mut parsed_indexed = Vec::with_capacity(commits.len());
@@ -1077,10 +1212,11 @@ async fn main() -> Result<()> {
             parsed_indexed.sort_by_key(|(i, _)| *i);
             parsed_indexed.into_iter().map(|(_, d)| d).collect()
         };
+        let (parsed, raw): (Vec<_>, Vec<_>) = parsed.into_iter().unzip();
         let spinner = Spinner::start("Precomputing file content");
         let (pre_old, pre_new) = server::precompute_series_content(&parsed, &working_dir).await;
         spinner.finish("Ready");
-        (parsed, pre_old, pre_new, true)
+        (parsed, raw, pre_old, pre_new, true)
     } else {
         // Get diff text from stdin, file, or command
         let cmd_for_revision = args.cmd.clone();
@@ -1131,12 +1267,12 @@ async fn main() -> Result<()> {
             return Ok(());
         }
 
-        (vec![diff], vec![], vec![], false)
+        (vec![diff], vec![diff_text], vec![], vec![], false)
     };
 
     let mut review_notes = Vec::new();
     for path in &args.review_notes_file {
-        review_notes.extend(load_review_notes_file(path)?);
+        review_notes.extend(load_startup_review_notes_file(path)?);
     }
 
     let phab_base_url = args
@@ -1158,7 +1294,9 @@ async fn main() -> Result<()> {
     let targets = phabricator::resolve_phab_targets(&named_revisions, &phab_base_url, &messages);
     let publisher = if targets.iter().any(Option::is_some) {
         project_context.phabricator_available = true;
-        Some(Arc::new(phabricator::Publisher::new(targets, &diffs)))
+        let publisher = phabricator::Publisher::new(targets, &diffs);
+        project_context.phabricator_revisions = publisher.local_revisions();
+        Some(Arc::new(publisher))
     } else {
         None
     };
@@ -1168,12 +1306,31 @@ async fn main() -> Result<()> {
         || args.github_pr_comments.is_some()
         || args.github_pr.is_some();
     let config_fetch = user_config.auto_fetch_comments && !explicit_comments;
-    let outdated = match &publisher {
-        Some(publisher) if !args.phab_revisions.is_empty() || config_fetch => {
-            outdated_phab_revisions(publisher).await
+    let validation = async {
+        match &publisher {
+            Some(publisher) if !args.phab_revisions.is_empty() || config_fetch => {
+                outdated_phab_revisions(publisher).await
+            }
+            _ => Vec::new(),
         }
-        _ => Vec::new(),
     };
+    let fetch_notes = async {
+        let named = load_phabricator_notes(
+            &named_revisions,
+            &phab_base_url,
+            args.phab_include_done,
+            &diffs,
+        );
+        let trailers = async {
+            if named_revisions.len() < args.phab_revisions.len() || config_fetch {
+                auto_fetch_phab(&diffs, args.phab_include_done).await
+            } else {
+                None
+            }
+        };
+        tokio::join!(named, trailers)
+    };
+    let (outdated, (named_notes, trailer_notes)) = tokio::join!(validation, fetch_notes);
     // An explicit --phab-revision aborts; comments fetched because of the config are skipped.
     if !args.phab_revisions.is_empty() && !outdated.is_empty() {
         let reasons = outdated
@@ -1186,22 +1343,27 @@ async fn main() -> Result<()> {
             outdated[0].id
         );
     }
-    let skip = outdated
+    let skip: HashMap<_, _> = outdated
         .iter()
         .flat_map(|revision| revision.commit_idxs.iter().map(move |&idx| (idx, revision)))
         .collect();
-    review_notes.extend(
-        load_phabricator_notes(
-            &named_revisions,
-            &phab_base_url,
-            args.phab_include_done,
-            &diffs,
-        )
-        .await?,
-    );
+    review_notes.extend(named_notes?);
+    let trailer_notes = trailer_notes.map(|mut notes| {
+        for revision in &outdated {
+            let id = &revision.id;
+            for _ in &revision.commit_idxs {
+                eprintln!(
+                    "warning: not loading comments from {id}: {}; update your checkout (e.g. moz-phab patch {id})",
+                    revision.reason.as_deref().unwrap_or_default()
+                );
+            }
+        }
+        notes.retain(|note| !note.commit_idx.is_some_and(|idx| skip.contains_key(&idx)));
+        notes
+    });
     if named_revisions.len() < args.phab_revisions.len() {
-        match auto_fetch_phab(&diffs, args.phab_include_done, &skip).await {
-            Some(notes) => review_notes.extend(notes),
+        match trailer_notes.as_ref() {
+            Some(notes) => review_notes.extend(notes.iter().cloned()),
             None => eprintln!("warning: no commit has a Differential Revision trailer"),
         }
     }
@@ -1236,7 +1398,7 @@ async fn main() -> Result<()> {
         None => {}
     }
     if config_fetch {
-        match auto_fetch_phab(&diffs, args.phab_include_done, &skip).await {
+        match trailer_notes {
             Some(notes) => review_notes.extend(notes),
             None => {
                 if let Some((notes, prs)) = auto_fetch_github(&diffs).await {
@@ -1246,6 +1408,7 @@ async fn main() -> Result<()> {
             }
         }
     }
+    validate_startup_review_notes(&review_notes)?;
     tag_single_commit_notes(&mut review_notes, is_series, diffs.len());
     assign_note_ids(&mut review_notes);
 
@@ -1306,6 +1469,9 @@ async fn main() -> Result<()> {
     let state = AppState {
         notes_version: std::sync::Arc::new(tokio::sync::watch::channel(0).0),
         agent_token: Arc::from(agent_token.clone()),
+        agent: agent::AgentChannel::new(agent::lease_from_env()),
+        launcher: lrv::launch::AgentLauncher::new(),
+        raw_diffs: Arc::new(raw_diffs),
         diffs: Arc::new(diffs),
         comments: Arc::new(Mutex::new(Vec::new())),
         overall_comment: Arc::new(Mutex::new(None)),
@@ -1405,6 +1571,19 @@ async fn main() -> Result<()> {
         }
     }
 
+    state
+        .launcher
+        .allowed_hosts
+        .lock()
+        .unwrap()
+        .extend(listeners.iter().map(|(host, _)| {
+            if host.contains(':') {
+                format!("[{host}]")
+            } else {
+                host.clone()
+            }
+        }));
+
     let discovery_root = repository::root(&env::current_dir()?).unwrap_or(env::current_dir()?);
     let first_addr = &listeners[0].0;
     let host = if first_addr == "0.0.0.0" {
@@ -1438,6 +1617,11 @@ async fn main() -> Result<()> {
 
     // Prefer loopback when opening browser
     let url = format!("http://127.0.0.1:{}", actual_port);
+
+    tokio::spawn({
+        let agent = state.agent.clone();
+        async move { agent.track_presence().await }
+    });
 
     // Run servers with graceful shutdown
     let shutdown_notify = Arc::new(Notify::new());
@@ -1488,6 +1672,15 @@ async fn main() -> Result<()> {
         }
     }
 
+    state.agent.close();
+    state.agent.drain(std::time::Duration::from_secs(1)).await;
+    // Let hyper flush the final poll response after the handler returns.
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+    state
+        .launcher
+        .shutdown(std::time::Duration::from_secs(3))
+        .await;
     discovery::remove_if_ours(&discovery_root, std::process::id());
     if let Some(code) = signal_exit_code {
         std::process::exit(code);

@@ -25,17 +25,53 @@ pub fn dir() -> Result<PathBuf> {
         .join("lrv/servers"))
 }
 
-pub fn path_for(root: &Path) -> Result<PathBuf> {
+fn root_hash(root: &Path) -> u64 {
     let mut hash = 0xcbf29ce484222325u64;
     for byte in root.to_string_lossy().bytes() {
         hash ^= u64::from(byte);
         hash = hash.wrapping_mul(0x100000001b3);
     }
-    Ok(dir()?.join(format!("{hash:016x}.json")))
+    hash
+}
+
+pub fn path_for(root: &Path) -> Result<PathBuf> {
+    Ok(dir()?.join(format!("{:016x}.json", root_hash(root))))
+}
+
+pub fn cursor_path(root: &Path) -> Result<PathBuf> {
+    Ok(dir()?.join(format!("{:016x}.cursor", root_hash(root))))
+}
+
+#[derive(Serialize, Deserialize)]
+struct CursorFile {
+    pid: u32,
+    cursor: u64,
+}
+
+pub fn read_cursor(info: &ServerInfo) -> u64 {
+    let read = || -> Option<CursorFile> {
+        serde_json::from_slice(&fs::read(cursor_path(&info.root).ok()?).ok()?).ok()
+    };
+    read()
+        .filter(|file| file.pid == info.pid)
+        .map_or(0, |file| file.cursor)
+}
+
+pub fn write_cursor(info: &ServerInfo, cursor: u64) -> Result<()> {
+    write_private(
+        &cursor_path(&info.root)?,
+        &serde_json::to_vec(&CursorFile {
+            pid: info.pid,
+            cursor,
+        })?,
+    )
 }
 
 pub fn write(info: &ServerInfo) -> Result<()> {
-    let path = path_for(&info.root)?;
+    write_private(&path_for(&info.root)?, &serde_json::to_vec(info)?)
+}
+
+fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
     fs::create_dir_all(path.parent().unwrap())?;
     let mut options = OpenOptions::new();
     options.write(true).create(true).truncate(true);
@@ -46,7 +82,7 @@ pub fn write(info: &ServerInfo) -> Result<()> {
     {
         file.set_permissions(fs::Permissions::from_mode(0o600))?;
     }
-    file.write_all(&serde_json::to_vec(info)?)?;
+    file.write_all(bytes)?;
     Ok(())
 }
 
@@ -61,6 +97,9 @@ pub fn remove_if_ours(root: &Path, pid: u32) {
             if let Ok(info) = serde_json::from_slice::<ServerInfo>(&bytes) {
                 if info.pid == pid {
                     let _ = fs::remove_file(path);
+                    if let Ok(cursor) = cursor_path(root) {
+                        let _ = fs::remove_file(cursor);
+                    }
                 }
             }
         }
@@ -111,10 +150,23 @@ mod tests {
                     & 0o777,
                 0o600
             );
+            assert_eq!(read_cursor(&info), 0);
+            let cursor = cursor_path(&root).unwrap();
+            fs::write(&cursor, b"invalid JSON").unwrap();
+            assert_eq!(read_cursor(&info), 0);
+            write_cursor(&info, 42).unwrap();
+            assert_eq!(read_cursor(&info), 42);
+            assert_eq!(read_cursor(&ServerInfo { pid: 456, ..found }), 0);
+            assert_eq!(
+                fs::metadata(&cursor).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
             remove_if_ours(&root, 456);
+            assert!(cursor.exists());
             assert!(find(&subdir).is_some());
             remove_if_ours(&root, 123);
             assert!(find(&subdir).is_none());
+            assert!(!cursor.exists());
             std::env::remove_var("LRV_SERVER_DIR");
         });
         fs::remove_dir_all(base).unwrap();

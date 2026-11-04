@@ -538,62 +538,58 @@ var CommentManager = class {
 	}
 };
 //#endregion
-//#region web/src/review-notes.ts
-var ReviewNoteManager = class {
-	notes;
-	listeners;
-	currentCommitIdx;
-	constructor() {
-		this.notes = [];
-		this.listeners = [];
-		this.currentCommitIdx = null;
+//#region web/src/discussions.ts
+var DiscussionError = class extends Error {
+	status;
+	constructor(status) {
+		super(`Discussion request failed (${status})`);
+		this.status = status;
 	}
-	setNotes(notes) {
-		this.notes = [...notes];
-		this.notifyListeners();
+};
+var DiscussionManager = class {
+	discussions = [];
+	listeners = [];
+	currentCommitIdx = null;
+	getOpenThreadCount() {
+		return this.discussions.filter((d) => !d.thread_id).length;
 	}
-	mergeNotes(notes) {
-		let added = false;
-		for (const note of notes) if (!this.notes.some((existing) => this.isSameNote(existing, note))) {
-			this.notes.push(note);
-			added = true;
-		}
-		if (added) this.notifyListeners();
+	getForFile(file) {
+		return this.discussions.filter((d) => !d.thread_id && d.file === file && (this.currentCommitIdx === null || d.commit_idx === this.currentCommitIdx));
 	}
-	addNote(note) {
-		if (this.currentCommitIdx !== null && note.commit_idx === void 0) note = {
-			...note,
-			commit_idx: this.currentCommitIdx
-		};
-		this.notes.push(note);
-		this.notifyListeners();
-	}
-	getNotes() {
-		return [...this.notes];
-	}
-	getNotesForFile(file) {
-		return this.notes.filter((n) => n.file === file && (this.currentCommitIdx === null || n.commit_idx === this.currentCommitIdx));
-	}
-	updateNote(target, patch) {
-		const idx = this.notes.findIndex((note) => this.isSameNote(note, target));
-		if (idx < 0) return;
-		this.notes[idx] = {
-			...this.notes[idx],
-			...patch
-		};
-		this.notifyListeners();
-	}
-	findNote(file, line, side) {
-		return this.notes.findIndex((n) => n.file === file && n.side === side && commentContainsLine(n, line) && (this.currentCommitIdx === null || n.commit_idx === this.currentCommitIdx));
+	getFollowUps(rootId) {
+		return this.discussions.filter((d) => d.thread_id === rootId && !d.summarize);
 	}
 	onChange(listener) {
 		this.listeners.push(listener);
 	}
-	notifyListeners() {
-		this.listeners.forEach((l) => l());
+	setDiscussions(discussions) {
+		this.discussions = [...discussions];
+		this.notifyListeners();
 	}
-	isSameNote(a, b) {
-		return a === b || a.id !== void 0 && a.id === b.id;
+	async send(req) {
+		const response = await fetch("/api/discussions", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify(this.currentCommitIdx === null || "thread_id" in req ? req : {
+				...req,
+				commit_idx: this.currentCommitIdx
+			})
+		});
+		if (!response.ok) throw new DiscussionError(response.status);
+		const discussion = await response.json();
+		this.discussions.push(discussion);
+		this.notifyListeners();
+		return discussion;
+	}
+	async delete(id, onDeleted) {
+		const response = await fetch(`/api/discussions/${encodeURIComponent(id)}`, { method: "DELETE" });
+		if (!response.ok) throw new DiscussionError(response.status);
+		this.discussions = this.discussions.filter((d) => d.id !== id && d.thread_id !== id);
+		onDeleted?.();
+		this.notifyListeners();
+	}
+	notifyListeners() {
+		this.listeners.forEach((listener) => listener());
 	}
 };
 //#endregion
@@ -655,6 +651,440 @@ async function fetchJSON(url, options) {
 		}
 	}
 }
+function launchAgent(request) {
+	return fetchJSON("/api/agent/launch", {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify(request)
+	});
+}
+//#endregion
+//#region web/src/connect-agent-methods.ts
+const storageKey = "lrv.connect-agent";
+var ConnectAgentMethods = class {
+	setAgentState(state) {
+		this.agentState = state;
+		this.agentAttached = state.attached;
+		document.body.classList.toggle("agent-attached", state.attached);
+		const available = this.context?.launch_available === true;
+		const active = state.attached || state.launch === "running";
+		const button = $$1("#connect-agent");
+		const badge = $$1("#agent-status");
+		button.hidden = !available || active;
+		badge.hidden = !available || !active;
+		const busy = state.busy || state.initial_review || !state.attached && state.launch === "running";
+		badge.classList.toggle("busy", busy);
+		badge.title = busy ? "The agent is working" : "The agent is waiting for discussion comments";
+		if (active) {
+			$$1("#connect-agent-popover").hidden = true;
+			button.setAttribute("aria-expanded", "false");
+		}
+	}
+	setupConnectAgent() {
+		const button = $$1("#connect-agent");
+		const popover = $$1("#connect-agent-popover");
+		const form = $$1("#connect-agent-form");
+		const provider = $$1("#agent-provider");
+		const model = $$1("#agent-model");
+		const effort = $$1("#agent-effort");
+		const review = $$1("#agent-initial-review");
+		const error = $$1("#agent-launch-error");
+		const submit = $$1("#agent-launch-submit");
+		try {
+			const saved = JSON.parse(localStorage.getItem(storageKey) || "null");
+			if (saved) {
+				provider.value = saved.provider === "codex" ? "codex" : "claude";
+				model.value = typeof saved.model === "string" ? saved.model : "";
+				effort.value = typeof saved.effort === "string" ? saved.effort : "";
+				review.checked = saved.initial_review !== false;
+			}
+		} catch {}
+		const values = () => ({
+			provider: provider.value,
+			model: model.value.trim(),
+			effort: effort.value.trim(),
+			initial_review: review.checked
+		});
+		const save = () => {
+			try {
+				localStorage.setItem(storageKey, JSON.stringify(values()));
+			} catch {}
+		};
+		form.addEventListener("input", save);
+		form.addEventListener("change", save);
+		const close = () => {
+			popover.hidden = true;
+			button.setAttribute("aria-expanded", "false");
+		};
+		button.addEventListener("click", () => {
+			popover.hidden = !popover.hidden;
+			button.setAttribute("aria-expanded", String(!popover.hidden));
+			if (!popover.hidden) {
+				error.textContent = this.agentState.error || "";
+				provider.focus();
+			}
+		});
+		document.addEventListener("click", (event) => {
+			if (!(event.target instanceof Node) || !button.parentElement?.contains(event.target)) close();
+		});
+		document.addEventListener("keydown", (event) => {
+			if (event.key === "Escape" && !popover.hidden) {
+				event.stopPropagation();
+				close();
+				button.focus();
+			}
+		});
+		form.addEventListener("submit", (event) => {
+			event.preventDefault();
+			save();
+			submit.disabled = true;
+			error.textContent = "";
+			const req = values();
+			const previousState = this.agentState;
+			launchAgent(req).then(() => {
+				if (this.agentState === previousState) this.setAgentState({
+					attached: this.agentAttached,
+					busy: true,
+					launch: "running",
+					initial_review: req.initial_review
+				});
+				close();
+			}).catch((reason) => {
+				error.textContent = reason instanceof Error ? reason.message : String(reason);
+			}).finally(() => {
+				submit.disabled = false;
+			});
+		});
+		this.setAgentState(this.agentState);
+	}
+};
+//#endregion
+//#region web/src/linkify.ts
+const BUG_RE = /\b([bB]ug)\s+(\d{6,})\b/g;
+const PHAB_RE = /\b(D\d{6,})\b/g;
+const MD_LINK_RE = /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g;
+const URL_RE = /\bhttps?:\/\/[^\s<>()]+/g;
+function appendLinkifiedText(target, text) {
+	target.textContent = "";
+	target.appendChild(linkifyText(text));
+}
+function linkifyText(text) {
+	const fragment = document.createDocumentFragment();
+	const matches = [];
+	for (const match of text.matchAll(MD_LINK_RE)) {
+		const full = match[0];
+		const label = match[1];
+		const href = match[2];
+		if (!full || !label || !href || match.index === void 0) continue;
+		matches.push({
+			start: match.index,
+			end: match.index + full.length,
+			text: label,
+			href
+		});
+	}
+	for (const match of text.matchAll(URL_RE)) {
+		const full = match[0];
+		if (!full || match.index === void 0) continue;
+		const trimmed = full.replace(/[),.;:!?]+$/g, "");
+		matches.push({
+			start: match.index,
+			end: match.index + trimmed.length,
+			text: trimmed,
+			href: trimmed
+		});
+	}
+	for (const match of text.matchAll(BUG_RE)) {
+		const full = match[0];
+		const id = match[2];
+		if (!full || !id || match.index === void 0) continue;
+		matches.push({
+			start: match.index,
+			end: match.index + full.length,
+			text: full,
+			href: `https://bugzilla.mozilla.org/show_bug.cgi?id=${id}`
+		});
+	}
+	for (const match of text.matchAll(PHAB_RE)) {
+		const full = match[1];
+		if (!full || match.index === void 0) continue;
+		matches.push({
+			start: match.index,
+			end: match.index + full.length,
+			text: full,
+			href: `https://phabricator.services.mozilla.com/${full}`
+		});
+	}
+	if (matches.length === 0) {
+		fragment.appendChild(document.createTextNode(text));
+		return fragment;
+	}
+	matches.sort((a, b) => a.start - b.start || b.end - a.end);
+	const filtered = [];
+	let cursor = -1;
+	matches.forEach((match) => {
+		if (match.start < cursor) return;
+		filtered.push(match);
+		cursor = match.end;
+	});
+	let pos = 0;
+	filtered.forEach((match) => {
+		if (match.start > pos) fragment.appendChild(document.createTextNode(text.slice(pos, match.start)));
+		const anchor = el("a", {
+			className: "auto-link",
+			text: match.text,
+			attrs: {
+				href: match.href,
+				target: "_blank",
+				rel: "noopener noreferrer"
+			}
+		});
+		fragment.appendChild(anchor);
+		pos = match.end;
+	});
+	if (pos < text.length) fragment.appendChild(document.createTextNode(text.slice(pos)));
+	return fragment;
+}
+//#endregion
+//#region web/src/discussion-methods.ts
+var DiscussionMethods = class {
+	deleteDiscussion(root) {
+		return this.discussionManager.delete(root.id, () => {
+			this.reviewNoteManager.removeDiscussionReplies(root.id);
+		});
+	}
+	async summarizeDiscussion(root) {
+		const summary = this.reviewNoteManager.nextSummary(root.id);
+		await this.discussionManager.send({
+			thread_id: root.id,
+			body: "Summarize this thread as a review comment.",
+			summarize: true
+		});
+		return (await summary).body;
+	}
+	buildDiscussionNode(root) {
+		const box = el("div", { className: "discussion" });
+		for (const eventName of [
+			"pointerdown",
+			"mousedown",
+			"click",
+			"dblclick"
+		]) box.addEventListener(eventName, (event) => event.stopPropagation());
+		const entries = [
+			{
+				body: root.body,
+				time: root.created_at,
+				author: "You",
+				agent: false
+			},
+			...this.discussionManager.getFollowUps(root.id).map((d) => ({
+				body: d.body,
+				time: d.created_at,
+				author: "You",
+				agent: false
+			})),
+			...this.reviewNoteManager.getDiscussionReplies(root.id).map((note) => ({
+				body: note.body,
+				time: Date.parse(note.date),
+				author: note.author || "Agent",
+				agent: true
+			}))
+		].sort((a, b) => a.time - b.time);
+		for (const entry of entries) {
+			const node = el("div", { className: `discussion-entry${entry.agent ? " discussion-entry-agent" : ""}` });
+			const meta = el("div", {
+				className: "discussion-meta",
+				text: `${entry.author} · ${new Date(entry.time).toLocaleTimeString()} · ${root.side} line ${commentLineLabel(root)}`
+			});
+			const body = el("div", { className: "discussion-body" });
+			appendLinkifiedText(body, entry.body);
+			node.append(meta, body);
+			box.appendChild(node);
+		}
+		const reply = el("button", {
+			className: "btn-secondary discussion-reply-btn",
+			text: "Reply"
+		});
+		reply.addEventListener("click", () => {
+			if (box.querySelector(".discussion-reply")) return;
+			const form = el("div", { className: "discussion-reply" });
+			const textarea = el("textarea", {
+				className: "discussion-reply-text",
+				attrs: { placeholder: "Follow up with the agent..." }
+			});
+			const controls = el("div", { className: "discussion-reply-actions" });
+			const send = el("button", {
+				className: "btn-primary",
+				text: "Send"
+			});
+			const cancel = el("button", {
+				className: "btn-secondary",
+				text: "Cancel"
+			});
+			const error = el("div", { className: "comment-error" });
+			error.hidden = true;
+			const resize = () => {
+				box.dispatchEvent(new Event("discussion-layout"));
+				box.scrollTop = box.scrollHeight;
+			};
+			const close = () => {
+				form.remove();
+				reply.hidden = false;
+				resize();
+			};
+			const submit = async () => {
+				const body = textarea.value.trim();
+				if (!body || send.disabled) {
+					textarea.focus();
+					return;
+				}
+				send.disabled = true;
+				error.hidden = true;
+				try {
+					await this.discussionManager.send({
+						thread_id: root.id,
+						body
+					});
+				} catch (err) {
+					error.textContent = err instanceof DiscussionError && err.status === 409 ? "No agent is listening any more" : "Failed to send discussion";
+					error.hidden = false;
+					send.disabled = false;
+					resize();
+				}
+			};
+			send.addEventListener("click", () => void submit());
+			cancel.addEventListener("click", close);
+			textarea.addEventListener("keydown", (event) => {
+				if (event.key === "Escape") {
+					event.preventDefault();
+					event.stopPropagation();
+					close();
+				} else if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+					event.preventDefault();
+					submit();
+				}
+			});
+			controls.append(send, cancel);
+			form.append(textarea, error, controls);
+			box.appendChild(form);
+			reply.hidden = true;
+			resize();
+			textarea.focus();
+		});
+		const actions = el("div", { className: "discussion-actions" });
+		const deleteButton = el("button", {
+			className: "btn-danger discussion-delete-btn",
+			text: "Delete"
+		});
+		const deleteError = el("div", { className: "comment-error" });
+		deleteError.hidden = true;
+		deleteButton.addEventListener("click", async () => {
+			deleteButton.disabled = true;
+			deleteError.hidden = true;
+			try {
+				await this.deleteDiscussion(root);
+			} catch (err) {
+				deleteButton.disabled = false;
+				deleteError.textContent = err instanceof Error ? err.message : "Failed to delete discussion";
+				deleteError.hidden = false;
+				box.dispatchEvent(new Event("discussion-layout"));
+			}
+		});
+		const convert = el("button", {
+			className: "btn-secondary discussion-convert-btn",
+			text: "Convert"
+		});
+		convert.addEventListener("click", () => {
+			if (this.isStacked) this.showStackedDiscussionDraft(root);
+			else this.showCommentDialog(root.file, root.line, commentEndLine(root), root.side, root);
+		});
+		actions.append(reply, convert, deleteButton);
+		box.append(actions, deleteError);
+		requestAnimationFrame(() => {
+			box.scrollTop = box.scrollHeight;
+		});
+		return box;
+	}
+};
+//#endregion
+//#region web/src/review-notes.ts
+var ReviewNoteManager = class {
+	notes;
+	listeners;
+	summaryWaiters = [];
+	currentCommitIdx;
+	constructor() {
+		this.notes = [];
+		this.listeners = [];
+		this.currentCommitIdx = null;
+	}
+	setNotes(notes) {
+		this.notes = [...notes];
+		this.notifyListeners();
+	}
+	mergeNotes(notes) {
+		let added = false;
+		for (const note of notes) if (!this.notes.some((existing) => this.isSameNote(existing, note))) {
+			this.notes.push(note);
+			added = true;
+		}
+		if (added) this.notifyListeners();
+	}
+	addNote(note) {
+		if (this.currentCommitIdx !== null && note.commit_idx === void 0) note = {
+			...note,
+			commit_idx: this.currentCommitIdx
+		};
+		this.notes.push(note);
+		this.notifyListeners();
+	}
+	getNotes() {
+		return this.notes.filter((n) => !n.discussion_id);
+	}
+	getNotesForFile(file) {
+		return this.notes.filter((n) => !n.discussion_id && n.file === file && (this.currentCommitIdx === null || n.commit_idx === this.currentCommitIdx));
+	}
+	getDiscussionReplies(discussionId) {
+		return this.notes.filter((n) => n.discussion_id === discussionId && !n.summary);
+	}
+	nextSummary(rootId) {
+		const isSummary = (note) => note.discussion_id === rootId && note.summary;
+		const known = new Set(this.notes.filter(isSummary));
+		return new Promise((resolve) => {
+			const check = () => {
+				const summary = this.notes.find((note) => isSummary(note) && !known.has(note));
+				if (summary) resolve(summary);
+				return !!summary;
+			};
+			this.summaryWaiters.push(check);
+		});
+	}
+	removeDiscussionReplies(id) {
+		this.notes = this.notes.filter((note) => note.discussion_id !== id);
+	}
+	updateNote(target, patch) {
+		const idx = this.notes.findIndex((note) => this.isSameNote(note, target));
+		if (idx < 0) return;
+		this.notes[idx] = {
+			...this.notes[idx],
+			...patch
+		};
+		this.notifyListeners();
+	}
+	findNote(file, line, side) {
+		return this.notes.findIndex((n) => !n.discussion_id && n.file === file && n.side === side && commentContainsLine(n, line) && (this.currentCommitIdx === null || n.commit_idx === this.currentCommitIdx));
+	}
+	onChange(listener) {
+		this.listeners.push(listener);
+	}
+	notifyListeners() {
+		this.summaryWaiters = this.summaryWaiters.filter((check) => !check());
+		this.listeners.forEach((l) => l());
+	}
+	isSameNote(a, b) {
+		return a === b || a.id !== void 0 && a.id === b.id;
+	}
+};
 //#endregion
 //#region web/src/live-events.ts
 function startLiveEvents(app) {
@@ -666,7 +1096,7 @@ function startLiveEvents(app) {
 	const merge = () => {
 		timer = null;
 		if (!pending) return;
-		if (document.querySelector(".review-note-reply")) {
+		if (document.querySelector(".review-note-reply, .discussion-reply")) {
 			timer = setTimeout(merge, 500);
 			return;
 		}
@@ -691,6 +1121,12 @@ function startLiveEvents(app) {
 			fetching = false;
 		}
 	};
+	source.addEventListener("agent", (e) => app.setAgentState(JSON.parse(e.data)));
+	source.addEventListener("error", () => app.setAgentState({
+		...app.agentState,
+		attached: false,
+		busy: app.agentState.launch === "running"
+	}));
 	source.addEventListener("notes", () => void refresh());
 	window.addEventListener("pagehide", () => {
 		source.close();
@@ -915,93 +1351,6 @@ function markAppReady() {
 			subtree: true
 		});
 	}
-}
-//#endregion
-//#region web/src/linkify.ts
-const BUG_RE = /\b([bB]ug)\s+(\d{6,})\b/g;
-const PHAB_RE = /\b(D\d{6,})\b/g;
-const MD_LINK_RE = /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g;
-const URL_RE = /\bhttps?:\/\/[^\s<>()]+/g;
-function appendLinkifiedText(target, text) {
-	target.textContent = "";
-	target.appendChild(linkifyText(text));
-}
-function linkifyText(text) {
-	const fragment = document.createDocumentFragment();
-	const matches = [];
-	for (const match of text.matchAll(MD_LINK_RE)) {
-		const full = match[0];
-		const label = match[1];
-		const href = match[2];
-		if (!full || !label || !href || match.index === void 0) continue;
-		matches.push({
-			start: match.index,
-			end: match.index + full.length,
-			text: label,
-			href
-		});
-	}
-	for (const match of text.matchAll(URL_RE)) {
-		const full = match[0];
-		if (!full || match.index === void 0) continue;
-		const trimmed = full.replace(/[),.;:!?]+$/g, "");
-		matches.push({
-			start: match.index,
-			end: match.index + trimmed.length,
-			text: trimmed,
-			href: trimmed
-		});
-	}
-	for (const match of text.matchAll(BUG_RE)) {
-		const full = match[0];
-		const id = match[2];
-		if (!full || !id || match.index === void 0) continue;
-		matches.push({
-			start: match.index,
-			end: match.index + full.length,
-			text: full,
-			href: `https://bugzilla.mozilla.org/show_bug.cgi?id=${id}`
-		});
-	}
-	for (const match of text.matchAll(PHAB_RE)) {
-		const full = match[1];
-		if (!full || match.index === void 0) continue;
-		matches.push({
-			start: match.index,
-			end: match.index + full.length,
-			text: full,
-			href: `https://phabricator.services.mozilla.com/${full}`
-		});
-	}
-	if (matches.length === 0) {
-		fragment.appendChild(document.createTextNode(text));
-		return fragment;
-	}
-	matches.sort((a, b) => a.start - b.start || b.end - a.end);
-	const filtered = [];
-	let cursor = -1;
-	matches.forEach((match) => {
-		if (match.start < cursor) return;
-		filtered.push(match);
-		cursor = match.end;
-	});
-	let pos = 0;
-	filtered.forEach((match) => {
-		if (match.start > pos) fragment.appendChild(document.createTextNode(text.slice(pos, match.start)));
-		const anchor = el("a", {
-			className: "auto-link",
-			text: match.text,
-			attrs: {
-				href: match.href,
-				target: "_blank",
-				rel: "noopener noreferrer"
-			}
-		});
-		fragment.appendChild(anchor);
-		pos = match.end;
-	});
-	if (pos < text.length) fragment.appendChild(document.createTextNode(text.slice(pos)));
-	return fragment;
 }
 //#endregion
 //#region web/src/file-order.ts
@@ -11212,7 +11561,7 @@ const KEYBOARD_SHORTCUTS = [
 	{
 		keys: ["Mod+Shift+Enter"],
 		action: "submitReview",
-		description: "Submit review"
+		description: "Finish review"
 	},
 	{
 		keys: ["?"],
@@ -11951,10 +12300,10 @@ var CommentsUIMethods = class {
 		this.modifiedDecorations = modifiedEditor.deltaDecorations(this.modifiedDecorations, modifiedDecorations);
 		this.originalDecorations = originalEditor.deltaDecorations(this.originalDecorations, originalDecorations);
 	}
-	showCommentDialog(file, commentLine, monacoLineNumber, side) {
+	showCommentDialog(file, commentLine, monacoLineNumber, side, discussion) {
 		if (!this.editor) return;
 		const targetEditor = side === "new" ? this.editor.getModifiedEditor() : this.editor.getOriginalEditor();
-		if (!Array.isArray(commentLine)) {
+		if (!discussion && !Array.isArray(commentLine)) {
 			const resolvedCommentLine = this.commentLineFromEditorSelection(targetEditor, monacoLineNumber, side === "new" ? this.lastModifiedRangeSelection : this.lastOriginalRangeSelection);
 			if (Array.isArray(resolvedCommentLine)) commentLine = resolvedCommentLine;
 		}
@@ -11963,7 +12312,7 @@ var CommentsUIMethods = class {
 			this.currentWidget = null;
 			this.currentWidgetEditor = null;
 		}
-		const existingIndex = this.commentManager.findComment(file, monacoLineNumber, side);
+		const existingIndex = discussion ? -1 : this.commentManager.findComment(file, monacoLineNumber, side);
 		const existingComment = existingIndex >= 0 ? this.commentManager.comments[existingIndex] : null;
 		const domNode = el("div", { className: "inline-comment-box" });
 		const updateMaxWidth = () => {
@@ -11981,6 +12330,18 @@ var CommentsUIMethods = class {
 				autofocus: true
 			}
 		});
+		const discuss = existingComment || discussion ? null : el("button", {
+			className: "btn-secondary discuss-btn",
+			text: "Discuss"
+		});
+		const summarize = discussion ? el("button", {
+			className: "btn-secondary summarize-btn",
+			text: "Summarize"
+		}) : null;
+		const error = el("div", {
+			className: "comment-error",
+			attrs: { hidden: true }
+		});
 		const actions = el("div", { className: "comment-actions" }, [
 			el("span", {
 				className: "shortcut-hint",
@@ -11994,6 +12355,12 @@ var CommentsUIMethods = class {
 				className: "btn-secondary cancel-btn",
 				text: "Cancel"
 			}),
+			discuss ? el("span", {
+				className: "shortcut-hint discuss-hint",
+				text: `${modKey}+Alt+Enter to discuss`
+			}) : null,
+			discuss,
+			summarize,
 			el("button", {
 				className: "btn-primary save-btn",
 				text: "Save"
@@ -12001,6 +12368,7 @@ var CommentsUIMethods = class {
 		]);
 		domNode.appendChild(title);
 		domNode.appendChild(textarea);
+		domNode.appendChild(error);
 		domNode.appendChild(actions);
 		const widget = {
 			getId: () => "inline.comment.widget",
@@ -12036,6 +12404,10 @@ var CommentsUIMethods = class {
 			if (e.key === "Escape") cleanup();
 			else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
 				e.preventDefault();
+				if (e.altKey) {
+					if (this.agentAttached && !existingComment) sendDiscussion();
+					return;
+				}
 				saveComment();
 			}
 		};
@@ -12047,9 +12419,17 @@ var CommentsUIMethods = class {
 			textarea.removeEventListener("keydown", handleKeydown);
 			textarea.removeEventListener("input", autoResize);
 		};
-		const saveComment = () => {
+		const saveComment = async () => {
 			if (!textarea.value.trim()) {
 				textarea.focus();
+				return;
+			}
+			if (discussion) try {
+				await this.deleteDiscussion(discussion);
+			} catch (err) {
+				error.textContent = err instanceof Error ? err.message : "Failed to delete discussion";
+				error.hidden = false;
+				targetEditor.layoutContentWidget(widget);
 				return;
 			}
 			if (existingIndex >= 0) this.commentManager.updateComment(existingIndex, textarea.value);
@@ -12065,7 +12445,49 @@ var CommentsUIMethods = class {
 			this.updateDecorations();
 			cleanup();
 		};
-		if (saveBtn) saveBtn.onclick = saveComment;
+		const sendDiscussion = async () => {
+			const body = textarea.value.trim();
+			if (!body) {
+				textarea.focus();
+				return;
+			}
+			if (!discuss || discuss.disabled) return;
+			discuss.disabled = true;
+			error.hidden = true;
+			try {
+				await this.discussionManager.send({
+					file,
+					line: commentLine,
+					side,
+					body
+				});
+				cleanup();
+			} catch (err) {
+				error.textContent = err instanceof DiscussionError && err.status === 409 ? "No agent is listening any more" : "Failed to send discussion. Try again.";
+				error.hidden = false;
+				targetEditor.layoutContentWidget(widget);
+			} finally {
+				discuss.disabled = false;
+			}
+		};
+		if (discuss) discuss.onclick = () => void sendDiscussion();
+		if (summarize && discussion) summarize.onclick = async () => {
+			summarize.disabled = true;
+			summarize.textContent = "Summarizing…";
+			error.hidden = true;
+			try {
+				textarea.value = await this.summarizeDiscussion(discussion);
+				autoResize();
+			} catch (err) {
+				error.textContent = err instanceof DiscussionError && err.status === 409 ? "No agent is listening any more" : "Failed to request a summary. Try again.";
+				error.hidden = false;
+			} finally {
+				summarize.disabled = false;
+				summarize.textContent = "Summarize";
+				targetEditor.layoutContentWidget(widget);
+			}
+		};
+		if (saveBtn) saveBtn.onclick = () => void saveComment();
 		if (cancelBtn) cancelBtn.onclick = cleanup;
 		const deleteBtnEl = domNode.querySelector(".delete-btn");
 		if (deleteBtnEl) deleteBtnEl.onclick = () => {
@@ -12101,7 +12523,28 @@ var ReviewNoteMethods = class {
 		if (!this.editor) return;
 		const file = this.files[this.currentFileIndex];
 		if (!file) return;
-		const notes = this.reviewNoteManager.getNotesForFile(file.path);
+		const notes = [...this.reviewNoteManager.getNotesForFile(file.path).map((note) => ({
+			file: note.file,
+			line: note.line,
+			side: note.side,
+			height: () => this.reviewNoteHeightPx(note.body),
+			hover: note.body,
+			node: this.buildReviewNoteNode(note)
+		})), ...this.discussionManager.getForFile(file.path).map((discussion) => {
+			const node = this.buildDiscussionNode(discussion);
+			return {
+				file: discussion.file,
+				line: discussion.line,
+				side: discussion.side,
+				node,
+				hover: discussion.body,
+				height: () => {
+					const entries = Array.from(node.querySelectorAll(".discussion-body")).reduce((total, body) => total + this.reviewNoteHeightPx(body.textContent || "") - 48, 0);
+					return Math.min(460, 52 + entries + (node.querySelector(".discussion-reply") ? 200 : 0));
+				},
+				discussion: true
+			};
+		})];
 		const modifiedEditor = this.editor.getModifiedEditor();
 		const originalEditor = this.editor.getOriginalEditor();
 		const modifiedNotes = notes.filter((note) => note.side === "new");
@@ -12121,11 +12564,16 @@ var ReviewNoteMethods = class {
 			notes.forEach((note) => {
 				const line = Math.max(1, Math.min(commentEndLine(note), maxLine));
 				const node = el("div", { className: `review-note-zone review-note-zone-${note.side}` });
-				node.appendChild(this.buildReviewNoteNode(note));
-				const id = accessor.addZone({
+				node.appendChild(note.node);
+				const zone = {
 					afterLineNumber: line,
 					domNode: node,
-					heightInPx: this.reviewNoteHeightPx(note)
+					heightInPx: note.height()
+				};
+				const id = accessor.addZone(zone);
+				if (note.discussion) note.node.addEventListener("discussion-layout", () => {
+					zone.heightInPx = note.height();
+					targetEditor.changeViewZones((zones) => zones.layoutZone(id));
 				});
 				newIds.push(id);
 			});
@@ -12143,9 +12591,9 @@ var ReviewNoteMethods = class {
 				range: new monaco.Range(start, 1, end, 1),
 				options: {
 					isWholeLine: true,
-					glyphMarginClassName: "codicon codicon-comment-discussion review-note-glyph",
-					glyphMarginHoverMessage: { value: note.body },
-					linesDecorationsClassName: "review-note-line-decoration"
+					glyphMarginClassName: note.discussion ? "codicon codicon-hubot discussion-glyph" : "codicon codicon-comment-discussion review-note-glyph",
+					glyphMarginHoverMessage: { value: note.hover },
+					linesDecorationsClassName: note.discussion ? "discussion-line-decoration" : "review-note-line-decoration"
 				}
 			};
 		});
@@ -12330,8 +12778,8 @@ var ReviewNoteMethods = class {
 		const index = this.commentManager.comments.findIndex(({ in_reply_to: target }) => target !== void 0 && target.id === note.id && target.author === note.author && target.body === note.body);
 		if (index >= 0) this.commentManager.removeComment(index);
 	}
-	reviewNoteHeightPx(note) {
-		const visualLines = note.body.split("\n").reduce((total, line) => total + Math.max(1, Math.ceil(line.length / 86)), 0);
+	reviewNoteHeightPx(body) {
+		const visualLines = body.split("\n").reduce((total, line) => total + Math.max(1, Math.ceil(line.length / 86)), 0);
 		return Math.max(124, Math.min(460, 88 + visualLines * 18));
 	}
 };
@@ -12490,7 +12938,7 @@ var DialogMethods = class {
 			id: "auto-close-tab",
 			name: "auto_close_tab",
 			checked: currentAutoCloseTab
-		} }), el("span", { text: "Automatically close tab after submitting review" })])]);
+		} }), el("span", { text: "Automatically close tab after finishing review" })])]);
 		const wordWrapField = el("div", { className: "settings-field" }, [el("label", {
 			attrs: { for: "word-wrap" },
 			text: "Word Wrap"
@@ -12572,20 +13020,19 @@ var DialogMethods = class {
 	async showSubmitConfirmation() {
 		const submissionComments = this.commentManager.getComments().filter((c) => !this.publishedCommentKeys.has(commentKey(c)));
 		const comments = submissionComments;
-		const submitLabel = "Submit Review";
+		const submitLabel = "Finish";
 		let submit = () => {};
-		const footerContent = [el("button", {
-			className: "btn-secondary cancel-submit-btn",
-			text: "Cancel"
-		}), el("button", {
-			className: "btn-primary confirm-submit-btn",
-			text: submitLabel
-		})];
 		const { overlay, modal, body, footer, close } = openModal({
-			title: submissionComments.length === 0 ? "Submit Review" : `Review Comments (${submissionComments.length})`,
+			title: "Finish review",
 			titleId: "submit-title",
 			modalClass: "submit-review-modal",
-			footerContent,
+			footerContent: [el("button", {
+				className: "btn-secondary cancel-submit-btn",
+				text: "Cancel"
+			}), el("button", {
+				className: "btn-primary confirm-submit-btn",
+				text: submitLabel
+			})],
 			onKeydown: (e) => {
 				if (e.key === "Enter" && e.shiftKey && (e.ctrlKey || e.metaKey)) {
 					e.preventDefault();
@@ -12594,19 +13041,25 @@ var DialogMethods = class {
 			}
 		});
 		if (submissionComments.length === 0) {
-			const noCommentsMsg = el("p", { text: "No comments. Submit to approve this review." });
+			const noCommentsMsg = el("p", { text: "No comments. Finish to approve this review." });
 			noCommentsMsg.style.padding = "20px";
 			noCommentsMsg.style.textAlign = "center";
 			noCommentsMsg.style.color = "var(--text-secondary)";
 			body.appendChild(noCommentsMsg);
 		}
+		const discussionCount = this.discussionManager.getOpenThreadCount();
+		if (discussionCount) body.appendChild(el("p", {
+			className: "submit-discussion-warning",
+			text: `${discussionCount} ${discussionCount === 1 ? "discussion" : "discussions"} will be discarded. Convert them first to keep them.`
+		}));
+		if (!submissionComments.length) body.appendChild(el("p", { text: "Comments will be printed to the terminal and lrv will exit." }));
 		const summaryField = el("div", { className: "submit-summary-field" }, [el("label", {
 			className: "submit-summary-label",
 			text: "Overall feedback"
 		})]);
 		const summaryInput = el("textarea", {
 			className: "submit-summary-input",
-			attrs: { placeholder: "Final global comment before submit…" }
+			attrs: { placeholder: "Final global comment before finishing…" }
 		});
 		summaryInput.value = this.overallReviewComment;
 		summaryField.appendChild(summaryInput);
@@ -12627,7 +13080,7 @@ var DialogMethods = class {
 				el("div", { className: "submit-review-summary-item" }, [el("strong", { text: fileCount }), el("span", { text: fileCount === 1 ? "location" : "locations" })]),
 				el("div", {
 					className: "submit-review-summary-hint",
-					text: "These comments will be sent to the agent when you submit."
+					text: "Comments will be printed to the terminal and lrv will exit."
 				})
 			]));
 		}
@@ -12638,7 +13091,7 @@ var DialogMethods = class {
 			errorBox.hidden = true;
 			this.overallReviewComment = summaryInput.value.trim();
 			submitBtn.disabled = true;
-			submitBtn.textContent = "Submitting...";
+			submitBtn.textContent = "Finishing…";
 			try {
 				const resp = await fetch("/api/complete", {
 					method: "POST",
@@ -12659,18 +13112,18 @@ var DialogMethods = class {
 				this.updateDecorations();
 				this.renderFileList();
 				if (this.currentFileIsCommit) this.loadCommitView();
-				submitBtn.textContent = "Submitted!";
+				submitBtn.textContent = "Finished";
 				const submitReviewBtn = document.getElementById("submit-review");
 				if (submitReviewBtn) {
 					submitReviewBtn.disabled = true;
-					submitReviewBtn.textContent = "Review Submitted";
+					submitReviewBtn.textContent = "Review finished";
 				}
 				setTimeout(() => {
 					close();
 					if (this.config.auto_close_tab) window.close();
 				}, 1e3);
 			} catch (error) {
-				errorBox.textContent = `Failed to submit review: ${error instanceof Error ? error.message : error}`;
+				errorBox.textContent = `Failed to finish review: ${error instanceof Error ? error.message : error}`;
 				errorBox.hidden = false;
 				submitBtn.disabled = false;
 				submitBtn.textContent = submitLabel;
@@ -12788,16 +13241,54 @@ var DialogMethods = class {
 };
 //#endregion
 //#region web/src/publish-dialog-methods.ts
+const REVISION_STATE_CLASSES = {
+	accepted: "revision-accepted",
+	"needs-review": "revision-needs-review",
+	"needs-revision": "revision-waiting",
+	"changes-planned": "revision-waiting",
+	draft: "revision-waiting"
+};
 var PublishDialogMethods = class {
 	prefetchPhabricator() {
-		this.phabStatus ??= fetchJSON("/api/phabricator").catch((error) => {
+		this.phabStatus ??= fetchJSON("/api/phabricator").then((status) => {
+			this.phabRevisionStatus = status;
+			this.phabValidationError = null;
+			status.revisions.filter((r) => r.published).forEach((r) => this.publishedRevisionIds.add(r.id));
+			this.renderSeriesNav();
+			return status;
+		}).catch((error) => {
 			this.phabStatus = null;
+			this.phabValidationError = `Failed to verify revisions: ${error instanceof Error ? error.message : error}`;
+			this.updatePublishButton();
 			throw error;
 		});
 		return this.phabStatus;
 	}
-	async showPublishDialog() {
-		let active = "";
+	/** The commit's revision id, known locally before Phabricator has been contacted. */
+	revisionIdFor(commitIdx) {
+		return this.context?.phabricator_revisions?.[commitIdx] ?? null;
+	}
+	updatePublishButton() {
+		const button = document.getElementById("publish-commit");
+		if (!button) return;
+		const id = this.revisionIdFor(this.currentCommitIdx);
+		button.hidden = !id;
+		if (!id) return;
+		const status = this.phabRevisionStatus;
+		const revision = status?.revisions.find((r) => r.id === id);
+		const published = this.publishedRevisionIds.has(id);
+		const error = this.phabValidationError ?? status?.error;
+		const verifying = !status && !error;
+		button.classList.toggle("verifying", verifying);
+		for (const state of Object.values(REVISION_STATE_CLASSES)) button.classList.remove(state);
+		const stateClass = REVISION_STATE_CLASSES[revision?.status ?? ""];
+		if (stateClass) button.classList.add(stateClass);
+		const stateName = revision?.status_name ? ` · ${revision.status_name}` : "";
+		button.textContent = published ? `Published ${id} ✓` : `Publish ${id}${stateName}`;
+		button.disabled = verifying || published || !!error || !revision || !revision.publishable;
+		button.title = verifying ? `Verifying ${id}…` : error ?? revision?.reason ?? "";
+	}
+	async showPublishDialog(revisionId) {
 		let publish = async () => {};
 		const closeButton = el("button", {
 			className: "btn-secondary",
@@ -12842,73 +13333,32 @@ var PublishDialogMethods = class {
 			const revision = status.revisions.find((r) => r.id === id);
 			return originals.filter((c) => revision.commit_idxs.includes(c.commit_idx ?? 0) && !isAddressRequest(c));
 		};
-		const unassigned = originals.filter((c) => isAddressRequest(c) || !status.revisions.some((r) => r.commit_idxs.includes(c.commit_idx ?? 0)));
-		const tabs = el("div", {
-			className: "publish-tabs",
-			attrs: { role: "tablist" }
-		});
-		const panel = el("div", {
-			className: "publish-panel",
-			attrs: { role: "tabpanel" }
-		});
-		body.append(tabs, panel);
-		active = status.revisions.find((r) => !r.published)?.id ?? status.revisions[0]?.id ?? "";
+		const panel = el("div", { className: "publish-panel" });
+		body.appendChild(panel);
+		const revision = status.revisions.find((r) => r.id === revisionId);
+		if (!revision) {
+			panel.appendChild(el("p", { text: "Revision unavailable." }));
+			return;
+		}
+		const unassigned = originals.filter((c) => revision.commit_idxs.includes(c.commit_idx ?? 0) && isAddressRequest(c));
 		let rendering = 0;
 		const render = () => {
 			const generation = ++rendering;
-			tabs.replaceChildren();
-			tabs.hidden = status.revisions.length + Number(unassigned.length > 0) <= 1;
-			for (const revision of status.revisions) {
-				const badge = revision.published ? "✓" : !revision.publishable ? "⚠" : `· ${forRevision(revision.id).length}`;
-				const tab = el("button", {
-					className: "publish-tab",
-					text: `${revision.id} ${badge}`,
-					attrs: {
-						role: "tab",
-						"aria-selected": String(active === revision.id),
-						title: revision.reason ?? ""
-					}
-				});
-				tab.onclick = () => {
-					active = revision.id;
-					render();
-				};
-				tabs.appendChild(tab);
-			}
-			if (unassigned.length) {
-				const tab = el("button", {
-					className: "publish-tab",
-					text: `Not published · ${unassigned.length}`,
-					attrs: {
-						role: "tab",
-						"aria-selected": String(active === "unassigned")
-					}
-				});
-				tab.onclick = () => {
-					active = "unassigned";
-					render();
-				};
-				tabs.appendChild(tab);
-			}
 			panel.replaceChildren();
-			publishButton.hidden = active === "unassigned";
-			if (active === "unassigned") {
-				panel.appendChild(el("p", { text: "These comments are for the agent. Close this dialog and choose Submit To.. → Agent." }));
-				this.renderSubmitComments(panel, unassigned);
-				return;
-			}
-			const revision = status.revisions.find((r) => r.id === active);
-			if (!revision) return;
-			let state = this.publishTabStates.get(active);
+			if (unassigned.length) panel.appendChild(el("p", {
+				className: "submit-publish-note",
+				text: `${unassigned.length} ${unassigned.length === 1 ? "comment stays" : "comments stay"} in the review and ${unassigned.length === 1 ? "is" : "are"} printed on Finish.`
+			}));
+			let state = this.publishStates.get(revisionId);
 			if (!state) {
 				state = {
 					action: "comment",
 					overall: ""
 				};
-				this.publishTabStates.set(active, state);
+				this.publishStates.set(revisionId, state);
 			}
 			const tabState = state;
-			const comments = forRevision(active);
+			const comments = forRevision(revisionId);
 			const updateButton = () => {
 				publishButton.disabled = !!status.error || !revision.publishable || revision.published || !!tabState.busy || !comments.length && !tabState.overall.trim() && tabState.action === "comment";
 				publishButton.textContent = revision.published ? "Published ✓" : tabState.busy ? "Publishing…" : `Publish ${revision.id}`;
@@ -13011,9 +13461,8 @@ var PublishDialogMethods = class {
 					revision.published = true;
 					comments.forEach((c) => this.publishedCommentKeys.add(commentKey(c)));
 					this.publishedRevisionIds.add(revision.id);
-					const next = status.revisions.find((r) => r.publishable && !r.published);
-					if (!next) setTimeout(close, 1e3);
-					active = next?.id ?? revision.id;
+					this.renderSeriesNav();
+					close();
 				} catch (error) {
 					tabState.error = `Failed to publish review: ${error instanceof Error ? error.message : error}`;
 				} finally {
@@ -13086,6 +13535,7 @@ var SeriesMethods = class {
 		return row;
 	}
 	renderSeriesNav() {
+		this.updatePublishButton();
 		const container = document.getElementById("commit-strip");
 		const resizer = document.getElementById("commit-strip-resizer");
 		if (!container) return;
@@ -13116,6 +13566,11 @@ var SeriesMethods = class {
 				text: msg
 			});
 			titleRow.appendChild(title);
+			const revisionId = this.revisionIdFor(commit.idx);
+			if (revisionId) titleRow.appendChild(el("span", {
+				className: "series-revision-badge",
+				text: `${revisionId}${this.publishedRevisionIds.has(revisionId) ? " ✓" : ""}`
+			}));
 			if (commitCommentCount > 0) titleRow.appendChild(el("span", {
 				className: "series-comment-badge",
 				text: String(commitCommentCount)
@@ -13155,6 +13610,7 @@ var SeriesMethods = class {
 		this.currentCommitIdx = clamped;
 		this.commentManager.currentCommitIdx = clamped;
 		this.reviewNoteManager.currentCommitIdx = clamped;
+		this.discussionManager.currentCommitIdx = clamped;
 		this.resetFileView();
 		this.clearStackedView();
 		if (this._commitViewEl) {
@@ -13525,6 +13981,15 @@ var StackedViewMethods = class {
 		};
 		this.renderStackedComments();
 	}
+	showStackedDiscussionDraft(discussion) {
+		this.stackedDraft = {
+			file: discussion.file,
+			line: discussion.line,
+			side: discussion.side,
+			discussion
+		};
+		this.renderStackedComments();
+	}
 	showStackedDraftFromSelection(file, range) {
 		if (!file || !range) return;
 		const startSide = range.side ? this.fromAnnotationSide(range.side) : null;
@@ -13576,6 +14041,11 @@ var StackedViewMethods = class {
 		const metadata = annotation.metadata;
 		if (!metadata) return;
 		if (metadata.kind === "draft") return this.buildDraftAnnotation(metadata);
+		if (metadata.kind === "discussion") {
+			const wrap = el("div", { className: "stacked-annotation" });
+			wrap.appendChild(this.buildDiscussionNode(metadata.discussion));
+			return wrap;
+		}
 		if (metadata.kind === "review-note") {
 			const wrap = el("div", { className: `stacked-annotation stacked-review-note-${metadata.note.side}` });
 			wrap.appendChild(this.buildReviewNoteNode(metadata.note));
@@ -13589,6 +14059,12 @@ var StackedViewMethods = class {
 		ta.className = "stacked-comment-ta";
 		ta.placeholder = "Add a comment...";
 		ta.rows = 3;
+		const state = this.stackedDraft ?? draft;
+		ta.value = state.body ?? "";
+		ta.addEventListener("input", () => {
+			state.body = ta.value;
+		});
+		const { discussion } = draft;
 		const save = el("button", {
 			className: "stacked-comment-save btn-primary",
 			text: "Save"
@@ -13597,10 +14073,36 @@ var StackedViewMethods = class {
 			className: "stacked-comment-cancel btn-secondary",
 			text: "Cancel"
 		});
-		const doSave = () => {
+		const reset = () => {
+			this.stackedDraft = null;
+			this.stackedLastRangeSelection = null;
+			this.stackedCodeView?.clearSelectedLines({ notify: false });
+			this.renderStackedComments();
+		};
+		const discuss = el("button", {
+			className: "stacked-comment-discuss btn-secondary discuss-btn",
+			text: "Discuss"
+		});
+		const summarize = discussion ? el("button", {
+			className: "stacked-comment-summarize btn-secondary summarize-btn",
+			text: state.summarizing ? "Summarizing…" : "Summarize",
+			attrs: { disabled: state.summarizing }
+		}) : null;
+		const error = el("div", {
+			className: "comment-error",
+			attrs: { hidden: true }
+		});
+		const doSave = async () => {
 			const body = ta.value.trim();
 			if (!body) {
 				ta.focus();
+				return;
+			}
+			if (discussion) try {
+				await this.deleteDiscussion(discussion);
+			} catch (err) {
+				error.textContent = err instanceof Error ? err.message : "Failed to delete discussion";
+				error.hidden = false;
 				return;
 			}
 			const comment = {
@@ -13613,30 +14115,72 @@ var StackedViewMethods = class {
 				...comment,
 				commit_idx: this.currentCommitIdx
 			} : comment);
-			this.stackedDraft = null;
-			this.stackedLastRangeSelection = null;
-			this.stackedCodeView?.clearSelectedLines({ notify: false });
-			this.renderStackedComments();
+			reset();
 		};
-		save.addEventListener("click", doSave);
+		const sendDiscussion = async () => {
+			const body = ta.value.trim();
+			if (!body) {
+				ta.focus();
+				return;
+			}
+			if (discuss.disabled) return;
+			discuss.disabled = true;
+			error.hidden = true;
+			try {
+				await this.discussionManager.send({
+					file: draft.file,
+					line: draft.line,
+					side: draft.side,
+					body
+				});
+				reset();
+			} catch (err) {
+				error.textContent = err instanceof DiscussionError && err.status === 409 ? "No agent is listening any more" : "Failed to send discussion. Try again.";
+				error.hidden = false;
+			} finally {
+				discuss.disabled = false;
+			}
+		};
+		discuss.addEventListener("click", () => void sendDiscussion());
+		summarize?.addEventListener("click", async () => {
+			state.summarizing = true;
+			summarize.disabled = true;
+			summarize.textContent = "Summarizing…";
+			error.hidden = true;
+			try {
+				const body = await this.summarizeDiscussion(discussion);
+				delete state.summarizing;
+				if (this.stackedDraft === state) {
+					state.body = body;
+					this.renderStackedComments();
+				}
+			} catch (err) {
+				delete state.summarizing;
+				summarize.disabled = false;
+				summarize.textContent = "Summarize";
+				error.textContent = err instanceof DiscussionError && err.status === 409 ? "No agent is listening any more" : "Failed to request a summary. Try again.";
+				error.hidden = false;
+			}
+		});
+		save.addEventListener("click", () => void doSave());
 		cancel.addEventListener("click", () => {
-			this.stackedDraft = null;
-			this.stackedLastRangeSelection = null;
-			this.stackedCodeView?.clearSelectedLines({ notify: false });
-			this.renderStackedComments();
+			reset();
 		});
 		ta.addEventListener("keydown", (event) => {
 			if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
 				event.preventDefault();
+				if (event.altKey) {
+					if (this.agentAttached && !discussion) sendDiscussion();
+					return;
+				}
 				doSave();
-			} else if (event.key === "Escape") {
-				this.stackedDraft = null;
-				this.stackedLastRangeSelection = null;
-				this.stackedCodeView?.clearSelectedLines({ notify: false });
-				this.renderStackedComments();
-			}
+			} else if (event.key === "Escape") reset();
 		});
-		form.append(ta, el("div", { className: "stacked-comment-actions" }, [save, cancel]));
+		form.append(ta, error, el("div", { className: "stacked-comment-actions" }, [
+			discussion ? summarize : discuss,
+			save,
+			cancel
+		]));
 		queueMicrotask(() => ta.focus());
 		return form;
 	}
@@ -13685,7 +14229,7 @@ var StackedViewMethods = class {
 			ta.addEventListener("keydown", (event) => {
 				if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
 					event.preventDefault();
-					saveEdit();
+					if (!event.altKey) saveEdit();
 				} else if (event.key === "Escape") this.renderStackedComments();
 			});
 			box.replaceChildren(meta, ta, el("div", { className: "stacked-comment-actions-row" }, [save, cancel]));
@@ -13716,6 +14260,16 @@ var StackedViewMethods = class {
 				metadata: {
 					kind: "review-note",
 					note
+				}
+			});
+		});
+		this.discussionManager.getForFile(path).forEach((discussion) => {
+			annotations.push({
+				side: this.toAnnotationSide(discussion.side),
+				lineNumber: commentEndLine(discussion),
+				metadata: {
+					kind: "discussion",
+					discussion
 				}
 			});
 		});
@@ -13830,12 +14384,16 @@ function applyMixin(TargetClass, MethodsClass) {
 	}
 }
 var MonacoApp = class {
+	agentAttached = false;
 	publishedCommentKeys = /* @__PURE__ */ new Set();
 	publishedRevisionIds = /* @__PURE__ */ new Set();
-	publishTabStates = /* @__PURE__ */ new Map();
+	publishStates = /* @__PURE__ */ new Map();
 	phabStatus = null;
+	phabRevisionStatus = null;
+	phabValidationError = null;
 	commentManager;
 	reviewNoteManager;
+	discussionManager;
 	currentFileIndex;
 	editor;
 	isInline;
@@ -13875,9 +14433,15 @@ var MonacoApp = class {
 	commitLoadGeneration;
 	commentDraftKey;
 	commentDraftWrite;
+	agentState = {
+		attached: false,
+		busy: false,
+		launch: "idle"
+	};
 	constructor() {
 		this.commentManager = new CommentManager();
 		this.reviewNoteManager = new ReviewNoteManager();
+		this.discussionManager = new DiscussionManager();
 		this.currentFileIndex = 0;
 		this.editor = null;
 		this.isInline = false;
@@ -13926,6 +14490,10 @@ var MonacoApp = class {
 			this.updateUI();
 			if (this.isStacked) this.renderStackedComments();
 		});
+		this.discussionManager.onChange(() => {
+			this.renderReviewNotes();
+			this.renderFileList();
+		});
 		this.reviewNoteManager.onChange(() => {
 			this.renderReviewNotes();
 			this.renderFileList();
@@ -13939,13 +14507,14 @@ var MonacoApp = class {
 		if (performance.getEntriesByName("page:script-start").length > 0) window.Perf.measure("page:script-to-init-start", "page:script-start", "init:start");
 		window.Perf.mark("init:fetch:start");
 		const t0 = performance.now();
-		const [configData, contextData, diffData, seriesData, reviewNotesData, userThemesData] = await Promise.all([
+		const [configData, contextData, diffData, seriesData, reviewNotesData, userThemesData, discussionsData] = await Promise.all([
 			fetchJSON("/api/config"),
 			fetchJSON("/api/context"),
 			fetchJSON("/api/diff"),
 			fetchJSON("/api/series"),
 			fetchJSON("/api/review-notes"),
 			fetchJSON("/api/themes"),
+			fetchJSON("/api/discussions"),
 			document.fonts.ready
 		]);
 		window.Perf.mark("init:fetch:end");
@@ -13964,6 +14533,8 @@ var MonacoApp = class {
 		this.currentCommitIdx = 0;
 		this.commentManager.currentCommitIdx = seriesData.is_series ? 0 : null;
 		this.reviewNoteManager.currentCommitIdx = seriesData.is_series ? 0 : null;
+		this.discussionManager.currentCommitIdx = seriesData.is_series ? 0 : null;
+		this.discussionManager.setDiscussions(discussionsData ?? []);
 		this.reviewNoteManager.setNotes(reviewNotesData ?? []);
 		this.files = sortDiffFiles(diffData.files);
 		this.diff = {
@@ -14111,6 +14682,8 @@ var MonacoApp = class {
 		}
 		const themeColors = defs[themeName]?.colors ?? {};
 		const fromTheme = (token) => themeColors[token] ?? "";
+		setVar("--success-color", fromTheme("testing.iconPassed") || "#3fb950");
+		setVar("--warning-color", fromTheme("editorWarning.foreground") || "#d29922");
 		setVar("--bg-primary", fromTheme("editor.background"));
 		setVar("--bg-secondary", fromTheme("editorGutter.background") || fromTheme("editor.lineHighlightBackground") || fromTheme("editor.background"));
 		setVar("--bg-elevated", fromTheme("editorGutter.background") || fromTheme("editor.lineHighlightBackground") || fromTheme("editor.background"));
@@ -14225,55 +14798,16 @@ var MonacoApp = class {
 			this.showSettingsModal();
 		});
 		$$1("#help-btn")?.addEventListener("click", () => this.showKeyboardHelp());
-		const submitBtn = $$1("#submit-review");
-		const menu = $$1("#submit-menu");
-		const menuItems = Array.from(menu.querySelectorAll("[role=\"menuitem\"]"));
-		const hasMenu = !!this.context.phabricator_available;
-		if (hasMenu) {
-			submitBtn.textContent = "Submit To..";
-			submitBtn.setAttribute("aria-haspopup", "menu");
-			submitBtn.setAttribute("aria-expanded", "false");
-		}
-		const closeMenu = () => {
-			menu.hidden = true;
-			submitBtn.setAttribute("aria-expanded", "false");
-		};
-		submitBtn.addEventListener("click", () => {
-			if (!hasMenu) {
-				this.showSubmitConfirmation();
-				return;
-			}
-			menu.hidden = !menu.hidden;
-			submitBtn.setAttribute("aria-expanded", String(!menu.hidden));
-			if (!menu.hidden) {
-				menuItems[0]?.focus();
-				this.prefetchPhabricator().catch(() => {});
-			}
-		});
-		menu.addEventListener("keydown", (event) => {
-			if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
-			event.preventDefault();
-			const step = event.key === "ArrowDown" ? 1 : -1;
-			const current = menuItems.indexOf(document.activeElement);
-			menuItems[(current + step + menuItems.length) % menuItems.length]?.focus();
-		});
-		document.addEventListener("click", (event) => {
-			if (!(event.target instanceof Node) || !submitBtn.parentElement?.contains(event.target)) closeMenu();
-		});
-		document.addEventListener("keydown", (event) => {
-			if (event.key === "Escape" && !menu.hidden) {
-				closeMenu();
-				submitBtn.focus();
-			}
-		});
-		$$1("#send-to-agent")?.addEventListener("click", () => {
-			closeMenu();
+		this.setupConnectAgent();
+		$$1("#submit-review")?.addEventListener("click", () => {
 			this.showSubmitConfirmation();
 		});
-		$$1("#publish-to-phabricator")?.addEventListener("click", () => {
-			closeMenu();
-			this.showPublishDialog();
+		$$1("#publish-commit")?.addEventListener("click", () => {
+			const id = this.revisionIdFor(this.currentCommitIdx);
+			if (id) this.showPublishDialog(id);
 		});
+		this.updatePublishButton();
+		if (this.context.phabricator_available) this.prefetchPhabricator().catch((error) => console.error(error));
 		$$1("#toggle-view")?.addEventListener("click", () => {
 			this.toggleView();
 		});
@@ -14326,10 +14860,12 @@ applyMixin(MonacoApp, NavigationMethods);
 applyMixin(MonacoApp, CommitMethods);
 applyMixin(MonacoApp, CommentsUIMethods);
 applyMixin(MonacoApp, ReviewNoteMethods);
+applyMixin(MonacoApp, DiscussionMethods);
 applyMixin(MonacoApp, DialogMethods);
 applyMixin(MonacoApp, SeriesMethods);
 applyMixin(MonacoApp, StackedViewMethods);
 applyMixin(MonacoApp, PublishDialogMethods);
+applyMixin(MonacoApp, ConnectAgentMethods);
 //#endregion
 //#region web/src/main.ts
 document.title = "lrv — Loading…";

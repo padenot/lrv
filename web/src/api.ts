@@ -1,3 +1,4 @@
+import type { LaunchRequest } from './types/app';
 import { el } from './dom';
 
 let fileFetchPending = 0;
@@ -71,4 +72,12 @@ export async function fetchJSON<T>(url: string, options?: RequestInit): Promise<
       hideFetchSpinnerMaybe();
     }
   }
+}
+
+export function launchAgent(request: LaunchRequest): Promise<{ launch: string }> {
+  return fetchJSON('/api/agent/launch', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  });
 }

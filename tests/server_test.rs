@@ -31,9 +31,11 @@ fn test_app_state_construction() {
         git_branch: Some("main".to_string()),
         title: None,
         is_public: false,
+        launch_available: true,
         claude_skill_installed: false,
         comment_store_error: None,
         phabricator_available: false,
+        phabricator_revisions: Vec::new(),
     };
 
     let (shutdown_tx, _rx) = tokio::sync::mpsc::channel::<()>(1);
@@ -45,6 +47,9 @@ fn test_app_state_construction() {
         overall_comment: Arc::new(Mutex::new(None)),
         notes_version: std::sync::Arc::new(tokio::sync::watch::channel(0).0),
         agent_token: Arc::from("test-token"),
+        agent: lrv::agent::AgentChannel::new(lrv::agent::lease_from_env()),
+        launcher: lrv::launch::AgentLauncher::new(),
+        raw_diffs: std::sync::Arc::new(Vec::new()),
         review_notes: Arc::new(Mutex::new(vec![])),
         shutdown_tx: Arc::new(Mutex::new(Some(shutdown_tx))),
         config: Arc::new(Mutex::new(config)),
@@ -88,9 +93,11 @@ fn test_create_router() {
         git_branch: None,
         title: None,
         is_public: false,
+        launch_available: true,
         claude_skill_installed: false,
         comment_store_error: None,
         phabricator_available: false,
+        phabricator_revisions: Vec::new(),
     };
 
     let (shutdown_tx, _rx) = tokio::sync::mpsc::channel::<()>(1);
@@ -101,6 +108,9 @@ fn test_create_router() {
         overall_comment: Arc::new(Mutex::new(None)),
         notes_version: std::sync::Arc::new(tokio::sync::watch::channel(0).0),
         agent_token: Arc::from("test-token"),
+        agent: lrv::agent::AgentChannel::new(lrv::agent::lease_from_env()),
+        launcher: lrv::launch::AgentLauncher::new(),
+        raw_diffs: std::sync::Arc::new(Vec::new()),
         review_notes: Arc::new(Mutex::new(vec![])),
         shutdown_tx: Arc::new(Mutex::new(Some(shutdown_tx))),
         config: Arc::new(Mutex::new(config)),
@@ -121,8 +131,7 @@ fn test_create_router() {
     let _router = lrv::server::create_router(state, false);
 }
 
-#[tokio::test]
-async fn test_review_note_api_round_trip() {
+fn review_note_state() -> lrv::server::AppState {
     let diff_data = lrv::types::DiffResponse {
         files: vec![],
         stats: lrv::types::DiffStats {
@@ -146,19 +155,24 @@ async fn test_review_note_api_round_trip() {
         git_branch: None,
         title: None,
         is_public: false,
+        launch_available: true,
         claude_skill_installed: false,
         comment_store_error: None,
         phabricator_available: false,
+        phabricator_revisions: Vec::new(),
     };
 
     let (shutdown_tx, _rx) = tokio::sync::mpsc::channel::<()>(1);
 
-    let state = lrv::server::AppState {
+    lrv::server::AppState {
         diffs: Arc::new(vec![diff_data]),
         comments: Arc::new(Mutex::new(vec![])),
         overall_comment: Arc::new(Mutex::new(None)),
         notes_version: std::sync::Arc::new(tokio::sync::watch::channel(0).0),
         agent_token: Arc::from("test-token"),
+        agent: lrv::agent::AgentChannel::new(lrv::agent::lease_from_env()),
+        launcher: lrv::launch::AgentLauncher::new(),
+        raw_diffs: std::sync::Arc::new(Vec::new()),
         review_notes: Arc::new(Mutex::new(vec![])),
         shutdown_tx: Arc::new(Mutex::new(Some(shutdown_tx))),
         config: Arc::new(Mutex::new(config)),
@@ -173,8 +187,14 @@ async fn test_review_note_api_round_trip() {
         pull_requests: Default::default(),
         store: None,
         publish: None,
-    };
+    }
+}
 
+#[tokio::test]
+async fn test_review_note_api_round_trip() {
+    let state = review_note_state();
+    let agent = state.agent.clone();
+    assert!(!agent.attached());
     let app = lrv::server::create_router(state, false);
     let response = app
         .clone()
@@ -214,14 +234,29 @@ async fn test_review_note_api_round_trip() {
         .unwrap();
     assert_eq!(events.status(), StatusCode::OK);
     let mut stream = events.into_body().into_data_stream();
-    let frame = tokio::time::timeout(Duration::from_secs(2), stream.next())
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
-    let frame = String::from_utf8(frame.to_vec()).unwrap();
-    assert!(frame.contains("event: notes"));
-    assert!(frame.contains("data: {\"version\":0}"));
+    let mut buffer = String::new();
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while !buffer.contains("event: notes") || !buffer.contains("event: agent") {
+            let chunk = stream.next().await.unwrap().unwrap();
+            buffer.push_str(std::str::from_utf8(&chunk).unwrap());
+        }
+    })
+    .await
+    .unwrap();
+    assert!(buffer.contains("data: {\"version\":0}"));
+    assert!(buffer.contains("data: {\"attached\":false,"));
+    let waiter = agent.clone();
+    let poll = tokio::spawn(async move { waiter.wait(0, Duration::from_secs(5)).await });
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while !buffer.contains("data: {\"attached\":true,") {
+            let chunk = stream.next().await.unwrap().unwrap();
+            buffer.push_str(std::str::from_utf8(&chunk).unwrap());
+        }
+    })
+    .await
+    .unwrap();
+    poll.abort();
+    let _ = poll.await;
     let note = serde_json::json!({
         "id": "n1",
         "file": "src/lib.rs",
@@ -247,6 +282,7 @@ async fn test_review_note_api_round_trip() {
         .await
         .unwrap();
     assert_eq!(post.status(), StatusCode::OK);
+    assert!(agent.attached());
     let frame = tokio::time::timeout(Duration::from_secs(2), stream.next())
         .await
         .unwrap()
@@ -385,4 +421,636 @@ async fn test_config_mutation() {
     let config_lock = config.lock().await;
     assert_eq!(config_lock.color_scheme, "github-dark");
     assert!(!config_lock.split_view);
+}
+
+#[tokio::test(start_paused = true)]
+async fn test_agent_events_api() {
+    let state = review_note_state();
+    let agent = state.agent.clone();
+    let app = lrv::server::create_router(state, false);
+    for token in [None, Some("Bearer wrong-token")] {
+        let mut request = Request::builder().uri("/api/agent/events");
+        if let Some(token) = token {
+            request = request.header("authorization", token);
+        }
+        let response = app
+            .clone()
+            .oneshot(request.body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+    assert!(!agent.attached());
+    for (uri, expected) in [
+        (
+            "/api/agent/events?timeout=1",
+            serde_json::json!({"events": [], "cursor": 0, "ended": false}),
+        ),
+        (
+            "/api/agent/events?after=0",
+            serde_json::json!({"events": [{"seq": 1, "type": "discussion", "discussion": {
+            "id": "d1", "created_at": 0, "file": "src/lib.rs", "line": 3, "side": "new", "body": "Discuss this"
+        }}], "cursor": 1, "ended": false}),
+        ),
+        (
+            "/api/agent/events?after=1&timeout=1",
+            serde_json::json!({"events": [], "cursor": 1, "ended": false}),
+        ),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(uri)
+                    .header("authorization", "Bearer test-token")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(response.into_body(), 4096)
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&bytes).unwrap(),
+            expected
+        );
+        if uri == "/api/agent/events?timeout=1" {
+            agent.push(lrv::agent::AgentEvent::Discussion {
+                discussion: lrv::agent::Discussion {
+                    summarize: false,
+                    thread_id: None,
+                    id: "d1".into(),
+                    created_at: 0,
+                    file: "src/lib.rs".into(),
+                    line: lrv::types::CommentLine::Single(3),
+                    side: lrv::types::Side::New,
+                    body: "Discuss this".into(),
+                    commit_idx: None,
+                },
+            });
+        }
+    }
+}
+
+fn discussion_request(payload: serde_json::Value) -> Request<Body> {
+    Request::builder()
+        .method("POST")
+        .uri("/api/discussions")
+        .header("content-type", "application/json")
+        .body(Body::from(payload.to_string()))
+        .unwrap()
+}
+
+#[tokio::test]
+async fn test_discussion_api_round_trip_and_submission_isolation() {
+    let mut state = review_note_state();
+    state.is_series = false;
+    let app = lrv::server::create_router(state.clone(), false);
+    let payload = serde_json::json!({
+        "file": "src/lib.rs", "line": [3, 4], "side": "new", "body": "Discuss this"
+    });
+    let response = app
+        .clone()
+        .oneshot(discussion_request(payload.clone()))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    assert!(state.agent.discussions().is_empty());
+
+    state.agent.touch();
+    let response = app
+        .clone()
+        .oneshot(discussion_request(payload.clone()))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(response.into_body(), 4096)
+        .await
+        .unwrap();
+    let discussion: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(discussion["id"], "lrv-discussion-1");
+    assert!(discussion["created_at"].as_u64().unwrap() > 0);
+    assert!(discussion.get("commit_idx").is_none());
+    for key in ["file", "line", "side", "body"] {
+        assert_eq!(discussion[key], payload[key]);
+    }
+    for (uri, expected) in [
+        (
+            "/api/agent/events?after=0&timeout=1",
+            serde_json::json!({"events": [{"seq": 1, "type": "discussion", "discussion": discussion}], "cursor": 1, "ended": false}),
+        ),
+        ("/api/discussions", serde_json::json!([discussion])),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(uri)
+                    .header("authorization", "Bearer test-token")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(response.into_body(), 4096)
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&bytes).unwrap(),
+            expected
+        );
+    }
+    assert!(state.comments.lock().await.is_empty());
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/complete")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"comments":[]}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let comments = state.comments.lock().await.clone();
+    assert!(comments.is_empty());
+    let output = lrv::output::format_output(
+        comments,
+        &lrv::output::OutputFormat::Json,
+        &state.diffs,
+        state.is_series,
+        state.overall_comment.lock().await.clone(),
+    );
+    let output: serde_json::Value = serde_json::from_str(&output).unwrap();
+    assert_eq!(output["comments"], serde_json::json!([]));
+    assert!(!output.to_string().contains("Discuss this"));
+}
+
+#[tokio::test]
+async fn test_discussion_validation() {
+    let state = review_note_state();
+    state.agent.touch();
+    let app = lrv::server::create_router(state.clone(), false);
+    for invalid in [
+        serde_json::json!({"line": 0}),
+        serde_json::json!({"line": [4, 3]}),
+        serde_json::json!({"body": " \n\t"}),
+        serde_json::json!({"file": ""}),
+        serde_json::json!({"commit_idx": 1}),
+        serde_json::json!({"summarize": true}),
+    ] {
+        let mut payload = serde_json::json!({
+            "file": "src/lib.rs", "line": 3, "side": "new", "body": "Discuss this"
+        });
+        for (key, value) in invalid.as_object().unwrap() {
+            payload[key] = value.clone();
+        }
+        let response = app
+            .clone()
+            .oneshot(discussion_request(payload))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+    assert!(state.agent.discussions().is_empty());
+}
+
+#[tokio::test]
+async fn test_discussion_public_mode_refuses_with_or_without_agent() {
+    let mut state = review_note_state();
+    Arc::make_mut(&mut state.context).is_public = true;
+    let app = lrv::server::create_router(state.clone(), false);
+    for attached in [false, true] {
+        if attached {
+            state.agent.touch();
+        }
+        let response = app
+            .clone()
+            .oneshot(discussion_request(serde_json::json!({
+                "file": "src/lib.rs", "line": 3, "side": "new", "body": "Discuss this"
+            })))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
+    assert!(state.agent.discussions().is_empty());
+}
+
+#[tokio::test]
+async fn test_discussion_single_commit_series_pinning() {
+    let state = review_note_state();
+    state.agent.touch();
+    let app = lrv::server::create_router(state, false);
+    let response = app
+        .oneshot(discussion_request(serde_json::json!({
+            "file": "src/lib.rs", "line": 3, "side": "new", "body": "Discuss this"
+        })))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(response.into_body(), 4096)
+        .await
+        .unwrap();
+    let discussion: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(discussion["commit_idx"], 0);
+}
+
+async fn response_json(response: axum::response::Response) -> serde_json::Value {
+    let bytes = axum::body::to_bytes(response.into_body(), 65536)
+        .await
+        .unwrap();
+    serde_json::from_slice(&bytes).unwrap()
+}
+
+fn reply_request(batch: serde_json::Value) -> Request<Body> {
+    Request::builder()
+        .method("POST")
+        .uri("/api/review-notes")
+        .header("authorization", "Bearer test-token")
+        .header("content-type", "application/json")
+        .body(Body::from(batch.to_string()))
+        .unwrap()
+}
+
+#[tokio::test]
+async fn test_discussion_threads_and_agent_replies() {
+    let state = review_note_state();
+    state.agent.touch();
+    let app = lrv::server::create_router(state.clone(), false);
+    let root = response_json(
+        app.clone()
+            .oneshot(discussion_request(serde_json::json!({
+                "file": "root.rs", "line": [3, 5], "side": "old", "body": "Question"
+            })))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(root["commit_idx"], 0);
+    let follow = response_json(
+        app.clone()
+            .oneshot(discussion_request(serde_json::json!({
+                "thread_id": root["id"], "body": "Follow up", "summarize": true
+            })))
+            .await
+            .unwrap(),
+    )
+    .await;
+    for key in ["file", "line", "side", "commit_idx"] {
+        assert_eq!(follow[key], root[key]);
+    }
+    assert_eq!(follow["thread_id"], root["id"]);
+    assert_eq!(follow["summarize"], true);
+    let listed = response_json(
+        app.clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/discussions")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(listed, serde_json::json!([root, follow]));
+    let invalid_summary = app
+        .clone()
+        .oneshot(reply_request(serde_json::json!([
+            {"file": "root.rs", "line": 1, "side": "new", "body": "Summary", "summary": true}
+        ])))
+        .await
+        .unwrap();
+    assert_eq!(invalid_summary.status(), StatusCode::BAD_REQUEST);
+    let poll = response_json(
+        app.clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/agent/events?after=1&timeout=1")
+                    .header("authorization", "Bearer test-token")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(poll["events"][0]["discussion"], follow);
+    assert_eq!(poll["events"][0]["seq"], 2);
+
+    for id in [serde_json::json!("unknown"), follow["id"].clone()] {
+        let response = app
+            .clone()
+            .oneshot(discussion_request(serde_json::json!({
+                "thread_id": id, "body": "Invalid follow up"
+            })))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let response = app.clone().oneshot(reply_request(serde_json::json!([
+            {"file": "ordinary.rs", "line": 1, "side": "new", "body": "Don't store this"},
+            {"file": "wrong.rs", "line": 1, "side": "new", "body": "Done.", "discussion_id": root["id"]},
+            {"file": "wrong.rs", "line": 1, "side": "new", "body": "Done.", "discussion_id": id}
+        ]))).await.unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert!(state.review_notes.lock().await.is_empty());
+    }
+    for missing in ["file", "line", "side"] {
+        let mut payload =
+            serde_json::json!({"file": "a.rs", "line": 1, "side": "new", "body": "Question"});
+        payload.as_object_mut().unwrap().remove(missing);
+        assert_eq!(
+            app.clone()
+                .oneshot(discussion_request(payload))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::BAD_REQUEST
+        );
+    }
+    let mut reply = serde_json::json!({
+        "file": "wrong.rs", "line": 9, "side": "new", "body": "Done.",
+        "discussion_id": root["id"], "date": "untrusted date", "summary": true
+    });
+    let before = lrv::types::rfc3339_utc(std::time::SystemTime::now());
+    let response = app
+        .clone()
+        .oneshot(reply_request(serde_json::json!([reply, reply])))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response_json(response).await,
+        serde_json::json!({"added": 2, "skipped": 0})
+    );
+    reply["id"] = serde_json::json!("idempotent-reply");
+    for expected in [
+        serde_json::json!({"added": 1, "skipped": 0}),
+        serde_json::json!({"added": 0, "skipped": 1}),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(reply_request(serde_json::json!([reply])))
+            .await
+            .unwrap();
+        assert_eq!(response_json(response).await, expected);
+    }
+    let notes = response_json(
+        app.clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/review-notes")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap(),
+    )
+    .await;
+    let notes = notes.as_array().unwrap();
+    assert_eq!(notes.len(), 3);
+    assert_ne!(notes[0]["id"], notes[1]["id"]);
+    let after = lrv::types::rfc3339_utc(std::time::SystemTime::now());
+    for note in notes {
+        for key in ["file", "line", "side", "commit_idx"] {
+            assert_eq!(note[key], root[key]);
+        }
+        assert_eq!(note["summary"], true);
+        assert_eq!(note["read_only"], true);
+        let date = note["date"].as_str().unwrap();
+        assert!(date >= before.as_str() && date <= after.as_str());
+        assert_eq!(date.len(), 24);
+    }
+}
+
+fn delete_discussion_request(id: &str) -> Request<Body> {
+    Request::builder()
+        .method("DELETE")
+        .uri(format!("/api/discussions/{id}"))
+        .body(Body::empty())
+        .unwrap()
+}
+
+#[tokio::test]
+async fn test_delete_discussion_removes_replies_and_skips_late_replies() {
+    let state = review_note_state();
+    // Direct insertion doesn't attach an agent: deletion must work while detached.
+    let root = state
+        .agent
+        .add_discussion(lrv::agent::DiscussionRequest {
+            file: Some("a.rs".into()),
+            line: Some(lrv::types::CommentLine::Single(1)),
+            side: Some(lrv::types::Side::New),
+            body: "Question".into(),
+            summarize: false,
+            thread_id: None,
+            commit_idx: None,
+        })
+        .unwrap();
+    let app = lrv::server::create_router(state.clone(), false);
+    let reply = serde_json::json!({"file": "a.rs", "line": 1, "side": "new", "body": "Answer", "discussion_id": root.id});
+    assert_eq!(
+        response_json(
+            app.clone()
+                .oneshot(reply_request(serde_json::json!([
+                    reply, {"file": "a.rs", "line": 1, "side": "new", "body": "Keep this note"}
+                ])))
+                .await
+                .unwrap()
+        )
+        .await,
+        serde_json::json!({"added": 2, "skipped": 0})
+    );
+    let version = *state.notes_version.borrow();
+    for status in [StatusCode::NO_CONTENT, StatusCode::NOT_FOUND] {
+        assert_eq!(
+            app.clone()
+                .oneshot(delete_discussion_request(&root.id))
+                .await
+                .unwrap()
+                .status(),
+            status
+        );
+    }
+    assert_eq!(*state.notes_version.borrow(), version + 1);
+    let notes = response_json(
+        app.clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/review-notes")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(notes.as_array().unwrap().len(), 1);
+    assert_eq!(notes[0]["body"], "Keep this note");
+    assert_eq!(
+        response_json(
+            app.clone()
+                .oneshot(reply_request(serde_json::json!([reply])))
+                .await
+                .unwrap()
+        )
+        .await,
+        serde_json::json!({"added": 0, "skipped": 1})
+    );
+    let mut summary = reply.clone();
+    summary["summary"] = serde_json::json!(true);
+    assert_eq!(
+        response_json(
+            app.clone()
+                .oneshot(reply_request(serde_json::json!([summary])))
+                .await
+                .unwrap()
+        )
+        .await,
+        serde_json::json!({"added": 0, "skipped": 1})
+    );
+    let mut unknown = reply;
+    unknown["discussion_id"] = serde_json::json!("unknown");
+    assert_eq!(
+        app.oneshot(reply_request(serde_json::json!([unknown])))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
+}
+
+#[tokio::test]
+async fn test_delete_discussion_without_agent_and_public_mode() {
+    let mut state = review_note_state();
+    state.agent.push(lrv::agent::AgentEvent::Discussion {
+        discussion: lrv::agent::Discussion {
+            id: "d1".into(),
+            created_at: 0,
+            summarize: false,
+            thread_id: None,
+            file: "a.rs".into(),
+            line: lrv::types::CommentLine::Single(1),
+            side: lrv::types::Side::New,
+            body: "Question".into(),
+            commit_idx: None,
+        },
+    });
+    assert!(!state.agent.attached());
+    let follow = state
+        .agent
+        .add_discussion(lrv::agent::DiscussionRequest {
+            file: None,
+            line: None,
+            side: None,
+            summarize: false,
+            thread_id: Some("d1".into()),
+            body: "Follow up".into(),
+            commit_idx: None,
+        })
+        .unwrap();
+    let private_app = lrv::server::create_router(state.clone(), false);
+    for id in [follow.id.as_str(), "unknown"] {
+        assert_eq!(
+            private_app
+                .clone()
+                .oneshot(delete_discussion_request(id))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::NOT_FOUND
+        );
+    }
+    Arc::make_mut(&mut state.context).is_public = true;
+    let app = lrv::server::create_router(state.clone(), false);
+    for id in ["d1", "unknown"] {
+        assert_eq!(
+            app.clone()
+                .oneshot(delete_discussion_request(id))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::FORBIDDEN
+        );
+    }
+    assert_eq!(state.agent.discussions().len(), 2);
+    Arc::make_mut(&mut state.context).is_public = false;
+    let app = lrv::server::create_router(state.clone(), false);
+    assert_eq!(
+        app.oneshot(delete_discussion_request("d1"))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NO_CONTENT
+    );
+    assert!(state.agent.discussions().is_empty());
+}
+
+#[tokio::test]
+async fn launch_validates_requests_and_refuses_public_untrusted_or_attached() {
+    let state = review_note_state();
+    let app = lrv::server::create_router(state.clone(), false);
+    let payload = serde_json::json!({"provider": "claude"});
+    let request = |host: &str, payload: serde_json::Value| {
+        Request::builder()
+            .method("POST")
+            .uri("/api/agent/launch")
+            .header("host", host)
+            .header("content-type", "application/json")
+            .body(Body::from(payload.to_string()))
+            .unwrap()
+    };
+    for host in [
+        "attacker.example",
+        "localhost.attacker.example",
+        "127.0.0.1.attacker.example",
+    ] {
+        assert_eq!(
+            app.clone()
+                .oneshot(request(host, payload.clone()))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::FORBIDDEN
+        );
+    }
+    for payload in [
+        serde_json::json!({"provider": "sh"}),
+        serde_json::json!({"provider": "claude", "model": "$(bad)"}),
+        serde_json::json!({"provider": "codex", "effort": "a b"}),
+    ] {
+        assert_eq!(
+            app.clone()
+                .oneshot(request("localhost:1234", payload))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::BAD_REQUEST
+        );
+    }
+    state.agent.touch();
+    for host in ["localhost", "127.0.0.1:1234", "[::1]:1234"] {
+        assert_eq!(
+            app.clone()
+                .oneshot(request(host, payload.clone()))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::CONFLICT
+        );
+    }
+    let mut state = review_note_state();
+    Arc::make_mut(&mut state.context).is_public = true;
+    let app = lrv::server::create_router(state, false);
+    assert_eq!(
+        app.oneshot(request("localhost", payload))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::FORBIDDEN
+    );
 }

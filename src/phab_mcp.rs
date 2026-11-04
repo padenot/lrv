@@ -103,6 +103,8 @@ fn parse_header(header: &str, body: String) -> Option<ReviewNote> {
             date,
             source_url: None,
             commit_idx: None,
+            summary: false,
+            discussion_id: None,
             read_only: false,
         })
     } else if is_general {

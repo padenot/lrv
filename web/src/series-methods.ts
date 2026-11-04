@@ -28,6 +28,9 @@ export function prGroups(series: SeriesInfo): PrGroup[] {
 
 export class SeriesMethods {
   declare seriesInfo: AppContext['seriesInfo'];
+  declare revisionIdFor: (commitIdx: number) => string | null;
+  declare publishedRevisionIds: Set<string>;
+  declare updatePublishButton: () => void;
   declare currentCommitIdx: number;
   declare commitLoadGeneration: number;
   declare diff: AppContext['diff'];
@@ -41,6 +44,7 @@ export class SeriesMethods {
   declare _eagerPrefetchStarted: boolean;
   declare commentManager: AppContext['commentManager'];
   declare reviewNoteManager: AppContext['reviewNoteManager'];
+  declare discussionManager: AppContext['discussionManager'];
   declare loadFile: (index: number) => Promise<void>;
   declare loadCommitView: () => void;
   declare renderFileList: () => void;
@@ -101,6 +105,7 @@ export class SeriesMethods {
   }
 
   renderSeriesNav() {
+    this.updatePublishButton();
     const container = document.getElementById('commit-strip');
     const resizer = document.getElementById('commit-strip-resizer');
     if (!container) {
@@ -139,6 +144,15 @@ export class SeriesMethods {
       const titleRow = el('div', { className: 'series-commit-title-row' });
       const title = el('div', { className: 'series-commit-msg', text: msg });
       titleRow.appendChild(title);
+      const revisionId = this.revisionIdFor(commit.idx);
+      if (revisionId) {
+        titleRow.appendChild(
+          el('span', {
+            className: 'series-revision-badge',
+            text: `${revisionId}${this.publishedRevisionIds.has(revisionId) ? ' ✓' : ''}`,
+          }),
+        );
+      }
 
       if (commitCommentCount > 0) {
         titleRow.appendChild(
@@ -203,6 +217,7 @@ export class SeriesMethods {
     this.currentCommitIdx = clamped;
     this.commentManager.currentCommitIdx = clamped;
     this.reviewNoteManager.currentCommitIdx = clamped;
+    this.discussionManager.currentCommitIdx = clamped;
 
     // Invalidate the previous view before awaiting anything. Its outstanding
     // file loads may finish, but cannot publish into this generation.

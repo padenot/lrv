@@ -1,3 +1,4 @@
+import { DiscussionError, type Discussion } from './discussions';
 import { el } from './dom';
 import { MOD_KEY_LABEL } from './platform';
 import {
@@ -17,6 +18,10 @@ export class CommentsUIMethods {
   declare files: AppContext['files'];
   declare currentFileIndex: number;
   declare commentManager: AppContext['commentManager'];
+  declare discussionManager: AppContext['discussionManager'];
+  declare deleteDiscussion: AppContext['deleteDiscussion'];
+  declare summarizeDiscussion: AppContext['summarizeDiscussion'];
+  declare agentAttached: boolean;
   declare modifiedDecorations: string[];
   declare originalDecorations: string[];
   declare currentWidget: AppContext['currentWidget'];
@@ -77,13 +82,20 @@ export class CommentsUIMethods {
     );
   }
 
-  showCommentDialog(file: string, commentLine: CommentLine, monacoLineNumber: number, side: Side) {
+  // With `discussion`, saving converts that thread into the comment.
+  showCommentDialog(
+    file: string,
+    commentLine: CommentLine,
+    monacoLineNumber: number,
+    side: Side,
+    discussion?: Discussion,
+  ) {
     if (!this.editor) {
       return;
     }
     const targetEditor =
       side === 'new' ? this.editor.getModifiedEditor() : this.editor.getOriginalEditor();
-    if (!Array.isArray(commentLine)) {
+    if (!discussion && !Array.isArray(commentLine)) {
       const resolvedCommentLine = this.commentLineFromEditorSelection(
         targetEditor,
         monacoLineNumber,
@@ -104,7 +116,9 @@ export class CommentsUIMethods {
     }
 
     // Check for existing comment
-    const existingIndex = this.commentManager.findComment(file, monacoLineNumber, side);
+    const existingIndex = discussion
+      ? -1
+      : this.commentManager.findComment(file, monacoLineNumber, side);
     const existingComment = existingIndex >= 0 ? this.commentManager.comments[existingIndex] : null;
 
     const domNode = el('div', { className: 'inline-comment-box' });
@@ -124,14 +138,31 @@ export class CommentsUIMethods {
       className: 'comment-textarea',
       attrs: { placeholder: 'Add your comment...', autofocus: true },
     });
+    const discuss =
+      existingComment || discussion
+        ? null
+        : el('button', { className: 'btn-secondary discuss-btn', text: 'Discuss' });
+    const summarize = discussion
+      ? el('button', { className: 'btn-secondary summarize-btn', text: 'Summarize' })
+      : null;
+    const error = el('div', { className: 'comment-error', attrs: { hidden: true } });
     const actions = el('div', { className: 'comment-actions' }, [
       el('span', { className: 'shortcut-hint', text: `${modKey}+Enter to save` }),
       existingComment ? el('button', { className: 'btn-danger delete-btn', text: 'Delete' }) : null,
       el('button', { className: 'btn-secondary cancel-btn', text: 'Cancel' }),
+      discuss
+        ? el('span', {
+            className: 'shortcut-hint discuss-hint',
+            text: `${modKey}+Alt+Enter to discuss`,
+          })
+        : null,
+      discuss,
+      summarize,
       el('button', { className: 'btn-primary save-btn', text: 'Save' }),
     ]);
     domNode.appendChild(title);
     domNode.appendChild(textarea);
+    domNode.appendChild(error);
     domNode.appendChild(actions);
 
     const widget = {
@@ -179,7 +210,13 @@ export class CommentsUIMethods {
         cleanup();
       } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
-        saveComment();
+        if (e.altKey) {
+          if (this.agentAttached && !existingComment) {
+            void sendDiscussion();
+          }
+          return;
+        }
+        void saveComment();
       }
     };
     textarea.addEventListener('keydown', handleKeydown);
@@ -192,10 +229,20 @@ export class CommentsUIMethods {
       textarea.removeEventListener('input', autoResize);
     };
 
-    const saveComment = () => {
+    const saveComment = async () => {
       if (!textarea.value.trim()) {
         textarea.focus();
         return;
+      }
+      if (discussion) {
+        try {
+          await this.deleteDiscussion(discussion);
+        } catch (err) {
+          error.textContent = err instanceof Error ? err.message : 'Failed to delete discussion';
+          error.hidden = false;
+          targetEditor.layoutContentWidget(widget);
+          return;
+        }
       }
 
       if (existingIndex >= 0) {
@@ -213,8 +260,58 @@ export class CommentsUIMethods {
       cleanup();
     };
 
+    const sendDiscussion = async () => {
+      const body = textarea.value.trim();
+      if (!body) {
+        textarea.focus();
+        return;
+      }
+      if (!discuss || discuss.disabled) {
+        return;
+      }
+      discuss.disabled = true;
+      error.hidden = true;
+      try {
+        await this.discussionManager.send({ file, line: commentLine, side, body });
+        cleanup();
+      } catch (err) {
+        error.textContent =
+          err instanceof DiscussionError && err.status === 409
+            ? 'No agent is listening any more'
+            : 'Failed to send discussion. Try again.';
+        error.hidden = false;
+        targetEditor.layoutContentWidget(widget);
+      } finally {
+        discuss.disabled = false;
+      }
+    };
+    if (discuss) {
+      discuss.onclick = () => void sendDiscussion();
+    }
+    if (summarize && discussion) {
+      summarize.onclick = async () => {
+        summarize.disabled = true;
+        summarize.textContent = 'Summarizing…';
+        error.hidden = true;
+        try {
+          textarea.value = await this.summarizeDiscussion(discussion);
+          autoResize();
+        } catch (err) {
+          error.textContent =
+            err instanceof DiscussionError && err.status === 409
+              ? 'No agent is listening any more'
+              : 'Failed to request a summary. Try again.';
+          error.hidden = false;
+        } finally {
+          summarize.disabled = false;
+          summarize.textContent = 'Summarize';
+          targetEditor.layoutContentWidget(widget);
+        }
+      };
+    }
+
     if (saveBtn) {
-      saveBtn.onclick = saveComment;
+      saveBtn.onclick = () => void saveComment();
     }
     if (cancelBtn) {
       cancelBtn.onclick = cleanup;

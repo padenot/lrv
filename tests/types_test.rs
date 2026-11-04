@@ -61,9 +61,11 @@ fn test_project_context() {
         git_branch: Some("feature/test".to_string()),
         title: None,
         is_public: false,
+        launch_available: true,
         claude_skill_installed: false,
         comment_store_error: None,
         phabricator_available: false,
+        phabricator_revisions: Vec::new(),
     };
 
     assert_eq!(context.working_directory, "/home/user/project");

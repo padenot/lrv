@@ -1,4 +1,5 @@
 import type { CommentLine, ReviewComment } from '../comments';
+import type { Discussion, DiscussionManager } from '../discussions';
 import type { ReviewNote } from '../review-notes';
 import type { editor } from 'monaco-editor';
 
@@ -54,13 +55,15 @@ export type PhabRevisionStatus = {
   commit_idxs: number[];
   own: boolean;
   closed: boolean;
+  status?: string | null;
+  status_name?: string | null;
   publishable: boolean;
   reason?: string;
   published: boolean;
 };
 
 export type PhabStatus = { user: string; error?: string; revisions: PhabRevisionStatus[] };
-export type PublishTabState = {
+export type PublishState = {
   action: ReviewAction;
   overall: string;
   error?: string;
@@ -72,9 +75,11 @@ export type AppContextData = {
   working_directory?: string;
   git_branch?: string;
   is_public?: boolean;
+  launch_available?: boolean;
   claude_skill_installed?: boolean;
   comment_store_error?: string | null;
   phabricator_available?: boolean;
+  phabricator_revisions?: (string | null)[];
 };
 
 export type UserTheme = {
@@ -121,6 +126,11 @@ export type DiffStats = {
 };
 
 export interface AppContext {
+  discussionManager: DiscussionManager;
+  agentAttached: boolean;
+  agentState: AgentState;
+  setAgentState(state: AgentState): void;
+  setupConnectAgent(): void;
   commentManager: {
     comments: ReviewComment[];
     currentCommitIdx: number | null;
@@ -137,9 +147,13 @@ export interface AppContext {
   reviewNoteManager: {
     currentCommitIdx: number | null;
     setNotes(notes: ReviewNote[]): void;
+    mergeNotes(notes: ReviewNote[]): void;
     addNote(note: ReviewNote): void;
     updateNote(note: ReviewNote, patch: Partial<ReviewNote>): void;
     getNotes(): ReviewNote[];
+    nextSummary(rootId: string): Promise<ReviewNote>;
+    getDiscussionReplies(discussionId: string): ReviewNote[];
+    removeDiscussionReplies(id: string): void;
     getNotesForFile(file: string): ReviewNote[];
     findNote(file: string, line: number, side: Side): number;
     onChange(listener: () => void): void;
@@ -221,7 +235,16 @@ export interface AppContext {
   showKeyboardHelp(): void;
   updateDecorations(): void;
   renderReviewNotes(): void;
-  showCommentDialog(file: string, fileLine: CommentLine, monacoLine: number, side: Side): void;
+  showCommentDialog(
+    file: string,
+    fileLine: CommentLine,
+    monacoLine: number,
+    side: Side,
+    discussion?: Discussion,
+  ): void;
+  showStackedDiscussionDraft(discussion: Discussion): void;
+  deleteDiscussion(discussion: Discussion): Promise<void>;
+  summarizeDiscussion(discussion: Discussion): Promise<string>;
   showCommitSummaryDialog(): void;
   initFileHunks(file: DiffFile): void;
   isAddedFile(file: DiffFile): boolean;
@@ -236,3 +259,17 @@ export interface AppContext {
   clearFocusedHunk(): void;
   openCommentOnCurrentFocus(): void;
 }
+
+export type AgentState = {
+  attached: boolean;
+  busy: boolean;
+  launch: 'idle' | 'running' | 'failed';
+  initial_review?: boolean;
+  error?: string | null;
+};
+export type LaunchRequest = {
+  provider: 'claude' | 'codex';
+  model: string;
+  effort: string;
+  initial_review: boolean;
+};

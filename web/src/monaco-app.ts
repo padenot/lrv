@@ -1,5 +1,8 @@
 import { $, clearEl, el } from './dom';
 import { CommentManager } from './comments';
+import { DiscussionManager, type Discussion } from './discussions';
+import { ConnectAgentMethods } from './connect-agent-methods';
+import { DiscussionMethods } from './discussion-methods';
 import { ReviewNoteManager } from './review-notes';
 import { fetchJSON } from './api';
 import { startLiveEvents } from './live-events';
@@ -29,8 +32,9 @@ import { DialogMethods } from './dialog-methods';
 import { SeriesMethods } from './series-methods';
 import { StackedViewMethods } from './stacked-view-methods';
 import type {
+  AgentState,
   PhabStatus,
-  PublishTabState,
+  PublishState,
   AppConfig,
   AppConfigInput,
   AppContextData,
@@ -60,14 +64,20 @@ function applyMixin(TargetClass: Constructor, MethodsClass: Constructor) {
 }
 
 export class MonacoApp {
+  agentAttached = false;
   publishedCommentKeys = new Set<string>();
   publishedRevisionIds = new Set<string>();
-  publishTabStates = new Map<string, PublishTabState>();
+  publishStates = new Map<string, PublishState>();
   phabStatus: Promise<PhabStatus> | null = null;
-  declare showPublishDialog: () => Promise<void>;
+  declare showPublishDialog: (revisionId: string) => Promise<void>;
+  declare updatePublishButton: () => void;
+  phabRevisionStatus: PhabStatus | null = null;
+  phabValidationError: string | null = null;
+  declare revisionIdFor: (commitIdx: number) => string | null;
   declare prefetchPhabricator: () => Promise<PhabStatus>;
   commentManager: CommentManager;
   reviewNoteManager: ReviewNoteManager;
+  discussionManager: DiscussionManager;
   currentFileIndex: number;
   editor: editor.IStandaloneDiffEditor | null;
   isInline: boolean;
@@ -140,9 +150,14 @@ export class MonacoApp {
   declare toggleView: () => void;
   declare updateViewToggleLabel: () => void;
 
+  agentState: AgentState = { attached: false, busy: false, launch: 'idle' };
+  declare setAgentState: (state: AgentState) => void;
+  declare setupConnectAgent: () => void;
+
   constructor() {
     this.commentManager = new CommentManager();
     this.reviewNoteManager = new ReviewNoteManager();
+    this.discussionManager = new DiscussionManager();
     this.currentFileIndex = 0;
     this.editor = null;
     this.isInline = false;
@@ -190,6 +205,10 @@ export class MonacoApp {
         this.renderStackedComments();
       }
     });
+    this.discussionManager.onChange(() => {
+      this.renderReviewNotes();
+      this.renderFileList();
+    });
     this.reviewNoteManager.onChange(() => {
       this.renderReviewNotes();
       this.renderFileList();
@@ -211,21 +230,29 @@ export class MonacoApp {
     // Load config, context, diff data, series info, and ensure @font-face fonts are ready
     window.Perf.mark('init:fetch:start');
     const t0 = performance.now();
-    const [configData, contextData, diffData, seriesData, reviewNotesData, userThemesData] =
-      await Promise.all([
-        fetchJSON<AppConfigInput>('/api/config'),
-        fetchJSON<AppContextData>('/api/context'),
-        fetchJSON<{
-          files: DiffFile[];
-          stats: DiffStats;
-          commit_message?: string;
-          commit_hash?: string;
-        }>('/api/diff'),
-        fetchJSON<SeriesInfo>('/api/series'),
-        fetchJSON<ReviewNote[]>('/api/review-notes'),
-        fetchJSON<UserTheme[]>('/api/themes'),
-        document.fonts.ready,
-      ]);
+    const [
+      configData,
+      contextData,
+      diffData,
+      seriesData,
+      reviewNotesData,
+      userThemesData,
+      discussionsData,
+    ] = await Promise.all([
+      fetchJSON<AppConfigInput>('/api/config'),
+      fetchJSON<AppContextData>('/api/context'),
+      fetchJSON<{
+        files: DiffFile[];
+        stats: DiffStats;
+        commit_message?: string;
+        commit_hash?: string;
+      }>('/api/diff'),
+      fetchJSON<SeriesInfo>('/api/series'),
+      fetchJSON<ReviewNote[]>('/api/review-notes'),
+      fetchJSON<UserTheme[]>('/api/themes'),
+      fetchJSON<Discussion[]>('/api/discussions'),
+      document.fonts.ready,
+    ]);
     window.Perf.mark('init:fetch:end');
     window.Perf.measure('init:fetch', 'init:fetch:start', 'init:fetch:end');
     if (window.DEBUG) {
@@ -247,6 +274,8 @@ export class MonacoApp {
     this.currentCommitIdx = 0;
     this.commentManager.currentCommitIdx = seriesData.is_series ? 0 : null;
     this.reviewNoteManager.currentCommitIdx = seriesData.is_series ? 0 : null;
+    this.discussionManager.currentCommitIdx = seriesData.is_series ? 0 : null;
+    this.discussionManager.setDiscussions(discussionsData ?? []);
     this.reviewNoteManager.setNotes(reviewNotesData ?? []);
     this.files = sortDiffFiles(diffData.files);
     this.diff = { ...diffData, files: this.files };
@@ -469,6 +498,8 @@ export class MonacoApp {
 
     const fromTheme = (token: string) => themeColors[token] ?? '';
 
+    setVar('--success-color', fromTheme('testing.iconPassed') || '#3fb950');
+    setVar('--warning-color', fromTheme('editorWarning.foreground') || '#d29922');
     setVar('--bg-primary', fromTheme('editor.background'));
     setVar(
       '--bg-secondary',
@@ -616,60 +647,21 @@ export class MonacoApp {
     // Help button
     $('#help-btn')?.addEventListener('click', () => this.showKeyboardHelp());
 
-    // Submit button: a plain button, or a menu of destinations when there's a revision to publish to.
-    const submitBtn = $<HTMLButtonElement>('#submit-review')!;
-    const menu = $<HTMLElement>('#submit-menu')!;
-    const menuItems = Array.from(menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'));
-    const hasMenu = !!this.context.phabricator_available;
-    if (hasMenu) {
-      submitBtn.textContent = 'Submit To..';
-      submitBtn.setAttribute('aria-haspopup', 'menu');
-      submitBtn.setAttribute('aria-expanded', 'false');
-    }
-    const closeMenu = () => {
-      menu.hidden = true;
-      submitBtn.setAttribute('aria-expanded', 'false');
-    };
-    submitBtn.addEventListener('click', () => {
-      if (!hasMenu) {
-        void this.showSubmitConfirmation();
-        return;
-      }
-      menu.hidden = !menu.hidden;
-      submitBtn.setAttribute('aria-expanded', String(!menu.hidden));
-      if (!menu.hidden) {
-        menuItems[0]?.focus();
-        void this.prefetchPhabricator().catch(() => {});
-      }
-    });
-    menu.addEventListener('keydown', (event) => {
-      if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') {
-        return;
-      }
-      event.preventDefault();
-      const step = event.key === 'ArrowDown' ? 1 : -1;
-      const current = menuItems.indexOf(document.activeElement as HTMLButtonElement);
-      menuItems[(current + step + menuItems.length) % menuItems.length]?.focus();
-    });
-    document.addEventListener('click', (event) => {
-      if (!(event.target instanceof Node) || !submitBtn.parentElement?.contains(event.target)) {
-        closeMenu();
-      }
-    });
-    document.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape' && !menu.hidden) {
-        closeMenu();
-        submitBtn.focus();
-      }
-    });
-    $('#send-to-agent')?.addEventListener('click', () => {
-      closeMenu();
+    this.setupConnectAgent();
+
+    $('#submit-review')?.addEventListener('click', () => {
       void this.showSubmitConfirmation();
     });
-    $('#publish-to-phabricator')?.addEventListener('click', () => {
-      closeMenu();
-      void this.showPublishDialog();
+    $('#publish-commit')?.addEventListener('click', () => {
+      const id = this.revisionIdFor(this.currentCommitIdx);
+      if (id) {
+        void this.showPublishDialog(id);
+      }
     });
+    this.updatePublishButton();
+    if (this.context.phabricator_available) {
+      void this.prefetchPhabricator().catch((error) => console.error(error));
+    }
 
     // Toggle view
     $('#toggle-view')?.addEventListener('click', () => {
@@ -745,8 +737,11 @@ applyMixin(MonacoApp, NavigationMethods);
 applyMixin(MonacoApp, CommitMethods);
 applyMixin(MonacoApp, CommentsUIMethods);
 applyMixin(MonacoApp, ReviewNoteMethods);
+applyMixin(MonacoApp, DiscussionMethods);
 applyMixin(MonacoApp, DialogMethods);
 applyMixin(MonacoApp, SeriesMethods);
 applyMixin(MonacoApp, StackedViewMethods);
 
 applyMixin(MonacoApp, PublishDialogMethods);
+
+applyMixin(MonacoApp, ConnectAgentMethods);
