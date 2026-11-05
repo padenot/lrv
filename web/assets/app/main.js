@@ -10873,6 +10873,7 @@ var FileListMethods = class {
 			fileTreeSearchMode: "hide-non-matches",
 			initialSearchQuery: this.fileListFilter || null,
 			density: "compact",
+			itemHeight: 26,
 			icons: { set: "minimal" },
 			renderRowDecoration: ({ item }) => {
 				const file = this.files[pathToIndex.get(item.path) ?? -1];
@@ -10989,7 +10990,6 @@ var FileListMethods = class {
       }
       [data-type="item"] {
         border-radius: 1px;
-        margin: 1px 0;
         box-shadow: inset 0 0 0 1px transparent;
       }
       [data-type="item"]:hover {
