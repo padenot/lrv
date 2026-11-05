@@ -1273,6 +1273,27 @@ test.describe('Review Workflow E2E', () => {
     await expect(fileListItem).toHaveAttribute('data-item-git-status', 'added');
   });
 
+  test('sidebar and editor fit the viewport while a banner is shown', async ({ page }) => {
+    await page.route('**/api/context', async (route) => {
+      const response = await route.fetch();
+      await route.fulfill({
+        response,
+        json: { ...(await response.json()), claude_skill_installed: false },
+      });
+    });
+
+    await openApp(page);
+    await expect(page.locator('#skill-banner')).toBeVisible();
+
+    const viewportHeight = page.viewportSize()!.height;
+    for (const selector of ['#sidebar', '#editor-container']) {
+      const box = (await page.locator(selector).boundingBox())!;
+      expect(box.y + box.height, selector).toBeLessThanOrEqual(viewportHeight);
+    }
+    const lastRow = (await fileTreeRows(page).last().boundingBox())!;
+    expect(lastRow.y + lastRow.height).toBeLessThanOrEqual(viewportHeight);
+  });
+
   test('file tree scrolls down to its last row', async ({ page }) => {
     if (!testRepoPath) {
       throw new Error('Test repo not initialized');
