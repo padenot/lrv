@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { spawn, type ChildProcess } from 'child_process';
+import { execFileSync, spawn, type ChildProcess } from 'child_process';
 import { createServer } from 'http';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -10,6 +10,19 @@ test('Finish prints remaining comments and published URLs to stdout and exits', 
   page,
 }) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lrv-publish-stdout-'));
+  // Publishing needs a local commit whose Git tree matches the one recorded on the diff.
+  const git = (...args: string[]) =>
+    execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', ...args], {
+      cwd: root,
+      encoding: 'utf8',
+    }).trim();
+  git('init', '-q');
+  fs.writeFileSync(path.join(root, 'a.txt'), 'old\n');
+  git('add', 'a.txt');
+  git('commit', '-q', '-m', 'Base');
+  fs.writeFileSync(path.join(root, 'a.txt'), 'new\n');
+  git('commit', '-q', '-am', 'Change a.txt');
+  const [tree, parent] = git('log', '-1', '--format=%T %P').split(' ');
   const calls: string[] = [];
   let base = '';
   const conduit = createServer((request, response) => {
@@ -33,7 +46,11 @@ test('Finish prints remaining comments and published URLs to stdout and exits', 
       },
       'differential.diff.search': { data: [{ id: 1, phid: 'PHID-DIFF-1' }] },
       'differential.querydiffs': {
-        '1': { changes: [{ currentPath: 'a.txt', addLines: '1', delLines: '1' }] },
+        '1': {
+          properties: {
+            'local:commits': { c1: { commit: 'c1', tree, parents: [parent] } },
+          },
+        },
       },
       'transaction.search': { data: [] },
       'differential.createinline': {},
@@ -53,10 +70,7 @@ test('Finish prints remaining comments and published URLs to stdout and exits', 
       throw new Error('No mock server address');
     }
     base = `http://127.0.0.1:${address.port}`;
-    fs.writeFileSync(
-      path.join(root, 'review.diff'),
-      'diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-old\n+new\n',
-    );
+    fs.writeFileSync(path.join(root, 'review.diff'), git('show', 'HEAD') + '\n');
     const binary = process.env.LRV_BIN || path.resolve(__dirname, '../../target/debug/lrv');
     child = spawn(
       binary,
