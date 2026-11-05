@@ -1,6 +1,7 @@
 import { FileTree } from '../../node_modules/@pierre/trees/dist/render/FileTree.js';
 import type { GitStatus } from '../../node_modules/@pierre/trees/dist/publicTypes.js';
 import { clearEl, el } from './dom';
+import { compareFilePaths } from './file-order';
 import type { AppContext, DiffFile } from './types/app';
 
 export class FileListMethods {
@@ -221,6 +222,8 @@ export class FileListMethods {
     const tree = new FileTree({
       paths: this.files.map((file) => file.path),
       flattenEmptyDirectories: true,
+      // The default sort puts directories first; keep the stacked view's order.
+      sort: (left, right) => compareFilePaths(left.path, right.path),
       initialExpansion: this.fileTreeExpansion ?? 'open',
       initialSelectedPaths: selectedPath && !this.currentFileIsCommit ? [selectedPath] : [],
       gitStatus: this.files.map((file) => ({

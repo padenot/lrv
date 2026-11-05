@@ -79,7 +79,7 @@ function compareSegment(left: string, right: string): number {
   return left < right ? -1 : 1;
 }
 
-/** Matches the default ordering used by @pierre/trees for file paths. */
+/** Orders both the stacked view and the file tree, so they must stay identical. */
 export function compareFilePaths(left: string, right: string): number {
   if (left === right) {
     return 0;

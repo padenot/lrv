@@ -1397,7 +1397,7 @@ function compareSegment(left, right) {
 	if (left === right) return 0;
 	return left < right ? -1 : 1;
 }
-/** Matches the default ordering used by @pierre/trees for file paths. */
+/** Orders both the stacked view and the file tree, so they must stay identical. */
 function compareFilePaths(left, right) {
 	if (left === right) return 0;
 	const leftSegments = left.split("/");
@@ -10863,6 +10863,7 @@ var FileListMethods = class {
 		const tree = new FileTree({
 			paths: this.files.map((file) => file.path),
 			flattenEmptyDirectories: true,
+			sort: (left, right) => compareFilePaths(left.path, right.path),
 			initialExpansion: this.fileTreeExpansion ?? "open",
 			initialSelectedPaths: selectedPath && !this.currentFileIsCommit ? [selectedPath] : [],
 			gitStatus: this.files.map((file) => ({
