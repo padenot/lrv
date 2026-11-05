@@ -148,4 +148,53 @@ test.describe('Theme + Accent', () => {
     });
     expect(btnBg).toBe('rgb(255, 125, 233)');
   });
+
+  test('accent survives switching between files', async ({ page }) => {
+    // On a file's first paint the `import` token can still be drawn in the
+    // plain foreground color.
+    await stopServer();
+    await execAsync(
+      `cd "${testRepoPath}" && printf "import { a } from 'b';\\nexport const c = a;\\n" > mod.ts && git add mod.ts`,
+    );
+    await startServer(0);
+    const url = (serverUrl ?? 'http://localhost:9999') + '/';
+    await page.request.put(url + 'api/config', {
+      data: {
+        color_scheme: 'firefox-devtools-dark',
+        split_view: true,
+        font: 'JetBrains Mono',
+        auto_close_tab: false,
+      },
+    });
+    await page.goto(url + `?r=${Date.now()}`, { waitUntil: 'load' });
+    await page.waitForSelector('.monaco-editor', { state: 'attached', timeout: 15000 });
+    await page.waitForFunction(() => (window as any).__ACCENT_READY === true, { timeout: 15000 });
+
+    const loadAndCheckAccent = async (target: string) => {
+      const loadsBefore = await page.evaluate(
+        () => performance.getEntriesByName('loadFile:total').length,
+      );
+      await page.evaluate((t) => {
+        const app = (window as any).__APP;
+        return app.loadFile(app.files.findIndex((f: { path: string }) => f.path === t));
+      }, target);
+      await page.waitForFunction(
+        (n) => performance.getEntriesByName('loadFile:total').length > n,
+        loadsBefore,
+        { timeout: 10000 },
+      );
+      const accent = await page.evaluate(() =>
+        getComputedStyle(document.documentElement).getPropertyValue('--accent-color').trim(),
+      );
+      expect(accent.replace(/\s+/g, '')).toBe('rgb(255,125,233)');
+      await expect(page.locator('#submit-review')).toHaveCSS(
+        'background-color',
+        'rgb(255, 125, 233)',
+      );
+    };
+
+    await loadAndCheckAccent('mod.ts');
+    await loadAndCheckAccent('test.txt');
+    await loadAndCheckAccent('mod.ts');
+  });
 });

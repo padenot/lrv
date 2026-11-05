@@ -11398,29 +11398,6 @@ var FileLoadingMethods = class {
 				const d = e.length > 0 ? e[e.length - 1].duration : null;
 				if (d != null) console.info("[perf] fileSwitch ms:", Math.round(d));
 			}
-			const prefs = [
-				"function",
-				"const",
-				"import",
-				"class",
-				"return",
-				"if",
-				"export",
-				"let"
-			];
-			const spans = Array.from(document.querySelectorAll(".monaco-editor .view-line span"));
-			let found = null;
-			for (const p of prefs) {
-				for (const s of spans) if ((s.textContent ?? "").trim() === p) {
-					found = s;
-					break;
-				}
-				if (found) break;
-			}
-			if (found) {
-				const col = getComputedStyle(found).color;
-				if (col) document.documentElement.style.setProperty("--accent-color", col);
-			}
 			markAppReady();
 		}));
 		const modifiedEditor = diffEditor.getModifiedEditor();

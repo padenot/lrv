@@ -383,28 +383,6 @@ export class FileLoadingMethods {
             console.info('[perf] fileSwitch ms:', Math.round(d));
           }
         }
-        // Derive accent color from a visible keyword token if present (prefer 'function'/'const'/'import')
-        const prefs = ['function', 'const', 'import', 'class', 'return', 'if', 'export', 'let'];
-        const spans = Array.from(document.querySelectorAll('.monaco-editor .view-line span'));
-        let found: Element | null = null;
-        for (const p of prefs) {
-          for (const s of spans) {
-            const txt = (s.textContent ?? '').trim();
-            if (txt === p) {
-              found = s;
-              break;
-            }
-          }
-          if (found) {
-            break;
-          }
-        }
-        if (found) {
-          const col = getComputedStyle(found).color;
-          if (col) {
-            document.documentElement.style.setProperty('--accent-color', col);
-          }
-        }
         markAppReady();
       }),
     );
