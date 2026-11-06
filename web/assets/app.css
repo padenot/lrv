@@ -2411,11 +2411,6 @@ body:not(.agent-attached) .discuss-hint {
   border: 1px solid var(--border-color);
   border-radius: 4px;
 }
-.agent-review-option {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
 #agent-launch-error {
   color: var(--warning-color);
   overflow-wrap: anywhere;
@@ -2481,6 +2476,28 @@ body:not(.agent-attached) .discuss-hint {
   --revision-color: #2f81f7;
 }
 
+/* Secondary beside Publish: styled like the header's Settings button. */
+#request-review {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  border: none;
+  padding: 6px 12px;
+  border-radius: 0px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  transition: background 0.15s ease;
+}
+
+#request-review:hover:not(:disabled) {
+  opacity: 0.8;
+}
+
+#request-review:disabled {
+  background: var(--text-tertiary);
+  cursor: not-allowed;
+}
+
 #publish-commit:disabled:not(.verifying) {
   opacity: 0.6;
 }
@@ -2488,6 +2505,7 @@ body:not(.agent-attached) .discuss-hint {
 /* Finish (header) and Publish (commit bar) stack in the same right-hand column;
    a shared width keeps their edges aligned whatever the label or spinner. */
 #submit-review,
+#request-review,
 #publish-commit {
   min-width: 104px;
   text-align: center;

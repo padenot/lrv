@@ -224,6 +224,42 @@ test.describe('Series mode E2E', () => {
     }
   });
 
+  test('Request Review follows the selected commit and stays disabled until agent state changes', async ({
+    page,
+  }) => {
+    await openApp(page);
+    await page.evaluate(() =>
+      (window as any).__APP.setAgentState({ attached: true, busy: false, launch: 'idle' }),
+    );
+    const button = page.locator('#request-review');
+    await expect(button).toBeVisible();
+    await expect(button).toHaveAttribute('aria-label', 'Request review of commit 1');
+    await page.locator('#commit-strip .series-commit').nth(1).click();
+    await expect(button).toHaveAttribute('aria-label', 'Request review of commit 2');
+    let payload: unknown;
+    await page.route('**/api/agent/review', async (route) => {
+      payload = route.request().postDataJSON();
+      await route.fulfill({ status: 202, json: { seq: 1 } });
+    });
+    await button.click();
+    await expect(button).toBeDisabled();
+    expect(payload).toEqual({ commit_idx: 1 });
+    await page.locator('#commit-strip .series-commit').first().click();
+    await expect(button).toBeDisabled();
+    await page.evaluate(() =>
+      (window as any).__APP.setAgentState({ attached: true, busy: false, launch: 'idle' }),
+    );
+    await expect(button).toBeEnabled();
+    await page.route('**/api/agent/review', async (route) => {
+      await route.fulfill({ status: 409, body: 'No attached agent' });
+    });
+    await button.click();
+    await expect(button).toHaveText('Request failed');
+    await expect(button).toHaveAttribute('title', 'The agent is no longer connected.');
+    await expect(button).toBeEnabled();
+    await expect(button).toHaveText('Request Review', { timeout: 5000 });
+  });
+
   test('commit strip shows correct number of commits', async ({ page }) => {
     await openApp(page);
 

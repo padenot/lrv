@@ -651,6 +651,13 @@ async function fetchJSON(url, options) {
 		}
 	}
 }
+function requestReview(commitIdx) {
+	return fetchJSON("/api/agent/review", {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ commit_idx: commitIdx })
+	});
+}
 function launchAgent(request) {
 	return fetchJSON("/api/agent/launch", {
 		method: "POST",
@@ -672,13 +679,14 @@ var ConnectAgentMethods = class {
 		const badge = $$1("#agent-status");
 		button.hidden = !available || active;
 		badge.hidden = !available || !active;
-		const busy = state.busy || state.initial_review || !state.attached && state.launch === "running";
+		const busy = state.busy || !state.attached && state.launch === "running";
 		badge.classList.toggle("busy", busy);
 		badge.title = busy ? "The agent is working" : "The agent is waiting for discussion comments";
 		if (active) {
 			$$1("#connect-agent-popover").hidden = true;
 			button.setAttribute("aria-expanded", "false");
 		}
+		this.updateCommitBarVisibility();
 	}
 	setupConnectAgent() {
 		const button = $$1("#connect-agent");
@@ -687,7 +695,6 @@ var ConnectAgentMethods = class {
 		const provider = $$1("#agent-provider");
 		const model = $$1("#agent-model");
 		const effort = $$1("#agent-effort");
-		const review = $$1("#agent-initial-review");
 		const error = $$1("#agent-launch-error");
 		const submit = $$1("#agent-launch-submit");
 		try {
@@ -696,14 +703,12 @@ var ConnectAgentMethods = class {
 				provider.value = saved.provider === "codex" ? "codex" : "claude";
 				model.value = typeof saved.model === "string" ? saved.model : "";
 				effort.value = typeof saved.effort === "string" ? saved.effort : "";
-				review.checked = saved.initial_review !== false;
 			}
 		} catch {}
 		const values = () => ({
 			provider: provider.value,
 			model: model.value.trim(),
-			effort: effort.value.trim(),
-			initial_review: review.checked
+			effort: effort.value.trim()
 		});
 		const save = () => {
 			try {
@@ -745,8 +750,7 @@ var ConnectAgentMethods = class {
 				if (this.agentState === previousState) this.setAgentState({
 					attached: this.agentAttached,
 					busy: true,
-					launch: "running",
-					initial_review: req.initial_review
+					launch: "running"
 				});
 				close();
 			}).catch((reason) => {
@@ -11866,15 +11870,60 @@ var NavigationMethods = class {
 //#endregion
 //#region web/src/commit-bar-methods.ts
 var CommitBarMethods = class {
+	pendingReviewState = null;
+	reviewError = null;
+	reviewErrorTimer;
+	setupRequestReview() {
+		this.pendingReviewState = null;
+		document.getElementById("request-review").addEventListener("click", () => {
+			this.pendingReviewState = this.agentState;
+			this.reviewError = null;
+			window.clearTimeout(this.reviewErrorTimer);
+			this.updateRequestReviewButton();
+			requestReview(this.currentCommitIdx).catch((error) => {
+				const message = error instanceof Error ? error.message : String(error);
+				this.pendingReviewState = null;
+				this.reviewError = /\b409\b/.test(message) ? "The agent is no longer connected." : /\b403\b/.test(message) ? "Review requests are disabled in public mode." : "Could not send the review request. Try again.";
+				this.updateRequestReviewButton();
+				this.reviewErrorTimer = window.setTimeout(() => {
+					this.reviewError = null;
+					this.updateRequestReviewButton();
+				}, 3e3);
+			});
+		});
+	}
+	updateRequestReviewButton() {
+		const button = document.getElementById("request-review");
+		button.hidden = !this.agentState.attached || !!this.context?.is_public;
+		button.disabled = this.agentState.busy || this.pendingReviewState === this.agentState;
+		button.textContent = this.reviewError ? "Request failed" : "Request Review";
+		button.title = this.reviewError ?? (button.disabled ? "The agent is working" : "");
+		button.setAttribute("aria-label", this.reviewError ?? `Request review of commit ${this.currentCommitIdx + 1}`);
+	}
+	/** The current commit's identity; while a commit loads, this.diff still holds the previous one. */
+	currentCommitInfo() {
+		const commit = (this.seriesInfo?.is_series ? this.seriesInfo.commits[this.currentCommitIdx] : void 0) ?? this.diff;
+		return {
+			hash: commit?.commit_hash ?? "",
+			message: commit?.commit_message ?? "",
+			id: this.revisionIdFor(this.currentCommitIdx)
+		};
+	}
+	/** Agent state only affects visibility, so it needn't rebuild the bar's contents. */
+	updateCommitBarVisibility() {
+		const bar = document.getElementById("commit-bar");
+		if (bar) {
+			const { hash, message, id } = this.currentCommitInfo();
+			bar.hidden = !hash && !message && !id && !this.agentAttached;
+		}
+		this.updateRequestReviewButton();
+	}
 	renderCommitBar() {
 		const bar = document.getElementById("commit-bar");
 		const context = document.getElementById("commit-bar-context");
 		if (!bar || !context) return;
-		const commit = (this.seriesInfo?.is_series ? this.seriesInfo.commits[this.currentCommitIdx] : void 0) ?? this.diff;
-		const hash = commit?.commit_hash ?? "";
-		const message = commit?.commit_message ?? "";
-		const id = this.revisionIdFor(this.currentCommitIdx);
-		bar.hidden = !hash && !message && !id;
+		const { hash, message, id } = this.currentCommitInfo();
+		bar.hidden = !hash && !message && !id && !this.agentAttached;
 		context.replaceChildren();
 		if (this.seriesInfo?.is_series) {
 			const nav = el("div", { className: "commit-bar-nav" });
@@ -11911,6 +11960,7 @@ var CommitBarMethods = class {
 			text: hash.slice(0, 8)
 		}), el("span", { attrs: { id: "commit-revision" } }));
 		this.updatePublishButton();
+		this.updateRequestReviewButton();
 	}
 };
 //#endregion
@@ -14791,6 +14841,7 @@ var MonacoApp = class {
 			this.showSettingsModal();
 		});
 		$$1("#help-btn")?.addEventListener("click", () => this.showKeyboardHelp());
+		this.setupRequestReview();
 		this.setupConnectAgent();
 		$$1("#submit-review")?.addEventListener("click", () => {
 			this.showSubmitConfirmation();

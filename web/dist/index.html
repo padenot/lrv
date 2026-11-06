@@ -266,10 +266,6 @@
                 pattern="[A-Za-z0-9._:\[\]\-]{0,100}"
                 placeholder="CLI default"
               />
-              <label class="agent-review-option"
-                ><input id="agent-initial-review" type="checkbox" checked /> Perform initial
-                review</label
-              >
               <p id="agent-launch-error" role="alert"></p>
               <button id="agent-launch-submit" type="submit">Connect</button>
             </form>
@@ -343,6 +339,7 @@
         <div id="commit-bar" hidden>
           <div id="commit-bar-context"></div>
           <div class="commit-bar-actions">
+            <button id="request-review" hidden>Request Review</button>
             <button id="publish-commit" hidden>Publish</button>
           </div>
         </div>

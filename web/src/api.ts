@@ -74,6 +74,14 @@ export async function fetchJSON<T>(url: string, options?: RequestInit): Promise<
   }
 }
 
+export function requestReview(commitIdx: number): Promise<{ seq: number }> {
+  return fetchJSON('/api/agent/review', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ commit_idx: commitIdx }),
+  });
+}
+
 export function launchAgent(request: LaunchRequest): Promise<{ launch: string }> {
   return fetchJSON('/api/agent/launch', {
     method: 'POST',

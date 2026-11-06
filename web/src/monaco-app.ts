@@ -151,6 +151,8 @@ export class MonacoApp {
   agentState: AgentState = { attached: false, busy: false, launch: 'idle' };
   declare setAgentState: (state: AgentState) => void;
   declare setupConnectAgent: () => void;
+  declare setupRequestReview: () => void;
+  declare updateCommitBarVisibility: () => void;
 
   constructor() {
     this.commentManager = new CommentManager();
@@ -621,6 +623,7 @@ export class MonacoApp {
     // Help button
     $('#help-btn')?.addEventListener('click', () => this.showKeyboardHelp());
 
+    this.setupRequestReview();
     this.setupConnectAgent();
 
     $('#submit-review')?.addEventListener('click', () => {

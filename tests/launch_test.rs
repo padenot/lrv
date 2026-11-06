@@ -18,7 +18,6 @@ fn request_validation_and_provider_arguments() {
                 provider: provider.into(),
                 model: if options { "model-1.2:tag[fast]" } else { "" }.into(),
                 effort: if options { "high" } else { "" }.into(),
-                initial_review: true,
             };
             req.validate().unwrap();
             let ctx = context();
@@ -44,6 +43,7 @@ fn request_validation_and_provider_arguments() {
             }
             if provider == "claude" {
                 expected.extend([
+                    "--strict-mcp-config",
                     "--tools",
                     "Bash,Read,Grep,Glob",
                     "--allowedTools",
@@ -65,7 +65,6 @@ fn request_validation_and_provider_arguments() {
             }
             assert_eq!(args, expected);
             let prompt = build_prompt(
-                &req,
                 &[
                     PathBuf::from("/tmp/commit-0.diff"),
                     PathBuf::from("/tmp/commit-1.diff"),
@@ -73,7 +72,7 @@ fn request_validation_and_provider_arguments() {
                 &[],
             );
             assert!(prompt.contains("commit_idx 1: file /tmp/commit-1.diff"));
-            assert!(prompt.contains("First review the supplied diff files"));
+            assert!(prompt.contains("Immediately run lrv --listen"));
             assert!(prompt.contains("--listen-timeout 540"));
             assert!(prompt.contains(lrv::skill::EMBEDDED_SKILL));
         }

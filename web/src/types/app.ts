@@ -132,6 +132,7 @@ export interface AppContext {
   agentState: AgentState;
   setAgentState(state: AgentState): void;
   setupConnectAgent(): void;
+  updateCommitBarVisibility(): void;
   commentManager: {
     comments: ReviewComment[];
     currentCommitIdx: number | null;
@@ -263,12 +264,10 @@ export type AgentState = {
   attached: boolean;
   busy: boolean;
   launch: 'idle' | 'running' | 'failed';
-  initial_review?: boolean;
   error?: string | null;
 };
 export type LaunchRequest = {
   provider: 'claude' | 'codex';
   model: string;
   effort: string;
-  initial_review: boolean;
 };

@@ -139,6 +139,14 @@ The output defaults to JSON (`--format json`), with a `status` field:
 
 - `events`: the `events` array contains objects with `seq` and `type`.
   Handle every event in the batch, then listen again.
+  - `type: "review_request"` has `commit_idx`, optional `commit_hash` and
+    `subject`. Review **only** commit `commit_idx` for actionable bugs. Use its
+    diff file when the session lists one; otherwise run `jj show --git <hash>`
+    (or `git show <hash>` in a Git repository). Read other commits and source
+    only for context. Write findings as a JSON array with no `discussion_id`,
+    the requested `commit_idx` on every note, and exact `file`, `line`, `side`,
+    `body` and `author`. Post with `lrv --add-notes <file>`; post `[]` when there
+    are no findings. Listen again afterwards.
   - `type: "discussion"` has `discussion` containing `id`, `created_at`,
     `file`, `line`, `side`, `body`, and optional `thread_id`, `summarize` and
     `commit_idx`. Reply with `lrv --add-notes <file>`, setting `discussion_id` to
