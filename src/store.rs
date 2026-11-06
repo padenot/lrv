@@ -1,4 +1,4 @@
-use crate::types::{Comment, CommentLine, ReplyTarget, Side};
+use crate::types::{Comment, CommentLine, ReplyTarget, ReviewNote, Side};
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 use std::path::{Path, PathBuf};
@@ -30,8 +30,29 @@ CREATE TABLE IF NOT EXISTS comments (
     body TEXT NOT NULL,
     in_reply_to TEXT
 );
+CREATE TABLE IF NOT EXISTS note_dispositions (
+    session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    note_id TEXT NOT NULL,
+    disposition TEXT NOT NULL,
+    note TEXT NOT NULL,
+    PRIMARY KEY (session_id, note_id)
+);
 CREATE INDEX IF NOT EXISTS comments_session_idx ON comments(session_id, position);
 ";
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum NoteDisposition {
+    Open,
+    Accepted,
+    Ignored,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct StoredNoteDisposition {
+    pub note: ReviewNote,
+    pub disposition: NoteDisposition,
+}
 
 /// Identifying information about the review being performed, recorded once per
 /// session so a stored set of comments can be traced back to its diff.
@@ -167,9 +188,16 @@ impl CommentStore {
     /// Replace the comments recorded for this session. Called on every change
     /// in the UI, so the database always reflects what the reviewer sees.
     /// Once a session has been submitted its comments are frozen.
-    pub fn replace_comments(&self, comments: &[Comment]) -> Result<()> {
+    pub fn replace_draft(
+        &self,
+        comments: &[Comment],
+        notes: &[StoredNoteDisposition],
+    ) -> Result<()> {
         let mut conn = self.conn.lock().unwrap();
         let mut session_id = self.session_id.lock().unwrap();
+        if session_id.is_none() && comments.is_empty() && notes.is_empty() {
+            return Ok(());
+        }
         let id = ensure_session(&conn, &self.meta, &mut session_id)?;
 
         let tx = conn.transaction()?;
@@ -183,6 +211,21 @@ impl CommentStore {
             return Ok(());
         }
         write_comments(&tx, id, comments)?;
+        tx.execute(
+            "DELETE FROM note_dispositions WHERE session_id = ?1",
+            params![id],
+        )?;
+        for entry in notes {
+            let note_id = entry
+                .note
+                .id
+                .as_deref()
+                .context("Note disposition requires a note id")?;
+            tx.execute(
+                "INSERT INTO note_dispositions (session_id, note_id, disposition, note) VALUES (?1, ?2, ?3, ?4)",
+                params![id, note_id, serde_json::to_value(&entry.disposition)?.as_str(), serde_json::to_string(&entry.note)?],
+            )?;
+        }
         tx.commit()?;
         Ok(())
     }

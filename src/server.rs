@@ -1447,6 +1447,8 @@ async fn add_comment(State(state): State<AppState>, Json(comment): Json<Comment>
 #[derive(Deserialize)]
 struct CommentSync {
     comments: Vec<Comment>,
+    #[serde(default)]
+    notes: Vec<crate::store::StoredNoteDisposition>,
 }
 
 // Mirror the browser's comment drafts into the SQLite store on every change so
@@ -1455,14 +1457,20 @@ async fn sync_comments(
     State(state): State<AppState>,
     Json(payload): Json<CommentSync>,
 ) -> (StatusCode, String) {
-    if payload.comments.iter().any(|c| !c.is_valid()) {
+    if payload.comments.iter().any(|c| !c.is_valid())
+        || payload.notes.iter().any(|entry| {
+            entry.note.id.as_ref().is_none_or(|id| id.is_empty())
+                || !entry.note.line.is_valid()
+                || entry.note.discussion_id.is_some()
+        })
+    {
         return (StatusCode::BAD_REQUEST, String::new());
     }
     // A missing store is reported once, at startup and in the page banner.
     let Some(store) = state.store.clone() else {
         return (StatusCode::OK, String::new());
     };
-    if let Err(e) = store.replace_comments(&payload.comments) {
+    if let Err(e) = store.replace_draft(&payload.comments, &payload.notes) {
         // Comments are synced on every edit: warn once rather than per keystroke.
         static WARNED: AtomicBool = AtomicBool::new(false);
         if !WARNED.swap(true, Ordering::Relaxed) {

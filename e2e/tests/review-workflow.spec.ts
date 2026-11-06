@@ -770,7 +770,7 @@ test.describe('Review Workflow E2E', () => {
       } else {
         await button.click();
         const dialog = page.locator('.publish-dialog');
-        await expect(dialog.getByRole('button', { name: 'Accept', exact: true })).toBeDisabled();
+        await expect(dialog.locator('button', { hasText: 'Accept' })).toBeDisabled();
         await expect(dialog.getByRole('button', { name: 'Request Changes' })).toBeDisabled();
         await expect(dialog).toContainText('closed or abandoned');
         await expect(dialog).toContainText('You are the author of D123');
@@ -973,6 +973,43 @@ test.describe('Review Workflow E2E', () => {
       author: 'Author',
       body: 'Please fix this.',
     });
+  });
+
+  test('restores accepted and ignored note dispositions after reload', async ({ page }) => {
+    await page.route('**/api/review-notes', (route) =>
+      route.fulfill({
+        json: ['test.txt', 'file2.txt', 'file3.txt'].flatMap((file) =>
+          [1, 2].map((line) => ({
+            id: `${file}-${line}`,
+            file,
+            line,
+            side: 'new',
+            body: `Note ${line}`,
+          })),
+        ),
+      }),
+    );
+    await openApp(page);
+    await page.locator('.review-note').nth(0).locator('button', { hasText: 'Accept' }).click();
+    await page.locator('.review-note').nth(1).locator('button', { hasText: 'Ignore' }).click();
+    await expect(page.locator('.review-note-status-ignored')).toHaveCount(1);
+    await page.waitForFunction(async () => {
+      const db = await new Promise<IDBDatabase>((resolve) => {
+        const request = indexedDB.open('lrv-comment-drafts', 1);
+        request.onsuccess = () => resolve(request.result);
+      });
+      const records: any[] = await new Promise((resolve) => {
+        const request = db.transaction('drafts').objectStore('drafts').getAll();
+        request.onsuccess = () => resolve(request.result);
+      });
+      return records.some((r) => Object.values(r.dispositions ?? {}).includes('ignored'));
+    });
+    await page.reload();
+    await expect(page.locator('#restore-banner')).toBeVisible();
+    await expect(page.locator('#restore-banner')).toContainText('2 note dispositions');
+    await page.locator('#restore-yes-btn').click();
+    await expect(page.locator('.review-note-status-accepted')).toHaveCount(1);
+    await expect(page.locator('.review-note-status-ignored')).toHaveCount(1);
   });
 
   test('undoing a queued review note removes its comment', async ({ page }) => {

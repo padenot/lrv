@@ -1014,6 +1014,7 @@ var DiscussionMethods = class {
 //#region web/src/review-notes.ts
 var ReviewNoteManager = class {
 	notes;
+	dispositions = {};
 	listeners;
 	summaryWaiters = [];
 	currentCommitIdx;
@@ -1023,13 +1024,13 @@ var ReviewNoteManager = class {
 		this.currentCommitIdx = null;
 	}
 	setNotes(notes) {
-		this.notes = [...notes];
+		this.notes = notes.map((note) => this.withDisposition(note));
 		this.notifyListeners();
 	}
 	mergeNotes(notes) {
 		let added = false;
 		for (const note of notes) if (!this.notes.some((existing) => this.isSameNote(existing, note))) {
-			this.notes.push(note);
+			this.notes.push(this.withDisposition(note));
 			added = true;
 		}
 		if (added) this.notifyListeners();
@@ -1039,8 +1040,22 @@ var ReviewNoteManager = class {
 			...note,
 			commit_idx: this.currentCommitIdx
 		};
-		this.notes.push(note);
+		this.notes.push(this.withDisposition(note));
 		this.notifyListeners();
+	}
+	getDispositions() {
+		return { ...this.dispositions };
+	}
+	applyDispositions(map) {
+		this.dispositions = { ...map };
+		this.notes = this.notes.map((note) => this.withDisposition(note));
+		this.notifyListeners();
+	}
+	withDisposition(note) {
+		return {
+			...note,
+			disposition: note.id && this.dispositions[note.id] || "open"
+		};
 	}
 	getNotes() {
 		return this.notes.filter((n) => !n.discussion_id);
@@ -1069,6 +1084,7 @@ var ReviewNoteManager = class {
 	updateNote(target, patch) {
 		const idx = this.notes.findIndex((note) => this.isSameNote(note, target));
 		if (idx < 0) return;
+		if (target.id && patch.disposition) this.dispositions[target.id] = patch.disposition;
 		this.notes[idx] = {
 			...this.notes[idx],
 			...patch
@@ -1178,19 +1194,31 @@ function buildCommentDraftKey(context, diff, seriesInfo) {
 }
 async function loadCommentDraft(key) {
 	const db = await openDraftDb();
-	if (!db) return [];
+	if (!db) return {
+		comments: [],
+		dispositions: {}
+	};
 	try {
 		const record = await runTransaction(db, "readonly", (store) => store.get(key));
-		if (!record || record.schemaVersion !== 1 || !Array.isArray(record.comments)) return [];
-		return sanitizeComments(record.comments);
+		if (!record || record.schemaVersion !== 1 || !Array.isArray(record.comments)) return {
+			comments: [],
+			dispositions: {}
+		};
+		return {
+			comments: sanitizeComments(record.comments),
+			dispositions: sanitizeDispositions(record.dispositions)
+		};
 	} catch (error) {
 		console.warn("Failed to load persisted review comments:", error);
-		return [];
+		return {
+			comments: [],
+			dispositions: {}
+		};
 	}
 }
-async function saveCommentDraft(key, comments) {
+async function saveCommentDraft(key, comments, dispositions = {}) {
 	const sanitized = sanitizeComments(comments);
-	if (sanitized.length === 0) {
+	if (sanitized.length === 0 && !Object.values(dispositions).some((value) => value !== "open")) {
 		await clearCommentDraft(key);
 		return;
 	}
@@ -1200,7 +1228,8 @@ async function saveCommentDraft(key, comments) {
 		key,
 		schemaVersion: 1,
 		savedAt: Date.now(),
-		comments: sanitized
+		comments: sanitized,
+		dispositions
 	};
 	try {
 		await runTransaction(db, "readwrite", (store) => store.put(record));
@@ -1208,12 +1237,18 @@ async function saveCommentDraft(key, comments) {
 		console.warn("Failed to persist review comments:", error);
 	}
 }
-async function syncCommentDraftToServer(comments) {
+async function syncCommentDraftToServer(comments, notes = []) {
 	try {
 		const res = await fetch("/api/comments/sync", {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ comments })
+			body: JSON.stringify({
+				comments,
+				notes: notes.filter((note) => note.id && note.disposition && note.disposition !== "open").map((note) => ({
+					note,
+					disposition: note.disposition
+				}))
+			})
 		});
 		if (!res.ok) showCommentStoreError(await res.text() || `lrv answered with HTTP ${res.status}.`);
 	} catch (error) {
@@ -1294,6 +1329,13 @@ function sanitizeComment(value) {
 		body: raw.body
 	};
 	if (typeof raw.commit_idx === "number" && Number.isInteger(raw.commit_idx)) comment.commit_idx = raw.commit_idx;
+	if (raw.in_reply_to && typeof raw.in_reply_to.body === "string") {
+		const { body, id, author, source_url } = raw.in_reply_to;
+		comment.in_reply_to = { body };
+		if (typeof id === "string") comment.in_reply_to.id = id;
+		if (typeof author === "string") comment.in_reply_to.author = author;
+		if (typeof source_url === "string") comment.in_reply_to.source_url = source_url;
+	}
 	return comment;
 }
 function isCommentLine(value) {
@@ -1313,6 +1355,10 @@ function hashString(value) {
 		hash = Math.imul(hash, 16777619) >>> 0;
 	}
 	return hash.toString(16).padStart(8, "0");
+}
+function sanitizeDispositions(value) {
+	if (!value || typeof value !== "object") return {};
+	return Object.fromEntries(Object.entries(value).filter(([, disposition]) => disposition === "open" || disposition === "accepted" || disposition === "ignored"));
 }
 //#endregion
 //#region web/src/ui-signals.ts
@@ -14494,6 +14540,7 @@ var MonacoApp = class {
 	currentCommitIdx;
 	commitLoadGeneration;
 	commentDraftKey;
+	commentDraftRestorePending = true;
 	commentDraftWrite;
 	agentState = {
 		attached: false,
@@ -14556,6 +14603,7 @@ var MonacoApp = class {
 			this.renderFileList();
 		});
 		this.reviewNoteManager.onChange(() => {
+			this.persistComments();
 			this.renderReviewNotes();
 			this.renderFileList();
 			if (this.currentFileIsCommit) this.loadCommitView();
@@ -14680,31 +14728,44 @@ var MonacoApp = class {
 		if (!this.commentDraftKey) return;
 		const key = this.commentDraftKey;
 		const comments = this.commentManager.getComments();
-		this.commentDraftWrite = this.commentDraftWrite.catch(() => void 0).then(() => saveCommentDraft(key, comments)).then(() => this.reviewSubmitted ? void 0 : syncCommentDraftToServer(comments));
+		const dispositions = this.reviewNoteManager.getDispositions();
+		const notes = this.reviewNoteManager.getNotes();
+		const restorePending = this.commentDraftRestorePending;
+		this.commentDraftWrite = this.commentDraftWrite.catch(() => void 0).then(() => restorePending ? void 0 : saveCommentDraft(key, comments, dispositions)).then(() => this.reviewSubmitted ? void 0 : syncCommentDraftToServer(comments, notes));
 	}
 	async restorePersistedComments() {
 		if (!this.commentDraftKey) return;
-		const comments = await loadCommentDraft(this.commentDraftKey);
-		if (comments.length === 0) return;
+		const { comments, dispositions } = await loadCommentDraft(this.commentDraftKey);
+		const dispositionCount = Object.values(dispositions).filter((value) => value !== "open").length;
+		if (comments.length === 0 && dispositionCount === 0) {
+			this.commentDraftRestorePending = false;
+			this.persistComments();
+			return;
+		}
 		const banner = document.getElementById("restore-banner");
 		const msg = document.getElementById("restore-banner-msg");
 		const yesBtn = document.getElementById("restore-yes-btn");
 		const noBtn = document.getElementById("restore-no-btn");
 		if (!banner || !msg || !yesBtn || !noBtn) {
+			this.commentDraftRestorePending = false;
+			this.reviewNoteManager.applyDispositions(dispositions);
 			this.commentManager.setComments(comments);
 			return;
 		}
-		msg.textContent = `${comments.length} comment${comments.length === 1 ? "" : "s"} from a previous session — restore?`;
+		msg.textContent = `${comments.length} comment${comments.length === 1 ? "" : "s"}${dispositionCount ? ` and ${dispositionCount} note dispositions` : ""} from a previous session — restore?`;
 		banner.style.display = "";
 		const close = () => {
 			banner.style.display = "none";
 		};
 		yesBtn.onclick = () => {
+			this.commentDraftRestorePending = false;
+			this.reviewNoteManager.applyDispositions(dispositions);
 			this.commentManager.setComments(comments);
 			close();
 		};
 		noBtn.onclick = () => {
-			this.clearPersistedComments();
+			this.commentDraftRestorePending = false;
+			this.clearPersistedComments().then(() => this.persistComments());
 			close();
 		};
 	}

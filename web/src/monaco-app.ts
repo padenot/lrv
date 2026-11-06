@@ -121,6 +121,7 @@ export class MonacoApp {
   currentCommitIdx: number;
   commitLoadGeneration: number;
   commentDraftKey: string | null;
+  private commentDraftRestorePending = true;
   commentDraftWrite: Promise<void>;
   declare updateUI: () => void;
   declare renderReviewNotes: () => void;
@@ -209,6 +210,7 @@ export class MonacoApp {
       this.renderFileList();
     });
     this.reviewNoteManager.onChange(() => {
+      this.persistComments();
       this.renderReviewNotes();
       this.renderFileList();
       if (this.currentFileIsCommit) {
@@ -400,10 +402,15 @@ export class MonacoApp {
 
     const key = this.commentDraftKey;
     const comments = this.commentManager.getComments();
+    const dispositions = this.reviewNoteManager.getDispositions();
+    const notes = this.reviewNoteManager.getNotes();
+    // Until the restore banner is answered, the IndexedDB draft is the previous session's work,
+    // so leave it alone. The SQLite session belongs to this run and is always safe to update.
+    const restorePending = this.commentDraftRestorePending;
     this.commentDraftWrite = this.commentDraftWrite
       .catch(() => undefined)
-      .then(() => saveCommentDraft(key, comments))
-      .then(() => (this.reviewSubmitted ? undefined : syncCommentDraftToServer(comments)));
+      .then(() => (restorePending ? undefined : saveCommentDraft(key, comments, dispositions)))
+      .then(() => (this.reviewSubmitted ? undefined : syncCommentDraftToServer(comments, notes)));
   }
 
   private async restorePersistedComments() {
@@ -411,8 +418,11 @@ export class MonacoApp {
       return;
     }
 
-    const comments = await loadCommentDraft(this.commentDraftKey);
-    if (comments.length === 0) {
+    const { comments, dispositions } = await loadCommentDraft(this.commentDraftKey);
+    const dispositionCount = Object.values(dispositions).filter((value) => value !== 'open').length;
+    if (comments.length === 0 && dispositionCount === 0) {
+      this.commentDraftRestorePending = false;
+      this.persistComments();
       return;
     }
 
@@ -421,11 +431,13 @@ export class MonacoApp {
     const yesBtn = document.getElementById('restore-yes-btn');
     const noBtn = document.getElementById('restore-no-btn');
     if (!banner || !msg || !yesBtn || !noBtn) {
+      this.commentDraftRestorePending = false;
+      this.reviewNoteManager.applyDispositions(dispositions);
       this.commentManager.setComments(comments);
       return;
     }
 
-    msg.textContent = `${comments.length} comment${comments.length === 1 ? '' : 's'} from a previous session — restore?`;
+    msg.textContent = `${comments.length} comment${comments.length === 1 ? '' : 's'}${dispositionCount ? ` and ${dispositionCount} note dispositions` : ''} from a previous session — restore?`;
     banner.style.display = '';
 
     const close = () => {
@@ -433,11 +445,14 @@ export class MonacoApp {
     };
 
     yesBtn.onclick = () => {
+      this.commentDraftRestorePending = false;
+      this.reviewNoteManager.applyDispositions(dispositions);
       this.commentManager.setComments(comments);
       close();
     };
     noBtn.onclick = () => {
-      void this.clearPersistedComments();
+      this.commentDraftRestorePending = false;
+      void this.clearPersistedComments().then(() => this.persistComments());
       close();
     };
   }
