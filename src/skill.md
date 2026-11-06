@@ -197,3 +197,5 @@ otherwise), and don't retry inline after a rejection; write a file instead.
 
 `discussion_id` is accepted only by a running review, not by
 `--review-notes-file` or `--validate-review-notes`.
+
+Review notes and `in_reply_to` copies may have `origin: "host"` for comments imported from code hosts. Agent notes default to `"agent"`; leave `origin` out when posting findings.

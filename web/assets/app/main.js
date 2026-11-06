@@ -539,6 +539,7 @@ var CommentManager = class {
 };
 function replyTarget(note) {
 	const target = { body: note.body };
+	if (note.origin !== void 0) target.origin = note.origin;
 	if (note.id !== void 0) target.id = note.id;
 	if (note.author !== void 0) target.author = note.author;
 	if (note.source_url !== void 0) target.source_url = note.source_url;
@@ -1348,8 +1349,9 @@ function sanitizeComment(value) {
 	};
 	if (typeof raw.commit_idx === "number" && Number.isInteger(raw.commit_idx)) comment.commit_idx = raw.commit_idx;
 	if (raw.in_reply_to && typeof raw.in_reply_to.body === "string") {
-		const { body, id, author, source_url } = raw.in_reply_to;
+		const { body, id, author, source_url, origin } = raw.in_reply_to;
 		comment.in_reply_to = { body };
+		if (origin === "agent" || origin === "host") comment.in_reply_to.origin = origin;
 		if (typeof id === "string") comment.in_reply_to.id = id;
 		if (typeof author === "string") comment.in_reply_to.author = author;
 		if (typeof source_url === "string") comment.in_reply_to.source_url = source_url;

@@ -5,6 +5,7 @@ export type NoteDisposition = 'open' | 'accepted' | 'ignored';
 export type NoteDispositions = Record<string, NoteDisposition>;
 
 export type ReviewNote = {
+  origin?: 'agent' | 'host';
   id?: string;
   discussion_id?: string;
   summary?: boolean;

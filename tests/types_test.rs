@@ -121,6 +121,7 @@ fn comments_need_a_body_unless_they_reply_to_a_note() {
         in_reply_to,
     };
     let note = lrv::types::ReplyTarget {
+        origin: lrv::types::NoteOrigin::Agent,
         id: None,
         author: None,
         body: "Why?".to_string(),
@@ -129,4 +130,35 @@ fn comments_need_a_body_unless_they_reply_to_a_note() {
     assert!(comment("Fix this", None).is_valid());
     assert!(!comment("  ", None).is_valid());
     assert!(comment("", Some(note)).is_valid());
+}
+
+#[test]
+fn note_origins_default_to_agent_and_round_trip_host() {
+    use lrv::types::{NoteOrigin, ReplyTarget, ReviewNote};
+    let json = serde_json::json!({ "file": "a.rs", "line": 1, "side": "new", "body": "Finding" });
+    let mut note: ReviewNote = serde_json::from_value(json.clone()).unwrap();
+    assert_eq!(note.origin, NoteOrigin::Agent);
+    assert_eq!(serde_json::to_value(&note).unwrap(), json);
+    note.origin = NoteOrigin::Host;
+    let encoded = serde_json::to_value(&note).unwrap();
+    assert_eq!(encoded["origin"], "host");
+    assert_eq!(
+        serde_json::from_value::<ReviewNote>(encoded)
+            .unwrap()
+            .origin,
+        NoteOrigin::Host
+    );
+    let mut target: ReplyTarget =
+        serde_json::from_value(serde_json::json!({"body": "Finding"})).unwrap();
+    assert_eq!(target.origin, NoteOrigin::Agent);
+    assert!(serde_json::to_value(&target)
+        .unwrap()
+        .get("origin")
+        .is_none());
+    target.origin = NoteOrigin::Host;
+    assert_eq!(serde_json::to_value(target).unwrap()["origin"], "host");
+    assert_eq!(
+        ReviewNote::overall(None, "Host comment".into(), None, None, None, None).origin,
+        NoteOrigin::Host
+    );
 }

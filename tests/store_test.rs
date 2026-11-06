@@ -59,6 +59,7 @@ fn replies_keep_the_note_they_answer() {
     let path = db_path("reply");
     let store = CommentStore::open(&path, meta()).unwrap();
     let note = ReplyTarget {
+        origin: lrv::types::NoteOrigin::Agent,
         id: Some("42".to_string()),
         author: Some("alice".to_string()),
         body: "Why?".to_string(),

@@ -354,6 +354,7 @@ impl CommentStore {
                     body: String::new(),
                     commit_idx: note.commit_idx,
                     in_reply_to: Some(ReplyTarget {
+                        origin: note.origin,
                         id: note.id,
                         author: note.author,
                         body: note.body,

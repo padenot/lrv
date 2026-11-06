@@ -1,5 +1,5 @@
 use crate::diff::{attribute_line, diff_shows_line};
-use crate::types::{CommentLine, DiffResponse, PrInfo, ReviewNote, Side};
+use crate::types::{CommentLine, DiffResponse, NoteOrigin, PrInfo, ReviewNote, Side};
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
@@ -176,6 +176,7 @@ fn notes_from_comments(comments: Vec<GhComment>, diffs: &[DiffResponse]) -> Vec<
         }
 
         notes.push(ReviewNote {
+            origin: NoteOrigin::Host,
             id: Some(comment.id.to_string()),
             file: path.clone(),
             line,
