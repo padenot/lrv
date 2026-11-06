@@ -1,5 +1,6 @@
 import { FileTree } from '../../node_modules/@pierre/trees/dist/render/FileTree.js';
 import type { GitStatus } from '../../node_modules/@pierre/trees/dist/publicTypes.js';
+import type { FileTreeDirectoryHandle } from '../../node_modules/@pierre/trees/dist/model/publicTypes.js';
 import { clearEl, el } from './dom';
 import { compareFilePaths } from './file-order';
 import type { AppContext, DiffFile } from './types/app';
@@ -158,14 +159,28 @@ export class FileListMethods {
     });
 
     collapseAll?.addEventListener('click', () => {
-      this.fileTreeExpansion = 'closed';
-      this.renderFileList();
+      this.setFileTreeExpansion('closed');
     });
 
     expandAll?.addEventListener('click', () => {
-      this.fileTreeExpansion = 'open';
-      this.renderFileList();
+      this.setFileTreeExpansion('open');
     });
+  }
+
+  // Bulk actions replace the directories the user opened or closed by hand, so the
+  // rebuild must not restore them.
+  private setFileTreeExpansion(expansion: 'open' | 'closed') {
+    this.fileTreeExpansion = expansion;
+    this.fileTree?.cleanUp();
+    this.fileTree = null;
+    this.renderFileList();
+  }
+
+  private visibleDirectoryExpansion(tree: FileTree): [string, boolean][] {
+    return tree
+      .getVisibleRows(0, tree.getVisibleCount())
+      .filter((row) => row.kind === 'directory')
+      .map((row) => [row.path, row.isExpanded]);
   }
 
   expandCurrentFileAncestors() {
@@ -197,6 +212,8 @@ export class FileListMethods {
       return;
     }
 
+    // Rebuilding resets directories to the bulk default, so keep the visible ones as they are.
+    const directoryExpansion = this.fileTree ? this.visibleDirectoryExpansion(this.fileTree) : [];
     this.fileTree?.cleanUp();
     this.fileTree = null;
     clearEl(list);
@@ -270,6 +287,17 @@ export class FileListMethods {
     });
     this.fileTree = tree;
     tree.render({ fileTreeContainer: treeHost });
+    for (const [path, expanded] of directoryExpansion) {
+      const directory = tree.getItem(path) as FileTreeDirectoryHandle | null;
+      if (!directory) {
+        continue;
+      }
+      if (expanded) {
+        directory.expand();
+      } else {
+        directory.collapse();
+      }
+    }
 
     this.renderSummary(this.visibleFileCount());
     requestAnimationFrame(() => {

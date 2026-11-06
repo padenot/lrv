@@ -10829,13 +10829,20 @@ var FileListMethods = class {
 			this.renderSummary(this.visibleFileCount());
 		});
 		collapseAll?.addEventListener("click", () => {
-			this.fileTreeExpansion = "closed";
-			this.renderFileList();
+			this.setFileTreeExpansion("closed");
 		});
 		expandAll?.addEventListener("click", () => {
-			this.fileTreeExpansion = "open";
-			this.renderFileList();
+			this.setFileTreeExpansion("open");
 		});
+	}
+	setFileTreeExpansion(expansion) {
+		this.fileTreeExpansion = expansion;
+		this.fileTree?.cleanUp();
+		this.fileTree = null;
+		this.renderFileList();
+	}
+	visibleDirectoryExpansion(tree) {
+		return tree.getVisibleRows(0, tree.getVisibleCount()).filter((row) => row.kind === "directory").map((row) => [row.path, row.isExpanded]);
 	}
 	expandCurrentFileAncestors() {
 		const currentPath = this.currentPath();
@@ -10858,6 +10865,7 @@ var FileListMethods = class {
 		const list = document.getElementById("file-list");
 		const summaryHost = document.getElementById("overall-review-summary");
 		if (!list || !summaryHost) return;
+		const directoryExpansion = this.fileTree ? this.visibleDirectoryExpansion(this.fileTree) : [];
 		this.fileTree?.cleanUp();
 		this.fileTree = null;
 		clearEl(list);
@@ -10916,6 +10924,12 @@ var FileListMethods = class {
 		});
 		this.fileTree = tree;
 		tree.render({ fileTreeContainer: treeHost });
+		for (const [path, expanded] of directoryExpansion) {
+			const directory = tree.getItem(path);
+			if (!directory) continue;
+			if (expanded) directory.expand();
+			else directory.collapse();
+		}
 		this.renderSummary(this.visibleFileCount());
 		requestAnimationFrame(() => {
 			if (selectedPath && !this.currentFileIsCommit) {

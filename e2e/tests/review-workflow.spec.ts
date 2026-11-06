@@ -1350,6 +1350,36 @@ test.describe('Review Workflow E2E', () => {
       .toBeLessThanOrEqual(treeBox.y + treeBox.height);
   });
 
+  test('stacked mode keeps manually toggled directories when selecting a file', async ({
+    page,
+  }) => {
+    if (!testRepoPath) {
+      throw new Error('Test repo not initialized');
+    }
+
+    await execAsync(
+      `cd "${testRepoPath}" && mkdir -p aaa && for i in $(seq 1 3); do echo $i > aaa/f$i.txt; done && ` +
+        `git add aaa`,
+    );
+    await stopServer();
+    await startServer();
+    await openStackedView(page);
+
+    const folder = page.locator(
+      'file-tree-container.lrv-file-tree [data-item-type="folder"][data-item-path="aaa/"]',
+    );
+    await page.locator('#collapse-all-dirs').click();
+    await expect(folder).toHaveAttribute('aria-expanded', 'false');
+    await folder.click();
+    await expect(folder).toHaveAttribute('aria-expanded', 'true');
+
+    // Selecting a file rebuilds the tree; wait for a file in the folder to be selected,
+    // which only shows once the rebuilt tree has rendered its rows.
+    await fileTreeRow(page, 'aaa/f2.txt').click();
+    await expect(selectedFileTreeRow(page)).toHaveAttribute('data-item-path', /^aaa\/f/);
+    await expect(folder).toHaveAttribute('aria-expanded', 'true');
+  });
+
   test('should display provided title in header', async ({ page }) => {
     // Restart server with a custom title
     await stopServer();
