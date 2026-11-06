@@ -6,6 +6,7 @@ import type { editor } from 'monaco-editor';
 
 export class NavigationMethods {
   declare currentWidget: AppContext['currentWidget'];
+  declare isStacked: boolean;
   declare isInline: boolean;
   declare currentFileIndex: number;
   declare files: AppContext['files'];
@@ -53,7 +54,7 @@ export class NavigationMethods {
 
       // Match key event to shortcut
       const action = this.matchKeyboardShortcut(e);
-      if (!action) {
+      if (!action || !this.canRunShortcut(action)) {
         return;
       }
 
@@ -103,6 +104,17 @@ export class NavigationMethods {
           break;
       }
     });
+  }
+
+  // Editor-only shortcuts do nothing in the stacked view, where the Monaco editor is
+  // hidden or absent. Leave their keys to the browser (e.g. scrolling) there.
+  private canRunShortcut(action: KeyboardAction) {
+    const needsEditor =
+      action === 'lineDown' ||
+      action === 'lineUp' ||
+      action === 'openComment' ||
+      action === 'clearFocus';
+    return !needsEditor || (!this.isStacked && !!this.editor);
   }
 
   toggleView() {

@@ -1380,6 +1380,24 @@ test.describe('Review Workflow E2E', () => {
     await expect(folder).toHaveAttribute('aria-expanded', 'true');
   });
 
+  test('arrow keys scroll the stacked view when no editor is open', async ({ page }) => {
+    if (!testRepoPath) {
+      throw new Error('Test repo not initialized');
+    }
+
+    const lines = Array.from({ length: 300 }, (_, i) => `line ${i + 1}`);
+    fs.writeFileSync(path.join(testRepoPath, 'zz-long.txt'), lines.join('\n') + '\n');
+    await execAsync(`cd "${testRepoPath}" && git add zz-long.txt`);
+    await stopServer();
+    await startServer();
+    await openStackedView(page);
+
+    const codeView = page.locator('.stacked-code-view').first();
+    await codeView.click();
+    await page.keyboard.press('ArrowDown');
+    await expect.poll(() => codeView.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+  });
+
   test('should display provided title in header', async ({ page }) => {
     // Restart server with a custom title
     await stopServer();

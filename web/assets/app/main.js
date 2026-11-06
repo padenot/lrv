@@ -11611,7 +11611,7 @@ var NavigationMethods = class {
 			if (activeElement && (activeElement.tagName === "TEXTAREA" || activeElement.tagName === "INPUT" || activeElement.isContentEditable)) return;
 			if (this.currentWidget !== null) return;
 			const action = this.matchKeyboardShortcut(e);
-			if (!action) return;
+			if (!action || !this.canRunShortcut(action)) return;
 			e.preventDefault();
 			switch (action) {
 				case "nextFile":
@@ -11653,6 +11653,9 @@ var NavigationMethods = class {
 				case "previousCommit": this.previousCommit();
 			}
 		});
+	}
+	canRunShortcut(action) {
+		return !(action === "lineDown" || action === "lineUp" || action === "openComment" || action === "clearFocus") || !this.isStacked && !!this.editor;
 	}
 	toggleView() {
 		this.isInline = !this.isInline;
