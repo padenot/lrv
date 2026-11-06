@@ -4,6 +4,7 @@ import { promisify } from 'util';
 import { exec } from 'child_process';
 import * as path from 'path';
 import * as os from 'os';
+import { isolateConfig } from '../test-config';
 
 const execAsync = promisify(exec);
 
@@ -111,15 +112,7 @@ test.describe('Editor Font', () => {
   test('rejects non-monospace config font and uses monospace fallback', async ({ page }) => {
     const url = (serverUrl ?? 'http://localhost:9999') + '/';
 
-    // Set a proportional font via the config API
-    await page.request.put(url + 'api/config', {
-      data: {
-        color_scheme: 'vs-dark',
-        font: 'Inter',
-        split_view: true,
-        auto_close_tab: true,
-      },
-    });
+    await isolateConfig(page, { font: 'Inter' });
 
     // Load the app with the bad config
     await page.goto(url, { waitUntil: 'load' });
@@ -160,5 +153,44 @@ test.describe('Editor Font', () => {
     });
 
     expect(fontFamily.toLowerCase()).not.toContain('inter');
+  });
+
+  test('ligatures setting applies to Monaco and stacked views', async ({ page }) => {
+    const url = (serverUrl ?? 'http://localhost:9999') + '/';
+    const disabled = '"calt" 0, "liga" 0';
+
+    const monacoFeatures = () =>
+      page.evaluate(() => {
+        const lines = document.querySelector('.monaco-editor .view-lines');
+        return lines ? getComputedStyle(lines).fontFeatureSettings : '';
+      });
+    const stackedFeatures = () =>
+      page
+        .locator('.stacked-code-view diffs-container [data-line]')
+        .first()
+        .evaluate((line) => getComputedStyle(line).fontFeatureSettings);
+    const setLigatures = async (on: boolean) => {
+      await page.locator('#settings-btn').click();
+      await page.locator('#ligatures').setChecked(on);
+      await page.locator('.help-modal .save-btn').click();
+      await expect(page.locator('#ligatures')).toHaveCount(0);
+    };
+
+    const savedConfig = await isolateConfig(page);
+    await page.goto(url, { waitUntil: 'load' });
+    await page.waitForSelector('.monaco-editor', { state: 'attached', timeout: 15000 });
+    await page.evaluate(() => (window as any).__APP?.loadFile?.(0));
+    await page.waitForSelector('.monaco-editor .view-lines', { timeout: 15000 });
+    await expect.poll(monacoFeatures).toBe(disabled);
+
+    await setLigatures(true);
+    await expect.poll(monacoFeatures).toBe('"calt", "liga"');
+
+    await page.locator('#toggle-stacked').click();
+    await expect.poll(stackedFeatures).toBe('normal');
+
+    await setLigatures(false);
+    await expect.poll(stackedFeatures).toBe(disabled);
+    expect(savedConfig().ligatures).toBe(false);
   });
 });

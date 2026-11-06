@@ -989,6 +989,7 @@ export class StackedViewMethods {
     return `
       :host {
         --diffs-font-family: var(--font-mono);
+        --diffs-font-features: ${this.config.ligatures ? 'normal' : '"liga" 0, "calt" 0'};
         --diffs-light-bg: var(--bg-primary);
         --diffs-dark-bg: var(--bg-primary);
         --diffs-light: var(--text-primary);

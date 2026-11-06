@@ -8,6 +8,7 @@ fn test_config_defaults() {
     assert!(config.split_view);
     assert!(config.auto_close_tab);
     assert!(!config.word_wrap);
+    assert!(!config.ligatures);
     assert!(!config.auto_fetch_comments);
 }
 
@@ -21,6 +22,7 @@ fn test_config_serde() {
         auto_close_tab: false,
         stacked_view: false,
         word_wrap: true,
+        ligatures: true,
         auto_fetch_comments: true,
     };
 
@@ -36,6 +38,7 @@ fn test_config_serde() {
     assert!(!deserialized.split_view);
     assert!(!deserialized.auto_close_tab);
     assert!(deserialized.word_wrap);
+    assert!(deserialized.ligatures);
 }
 
 /// Test config with missing fields (should use defaults)

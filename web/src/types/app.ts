@@ -41,6 +41,7 @@ export type AppConfig = {
   stacked_view: boolean;
   auto_close_tab: boolean;
   word_wrap: boolean;
+  ligatures: boolean;
   auto_fetch_comments: boolean;
 };
 
