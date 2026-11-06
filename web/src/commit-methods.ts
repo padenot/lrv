@@ -12,7 +12,6 @@ import type { AppContext } from './types/app';
 import type { ReviewNote } from './review-notes';
 
 export class CommitMethods {
-  declare _commitPopoverEl: HTMLElement | null;
   declare commentManager: AppContext['commentManager'];
   declare reviewNoteManager: AppContext['reviewNoteManager'];
   declare currentFileIsCommit: boolean;
@@ -81,110 +80,6 @@ export class CommitMethods {
       ta.focus();
       autoResize();
     }, 0);
-  }
-
-  showCommitMessagePopover(anchorEl: HTMLElement, message: string, rev: string) {
-    // Toggle if already visible
-    if (this._commitPopoverEl) {
-      this._commitPopoverEl.remove();
-      this._commitPopoverEl = null;
-      return;
-    }
-    const pop = el('div', { className: 'commit-popover' });
-    const first = message.split('\n')[0] || '(no message)';
-    const title = el('div', {
-      className: 'commit-popover-title',
-      text: rev ? `${rev}: ${first}` : first,
-    });
-    const body = el('div', { className: 'commit-popover-body' });
-    appendLinkifiedText(body, message);
-    pop.appendChild(title);
-    pop.appendChild(body);
-
-    // Inline comment box
-    const form = el('div');
-    form.style.marginTop = '10px';
-    const ta = el('textarea');
-    ta.rows = 3;
-    ta.style.width = '100%';
-    ta.placeholder = 'Comment on this commit…';
-    const controls = el('div');
-    controls.style.display = 'flex';
-    controls.style.gap = '8px';
-    controls.style.marginTop = '6px';
-    const addBtn = el('button', { className: 'btn-secondary', text: 'Add Comment' });
-    const cancelBtn = el('button', { className: 'btn-secondary', text: 'Cancel' });
-    controls.appendChild(addBtn);
-    controls.appendChild(cancelBtn);
-    form.appendChild(ta);
-    form.appendChild(controls);
-    pop.appendChild(form);
-    document.body.appendChild(pop);
-    // Position near the anchor
-    const r = anchorEl.getBoundingClientRect();
-    const pad = 6;
-    let top = r.bottom + pad;
-    let left = r.left;
-    // Clamp to viewport
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    // If too far right, adjust left
-    const rect = pop.getBoundingClientRect();
-    if (left + rect.width + pad > vw) {
-      left = Math.max(pad, vw - rect.width - pad);
-    }
-    if (top + rect.height + pad > vh) {
-      top = Math.max(pad, r.top - rect.height - pad);
-    }
-    pop.style.left = `${Math.max(pad, left)}px`;
-    pop.style.top = `${Math.max(pad, top)}px`;
-
-    const onDocClick = (e: MouseEvent) => {
-      const target = e.target as Node | null;
-      if (!target || (!pop.contains(target) && target !== anchorEl)) {
-        cleanup();
-      }
-    };
-    const onEsc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        cleanup();
-      }
-    };
-    const cleanup = () => {
-      if (this._commitPopoverEl) {
-        this._commitPopoverEl.remove();
-        this._commitPopoverEl = null;
-      }
-      document.removeEventListener('click', onDocClick, true);
-      document.removeEventListener('keydown', onEsc, true);
-    };
-    this._commitPopoverEl = pop;
-    setTimeout(() => {
-      document.addEventListener('click', onDocClick, true);
-      document.addEventListener('keydown', onEsc, true);
-    }, 0);
-
-    // Wire buttons
-    cancelBtn.onclick = (e) => {
-      e.preventDefault();
-      cleanup();
-    };
-    addBtn.onclick = (e) => {
-      e.preventDefault();
-      const body = ta.value.trim();
-      if (!body) {
-        ta.focus();
-        return;
-      }
-      const comment = {
-        file: '(commit)',
-        line: 1,
-        side: 'new' as const,
-        body,
-      };
-      this.commentManager.addComment(comment);
-      cleanup();
-    };
   }
 
   loadCommitView() {

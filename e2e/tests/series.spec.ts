@@ -403,7 +403,7 @@ test.describe('Series mode E2E', () => {
 
     await expect(page.locator('.commit-view')).toBeVisible();
     await expect(page.locator('.commit-message-card')).toContainText('Modify alpha');
-    await expect(page.locator('#project-info .commit-message')).toContainText('Modify alpha');
+    await expect(page.locator('#commit-bar-title')).toContainText('Modify alpha');
     await expect(page.locator('li[data-commit="1"]')).toHaveClass(/active/);
   });
 

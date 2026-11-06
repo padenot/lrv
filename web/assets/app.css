@@ -254,48 +254,6 @@ body {
   overflow: hidden;
 }
 
-.commit-message {
-  color: var(--text-secondary);
-  font-size: 12px;
-  max-width: 40vw;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  cursor: pointer;
-}
-.commit-message:hover {
-  text-decoration: underline;
-}
-
-.auto-link {
-  color: var(--accent-color);
-  text-decoration: underline;
-}
-
-/* Popover for full commit message */
-.commit-popover {
-  position: fixed;
-  background: var(--bg-elevated);
-  color: var(--text-primary);
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  box-shadow: var(--shadow-md);
-  padding: 10px 12px;
-  z-index: 2147483647;
-  max-width: 60vw;
-  max-height: 50vh;
-  overflow: auto;
-}
-.commit-popover .commit-popover-title {
-  font-weight: 600;
-  margin-bottom: 6px;
-}
-.commit-popover .commit-popover-body {
-  white-space: pre-wrap;
-  font-family: var(--font-mono);
-  font-size: 12px;
-}
-
 .git-branch {
   color: var(--accent-color);
 }

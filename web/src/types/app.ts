@@ -196,7 +196,6 @@ export interface AppContext {
   originalModel: editor.ITextModel | null;
   modifiedModel: editor.ITextModel | null;
   _eagerPrefetchStarted: boolean;
-  _commitPopoverEl: HTMLElement | null;
   currentFileIsCommit: boolean;
   _commitViewEl: HTMLElement | null;
   collapsedDirs: Set<string>;
@@ -228,7 +227,6 @@ export interface AppContext {
   clearStackedView(): void;
   loadCommitView(): void;
   showCommitLineCommentDialog(lineNum: number): void;
-  showCommitMessagePopover(anchorEl: HTMLElement, message: string, rev: string): void;
   applyThemeToUI(themeName: string): void;
   showSettingsModal(): void;
   showSubmitConfirmation(): Promise<void>;

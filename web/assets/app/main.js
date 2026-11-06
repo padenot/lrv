@@ -12043,98 +12043,6 @@ var CommitMethods = class {
 			autoResize();
 		}, 0);
 	}
-	showCommitMessagePopover(anchorEl, message, rev) {
-		if (this._commitPopoverEl) {
-			this._commitPopoverEl.remove();
-			this._commitPopoverEl = null;
-			return;
-		}
-		const pop = el("div", { className: "commit-popover" });
-		const first = message.split("\n")[0] || "(no message)";
-		const title = el("div", {
-			className: "commit-popover-title",
-			text: rev ? `${rev}: ${first}` : first
-		});
-		const body = el("div", { className: "commit-popover-body" });
-		appendLinkifiedText(body, message);
-		pop.appendChild(title);
-		pop.appendChild(body);
-		const form = el("div");
-		form.style.marginTop = "10px";
-		const ta = el("textarea");
-		ta.rows = 3;
-		ta.style.width = "100%";
-		ta.placeholder = "Comment on this commit…";
-		const controls = el("div");
-		controls.style.display = "flex";
-		controls.style.gap = "8px";
-		controls.style.marginTop = "6px";
-		const addBtn = el("button", {
-			className: "btn-secondary",
-			text: "Add Comment"
-		});
-		const cancelBtn = el("button", {
-			className: "btn-secondary",
-			text: "Cancel"
-		});
-		controls.appendChild(addBtn);
-		controls.appendChild(cancelBtn);
-		form.appendChild(ta);
-		form.appendChild(controls);
-		pop.appendChild(form);
-		document.body.appendChild(pop);
-		const r = anchorEl.getBoundingClientRect();
-		const pad = 6;
-		let top = r.bottom + pad;
-		let left = r.left;
-		const vw = window.innerWidth;
-		const vh = window.innerHeight;
-		const rect = pop.getBoundingClientRect();
-		if (left + rect.width + pad > vw) left = Math.max(pad, vw - rect.width - pad);
-		if (top + rect.height + pad > vh) top = Math.max(pad, r.top - rect.height - pad);
-		pop.style.left = `${Math.max(pad, left)}px`;
-		pop.style.top = `${Math.max(pad, top)}px`;
-		const onDocClick = (e) => {
-			const target = e.target;
-			if (!target || !pop.contains(target) && target !== anchorEl) cleanup();
-		};
-		const onEsc = (e) => {
-			if (e.key === "Escape") cleanup();
-		};
-		const cleanup = () => {
-			if (this._commitPopoverEl) {
-				this._commitPopoverEl.remove();
-				this._commitPopoverEl = null;
-			}
-			document.removeEventListener("click", onDocClick, true);
-			document.removeEventListener("keydown", onEsc, true);
-		};
-		this._commitPopoverEl = pop;
-		setTimeout(() => {
-			document.addEventListener("click", onDocClick, true);
-			document.addEventListener("keydown", onEsc, true);
-		}, 0);
-		cancelBtn.onclick = (e) => {
-			e.preventDefault();
-			cleanup();
-		};
-		addBtn.onclick = (e) => {
-			e.preventDefault();
-			const body = ta.value.trim();
-			if (!body) {
-				ta.focus();
-				return;
-			}
-			const comment = {
-				file: "(commit)",
-				line: 1,
-				side: "new",
-				body
-			};
-			this.commentManager.addComment(comment);
-			cleanup();
-		};
-	}
 	loadCommitView() {
 		this.resetFileView();
 		this.currentFileIsCommit = true;
@@ -14528,7 +14436,6 @@ var MonacoApp = class {
 	originalModel;
 	modifiedModel;
 	_eagerPrefetchStarted;
-	_commitPopoverEl;
 	currentFileIsCommit;
 	_commitViewEl;
 	collapsedDirs;
@@ -14579,7 +14486,6 @@ var MonacoApp = class {
 		this.originalModel = null;
 		this.modifiedModel = null;
 		this._eagerPrefetchStarted = false;
-		this._commitPopoverEl = null;
 		this.currentFileIsCommit = false;
 		this._commitViewEl = null;
 		this.collapsedDirs = /* @__PURE__ */ new Set();
@@ -14858,25 +14764,6 @@ var MonacoApp = class {
 				className: "project-info-value git-branch",
 				text: this.context.git_branch
 			}));
-		}
-		if (this.diff && (this.diff.commit_message || this.diff.commit_hash)) {
-			container.appendChild(el("span", {
-				className: "project-info-separator",
-				text: "·"
-			}));
-			const mm = el("span", { className: "commit-message" });
-			const rev = this.diff.commit_hash ? `${this.diff.commit_hash.substring(0, 7)}: ` : "";
-			const firstLine = (this.diff.commit_message ?? "").split("\n")[0];
-			appendLinkifiedText(mm, rev + firstLine);
-			if (this.diff.commit_message) mm.title = this.diff.commit_message;
-			mm.addEventListener("click", (ev) => {
-				if (ev.target?.closest("a")) {
-					ev.stopPropagation();
-					return;
-				}
-				this.showCommitMessagePopover(ev.currentTarget, this.diff?.commit_message ?? "", this.diff?.commit_hash ?? "");
-			});
-			container.appendChild(mm);
 		}
 	}
 	setupUI() {
