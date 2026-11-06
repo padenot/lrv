@@ -13678,7 +13678,6 @@ var StackedViewMethods = class {
 	stackedScrollUnsubscribe;
 	stackedRenderToken;
 	stackedHydratedFiles;
-	stackedParseDiffFromFile;
 	stackedLastRangeSelection;
 	showStackedView() {
 		this.resetFileView();
@@ -13772,7 +13771,6 @@ var StackedViewMethods = class {
 		this.stackedItems = /* @__PURE__ */ new Map();
 		this.stackedFileMetadata = /* @__PURE__ */ new Map();
 		this.stackedHydratedFiles = /* @__PURE__ */ new Set();
-		this.stackedParseDiffFromFile = null;
 		this.stackedLastRangeSelection = null;
 		this.stackedDraft = null;
 		this.stackedRenderToken = (this.stackedRenderToken ?? 0) + 1;
@@ -13794,7 +13792,6 @@ var StackedViewMethods = class {
 		}
 		const { CodeView, parsePatchFiles, parseDiffFromFile, getOrCreateWorkerPoolSingleton } = await loadDiffsRuntime();
 		if (!this.isStacked || !container.isConnected || renderToken !== this.stackedRenderToken || generation !== this.commitLoadGeneration) return;
-		this.stackedParseDiffFromFile = parseDiffFromFile;
 		const codeViewRoot = el("div", { className: "stacked-code-view" });
 		container.appendChild(codeViewRoot);
 		const binaryFiles = this.files.filter((file) => file.is_binary);
@@ -13841,6 +13838,12 @@ var StackedViewMethods = class {
 			onSelectedLinesChange: (selection) => this.rememberStackedSelection(selection),
 			onLineSelected: (range, context) => this.showStackedDraftFromSelection(this.pathFromCodeViewContext(context), range),
 			renderAnnotation: (annotation) => this.renderStackedAnnotation(annotation),
+			onPostRender: (_node, _instance, phase, context) => {
+				if (phase !== "unmount") {
+					const path = this.pathFromCodeViewContext(context);
+					this.hydrateStackedFile(this.files.find((file) => file.path === path), parseDiffFromFile);
+				}
+			},
 			unsafeCSS: this.stackedDiffsCss()
 		}, workerPool);
 		this.stackedCodeView = view;
@@ -13851,7 +13854,6 @@ var StackedViewMethods = class {
 		this.stackedScrollUnsubscribe = view.subscribeToScroll((scrollTop) => {
 			this.syncCurrentFileFromStackedScroll(scrollTop);
 		});
-		this.hydrateStackedFile(this.files[this.currentFileIndex], parseDiffFromFile);
 	}
 	buildCodeViewItem(file, parsePatchFiles) {
 		if (file.is_binary) return null;
@@ -14274,7 +14276,6 @@ var StackedViewMethods = class {
 			this.currentFileIndex = bestIdx;
 			this.currentFileIsCommit = false;
 			this.renderFileList();
-			if (this.stackedParseDiffFromFile) this.hydrateStackedFile(this.files[bestIdx], this.stackedParseDiffFromFile);
 		}
 	}
 	toUnifiedPatch(file) {

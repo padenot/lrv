@@ -1048,6 +1048,27 @@ test.describe('Review Workflow E2E', () => {
     await expect(page.locator('#comment-count')).toHaveText('0');
   });
 
+  test('stacked mode can expand unmodified lines in the last file', async ({ page }) => {
+    if (!testRepoPath) {
+      throw new Error('Test repo not initialized');
+    }
+    // The last file can't scroll its header to the top, so it never becomes
+    // the current file.
+    const lines = Array.from({ length: 60 }, (_, i) => `line ${i + 1}`);
+    fs.writeFileSync(path.join(testRepoPath, 'zz-long.txt'), lines.join('\n') + '\n');
+    await execAsync(`cd "${testRepoPath}" && git add zz-long.txt && git commit -q -m long`);
+    lines[49] = 'changed line 50';
+    fs.writeFileSync(path.join(testRepoPath, 'zz-long.txt'), lines.join('\n') + '\n');
+    await stopServer();
+    await startServer();
+
+    await openStackedView(page);
+    const lastFile = page.locator('.stacked-code-view diffs-container', { hasText: 'zz-long.txt' });
+    await expect(lastFile.locator('[data-expand-button]').first()).toBeAttached({
+      timeout: 5000,
+    });
+  });
+
   test('stacked mode should create a range comment from selected lines and a line number click', async ({
     page,
   }) => {
