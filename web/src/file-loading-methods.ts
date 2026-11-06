@@ -253,6 +253,7 @@ export class FileLoadingMethods {
         lineDecorationsWidth: 0,
         fontSize: 14,
         fontFamily: mono,
+        fontLigatures: this.config.ligatures,
         lineNumbers: 'on',
         lineNumbersMinChars: 1,
         wordWrap: this.config.word_wrap ? 'on' : 'off',
@@ -334,6 +335,7 @@ export class FileLoadingMethods {
     diffEditor.updateOptions({
       renderSideBySide,
       fontFamily: mono,
+      fontLigatures: this.config.ligatures,
       wordWrap: this.config.word_wrap ? 'on' : 'off',
       glyphMargin: true,
       folding: false,

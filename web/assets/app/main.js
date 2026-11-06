@@ -1142,6 +1142,7 @@ const DEFAULT_APP_CONFIG = {
 	auto_close_tab: true,
 	stacked_view: false,
 	word_wrap: false,
+	ligatures: false,
 	auto_fetch_comments: false
 };
 function resolveAppConfig(input) {
@@ -1152,6 +1153,7 @@ function resolveAppConfig(input) {
 		auto_close_tab: input.auto_close_tab ?? DEFAULT_APP_CONFIG.auto_close_tab,
 		stacked_view: input.stacked_view ?? DEFAULT_APP_CONFIG.stacked_view,
 		word_wrap: input.word_wrap ?? DEFAULT_APP_CONFIG.word_wrap,
+		ligatures: input.ligatures ?? DEFAULT_APP_CONFIG.ligatures,
 		auto_fetch_comments: input.auto_fetch_comments ?? DEFAULT_APP_CONFIG.auto_fetch_comments
 	};
 }
@@ -11306,6 +11308,7 @@ var FileLoadingMethods = class {
 			lineDecorationsWidth: 0,
 			fontSize: 14,
 			fontFamily: mono,
+			fontLigatures: this.config.ligatures,
 			lineNumbers: "on",
 			lineNumbersMinChars: 1,
 			wordWrap: this.config.word_wrap ? "on" : "off",
@@ -11360,6 +11363,7 @@ var FileLoadingMethods = class {
 		diffEditor.updateOptions({
 			renderSideBySide,
 			fontFamily: mono,
+			fontLigatures: this.config.ligatures,
 			wordWrap: this.config.word_wrap ? "on" : "off",
 			glyphMargin: true,
 			folding: false,
@@ -12848,6 +12852,7 @@ var DialogMethods = class {
 		const currentSplitView = this.config.split_view;
 		const currentAutoCloseTab = this.config.auto_close_tab;
 		const currentWordWrap = this.config.word_wrap;
+		const currentLigatures = this.config.ligatures;
 		const currentAutoFetch = this.config.auto_fetch_comments;
 		if (window.DEBUG) console.info("Settings modal - current values:", {
 			currentColorScheme,
@@ -12925,6 +12930,15 @@ var DialogMethods = class {
 			name: "word_wrap",
 			checked: currentWordWrap
 		} }), el("span", { text: "Wrap long lines instead of scrolling horizontally" })])]);
+		const ligaturesField = el("div", { className: "settings-field" }, [el("label", {
+			attrs: { for: "ligatures" },
+			text: "Ligatures"
+		}), el("div", { className: "checkbox-wrapper" }, [el("input", { attrs: {
+			type: "checkbox",
+			id: "ligatures",
+			name: "ligatures",
+			checked: currentLigatures
+		} }), el("span", { text: "Render font ligatures such as => and != as single glyphs" })])]);
 		const autoFetchField = el("div", { className: "settings-field" }, [el("label", {
 			attrs: { for: "auto-fetch-comments" },
 			text: "Existing Comments"
@@ -12938,6 +12952,7 @@ var DialogMethods = class {
 		form.appendChild(fontField);
 		form.appendChild(splitViewField);
 		form.appendChild(wordWrapField);
+		form.appendChild(ligaturesField);
 		form.appendChild(autoCloseField);
 		form.appendChild(autoFetchField);
 		body.appendChild(form);
@@ -12955,6 +12970,7 @@ var DialogMethods = class {
 				split_view: formData.get("split_view") === "on",
 				auto_close_tab: formData.get("auto_close_tab") === "on",
 				word_wrap: formData.get("word_wrap") === "on",
+				ligatures: formData.get("ligatures") === "on",
 				auto_fetch_comments: formData.get("auto_fetch_comments") === "on",
 				stacked_view: this.config.stacked_view
 			});
@@ -14333,6 +14349,7 @@ var StackedViewMethods = class {
 		return `
       :host {
         --diffs-font-family: var(--font-mono);
+        --diffs-font-features: ${this.config.ligatures ? "normal" : "\"liga\" 0, \"calt\" 0"};
         --diffs-light-bg: var(--bg-primary);
         --diffs-dark-bg: var(--bg-primary);
         --diffs-light: var(--text-primary);

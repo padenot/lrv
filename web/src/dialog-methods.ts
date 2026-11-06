@@ -132,6 +132,7 @@ export class DialogMethods {
     const currentSplitView = this.config.split_view;
     const currentAutoCloseTab = this.config.auto_close_tab;
     const currentWordWrap = this.config.word_wrap;
+    const currentLigatures = this.config.ligatures;
     const currentAutoFetch = this.config.auto_fetch_comments;
 
     if (window.DEBUG) {
@@ -253,6 +254,21 @@ export class DialogMethods {
       ]),
     ]);
 
+    const ligaturesField = el('div', { className: 'settings-field' }, [
+      el('label', { attrs: { for: 'ligatures' }, text: 'Ligatures' }),
+      el('div', { className: 'checkbox-wrapper' }, [
+        el('input', {
+          attrs: {
+            type: 'checkbox',
+            id: 'ligatures',
+            name: 'ligatures',
+            checked: currentLigatures,
+          },
+        }),
+        el('span', { text: 'Render font ligatures such as => and != as single glyphs' }),
+      ]),
+    ]);
+
     const autoFetchField = el('div', { className: 'settings-field' }, [
       el('label', { attrs: { for: 'auto-fetch-comments' }, text: 'Existing Comments' }),
       el('div', { className: 'checkbox-wrapper' }, [
@@ -274,6 +290,7 @@ export class DialogMethods {
     form.appendChild(fontField);
     form.appendChild(splitViewField);
     form.appendChild(wordWrapField);
+    form.appendChild(ligaturesField);
     form.appendChild(autoCloseField);
     form.appendChild(autoFetchField);
 
@@ -298,6 +315,7 @@ export class DialogMethods {
         split_view: formData.get('split_view') === 'on',
         auto_close_tab: formData.get('auto_close_tab') === 'on',
         word_wrap: formData.get('word_wrap') === 'on',
+        ligatures: formData.get('ligatures') === 'on',
         auto_fetch_comments: formData.get('auto_fetch_comments') === 'on',
         stacked_view: this.config.stacked_view,
       });
