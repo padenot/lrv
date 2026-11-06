@@ -1344,7 +1344,8 @@ test.describe('Review Workflow E2E', () => {
     await expect
       .poll(async () => {
         await page.mouse.wheel(0, 2000);
-        const box = await lastRow.boundingBox();
+        // The tree virtualizes rows, so the last one is only in the DOM once scrolled to.
+        const box = (await lastRow.count()) ? await lastRow.boundingBox() : null;
         return box ? box.y + box.height : Infinity;
       })
       .toBeLessThanOrEqual(treeBox.y + treeBox.height);
