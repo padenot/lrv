@@ -973,6 +973,15 @@ test.describe('Review Workflow E2E', () => {
     await expect(page.locator('#comment-count')).toHaveText('0');
   });
 
+  test('preloader hides once the stacked view renders at startup', async ({ page }) => {
+    await isolateConfig(page, { stacked_view: true });
+    await page.goto((serverUrl ?? 'http://localhost:9999') + '/');
+    await page.locator('.stacked-code-view diffs-container').first().waitFor({ timeout: 10000 });
+    // The preloader falls back to hiding after 5 s, so this must beat it.
+    await expect(page.locator('#preloader-overlay')).toHaveCount(0, { timeout: 2000 });
+    expect(await page.evaluate(() => (window as any).__APP_READY)).toBe(true);
+  });
+
   test('stacked mode should add, edit, and delete a comment', async ({ page }) => {
     await openStackedView(page);
 
@@ -1046,6 +1055,27 @@ test.describe('Review Workflow E2E', () => {
 
     await expect(page.locator('.stacked-comment-form')).toHaveCount(0);
     await expect(page.locator('#comment-count')).toHaveText('0');
+  });
+
+  test('stacked mode can expand unmodified lines in the last file', async ({ page }) => {
+    if (!testRepoPath) {
+      throw new Error('Test repo not initialized');
+    }
+    // The last file can't scroll its header to the top, so it never becomes
+    // the current file.
+    const lines = Array.from({ length: 60 }, (_, i) => `line ${i + 1}`);
+    fs.writeFileSync(path.join(testRepoPath, 'zz-long.txt'), lines.join('\n') + '\n');
+    await execAsync(`cd "${testRepoPath}" && git add zz-long.txt && git commit -q -m long`);
+    lines[49] = 'changed line 50';
+    fs.writeFileSync(path.join(testRepoPath, 'zz-long.txt'), lines.join('\n') + '\n');
+    await stopServer();
+    await startServer();
+
+    await openStackedView(page);
+    const lastFile = page.locator('.stacked-code-view diffs-container', { hasText: 'zz-long.txt' });
+    await expect(lastFile.locator('[data-expand-button]').first()).toBeAttached({
+      timeout: 5000,
+    });
   });
 
   test('stacked mode should create a range comment from selected lines and a line number click', async ({

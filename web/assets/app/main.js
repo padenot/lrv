@@ -1352,6 +1352,21 @@ function markAppReady() {
 			childList: true,
 			subtree: true
 		});
+		return;
+	}
+	const stacked = document.getElementById("stacked-container");
+	if (stacked && stacked.style.display !== "none") {
+		const obs = new MutationObserver(() => {
+			if (stacked.querySelector(STACKED_READY_SELECTOR)) {
+				recordFirstLineVisible();
+				setAppReady("[app] APP_READY: observer saw stacked diff");
+				obs.disconnect();
+			}
+		});
+		obs.observe(stacked, {
+			childList: true,
+			subtree: true
+		});
 	}
 }
 //#endregion
@@ -1399,7 +1414,7 @@ function compareSegment(left, right) {
 	if (left === right) return 0;
 	return left < right ? -1 : 1;
 }
-/** Matches the default ordering used by @pierre/trees for file paths. */
+/** Orders both the stacked view and the file tree, so they must stay identical. */
 function compareFilePaths(left, right) {
 	if (left === right) return 0;
 	const leftSegments = left.split("/");
@@ -10865,6 +10880,7 @@ var FileListMethods = class {
 		const tree = new FileTree({
 			paths: this.files.map((file) => file.path),
 			flattenEmptyDirectories: true,
+			sort: (left, right) => compareFilePaths(left.path, right.path),
 			initialExpansion: this.fileTreeExpansion ?? "open",
 			initialSelectedPaths: selectedPath && !this.currentFileIsCommit ? [selectedPath] : [],
 			gitStatus: this.files.map((file) => ({
@@ -13694,7 +13710,6 @@ var StackedViewMethods = class {
 	stackedScrollUnsubscribe;
 	stackedRenderToken;
 	stackedHydratedFiles;
-	stackedParseDiffFromFile;
 	stackedLastRangeSelection;
 	showStackedView() {
 		this.resetFileView();
@@ -13788,7 +13803,6 @@ var StackedViewMethods = class {
 		this.stackedItems = /* @__PURE__ */ new Map();
 		this.stackedFileMetadata = /* @__PURE__ */ new Map();
 		this.stackedHydratedFiles = /* @__PURE__ */ new Set();
-		this.stackedParseDiffFromFile = null;
 		this.stackedLastRangeSelection = null;
 		this.stackedDraft = null;
 		this.stackedRenderToken = (this.stackedRenderToken ?? 0) + 1;
@@ -13810,7 +13824,6 @@ var StackedViewMethods = class {
 		}
 		const { CodeView, parsePatchFiles, parseDiffFromFile, getOrCreateWorkerPoolSingleton } = await loadDiffsRuntime();
 		if (!this.isStacked || !container.isConnected || renderToken !== this.stackedRenderToken || generation !== this.commitLoadGeneration) return;
-		this.stackedParseDiffFromFile = parseDiffFromFile;
 		const codeViewRoot = el("div", { className: "stacked-code-view" });
 		container.appendChild(codeViewRoot);
 		const binaryFiles = this.files.filter((file) => file.is_binary);
@@ -13857,6 +13870,12 @@ var StackedViewMethods = class {
 			onSelectedLinesChange: (selection) => this.rememberStackedSelection(selection),
 			onLineSelected: (range, context) => this.showStackedDraftFromSelection(this.pathFromCodeViewContext(context), range),
 			renderAnnotation: (annotation) => this.renderStackedAnnotation(annotation),
+			onPostRender: (_node, _instance, phase, context) => {
+				if (phase !== "unmount") {
+					const path = this.pathFromCodeViewContext(context);
+					this.hydrateStackedFile(this.files.find((file) => file.path === path), parseDiffFromFile);
+				}
+			},
 			unsafeCSS: this.stackedDiffsCss()
 		}, workerPool);
 		this.stackedCodeView = view;
@@ -13867,7 +13886,6 @@ var StackedViewMethods = class {
 		this.stackedScrollUnsubscribe = view.subscribeToScroll((scrollTop) => {
 			this.syncCurrentFileFromStackedScroll(scrollTop);
 		});
-		this.hydrateStackedFile(this.files[this.currentFileIndex], parseDiffFromFile);
 	}
 	buildCodeViewItem(file, parsePatchFiles) {
 		if (file.is_binary) return null;
@@ -14290,7 +14308,6 @@ var StackedViewMethods = class {
 			this.currentFileIndex = bestIdx;
 			this.currentFileIsCommit = false;
 			this.renderFileList();
-			if (this.stackedParseDiffFromFile) this.hydrateStackedFile(this.files[bestIdx], this.stackedParseDiffFromFile);
 		}
 	}
 	toUnifiedPatch(file) {

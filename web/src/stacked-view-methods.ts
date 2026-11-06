@@ -115,7 +115,6 @@ export class StackedViewMethods {
   private stackedScrollUnsubscribe: (() => void) | null;
   private stackedRenderToken: number;
   private stackedHydratedFiles: Set<string>;
-  private stackedParseDiffFromFile: ParseDiffFromFile | null;
   private stackedLastRangeSelection: CodeViewLineSelection | null;
 
   showStackedView() {
@@ -240,7 +239,6 @@ export class StackedViewMethods {
     this.stackedItems = new Map();
     this.stackedFileMetadata = new Map();
     this.stackedHydratedFiles = new Set();
-    this.stackedParseDiffFromFile = null;
     this.stackedLastRangeSelection = null;
     this.stackedDraft = null;
     this.stackedRenderToken = (this.stackedRenderToken ?? 0) + 1;
@@ -274,7 +272,6 @@ export class StackedViewMethods {
     ) {
       return;
     }
-    this.stackedParseDiffFromFile = parseDiffFromFile;
 
     const codeViewRoot = el('div', { className: 'stacked-code-view' });
     container.appendChild(codeViewRoot);
@@ -334,6 +331,17 @@ export class StackedViewMethods {
           this.showStackedDraftFromSelection(this.pathFromCodeViewContext(context), range),
         renderAnnotation: (annotation) =>
           this.renderStackedAnnotation(annotation as DiffLineAnnotation<StackedAnnotation>),
+        // Expanding unmodified lines needs the full file contents, so load
+        // them for every file the virtualizer renders.
+        onPostRender: (_node, _instance, phase, context) => {
+          if (phase !== 'unmount') {
+            const path = this.pathFromCodeViewContext(context);
+            void this.hydrateStackedFile(
+              this.files.find((file) => file.path === path),
+              parseDiffFromFile,
+            );
+          }
+        },
         unsafeCSS: this.stackedDiffsCss(),
       },
       workerPool,
@@ -348,7 +356,6 @@ export class StackedViewMethods {
     this.stackedScrollUnsubscribe = view.subscribeToScroll((scrollTop) => {
       this.syncCurrentFileFromStackedScroll(scrollTop);
     });
-    void this.hydrateStackedFile(this.files[this.currentFileIndex], parseDiffFromFile);
   }
 
   private buildCodeViewItem(
@@ -899,9 +906,6 @@ export class StackedViewMethods {
       this.currentFileIndex = bestIdx;
       this.currentFileIsCommit = false;
       this.renderFileList();
-      if (this.stackedParseDiffFromFile) {
-        void this.hydrateStackedFile(this.files[bestIdx], this.stackedParseDiffFromFile);
-      }
     }
   }
 
