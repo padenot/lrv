@@ -963,7 +963,10 @@ test.describe('Review Workflow E2E', () => {
     expect(published.comments[0].body).toBe('Because of the cache.');
     await page.locator('#submit-review').click();
     await expect(page.locator('.submit-review-modal')).toContainText('Already published to D123');
-    await expect(page.locator('.comment-preview')).toHaveCount(1);
+    await expect(page.locator('.comment-preview')).toHaveCount(0);
+    await expect(page.locator('.submit-review-modal')).toContainText(
+      '1 accepted note will be sent',
+    );
     await page.locator('.confirm-submit-btn').click();
     await expect(page.locator('#submit-review')).toHaveText('Review finished');
     expect(sent.comments).toHaveLength(1);
@@ -1012,7 +1015,43 @@ test.describe('Review Workflow E2E', () => {
     await expect(page.locator('.review-note-status-ignored')).toHaveCount(1);
   });
 
-  test('undoing a queued review note removes its comment', async ({ page }) => {
+  test('migrates legacy empty replies into accepted dispositions', async ({ page }) => {
+    await page.route('**/api/review-notes', (route) =>
+      route.fulfill({
+        json: ['test.txt', 'file2.txt', 'file3.txt'].map((file) => ({
+          id: file,
+          file,
+          line: 1,
+          side: 'new',
+          body: 'Legacy note',
+        })),
+      }),
+    );
+    await openApp(page);
+    await page.evaluate(() => {
+      const app = (window as any).__APP;
+      const note = app.reviewNoteManager.getNotesForFile(app.files[0].path)[0];
+      app.commentManager.addComment({
+        file: note.file,
+        line: note.line,
+        side: note.side,
+        body: '',
+        in_reply_to: { id: note.id, body: note.body },
+      });
+    });
+    await expect.poll(() => commentDraftCount(page)).toBe(1);
+    await page.reload();
+    await page.locator('#restore-yes-btn').click();
+    await expect(page.locator('#comment-count')).toHaveText('0');
+    await expect(page.locator('.review-note-status-accepted')).toHaveCount(1);
+    await page.locator('#submit-review').click();
+    await expect(page.locator('.submit-review-modal')).toContainText(
+      '1 accepted note will be sent',
+    );
+    await expect(page.locator('.comment-preview')).toHaveCount(0);
+  });
+
+  test('accepting and undoing a note adds no comments', async ({ page }) => {
     await page.route('**/api/review-notes', (route) =>
       route.fulfill({
         json: ['test.txt', 'file2.txt', 'file3.txt'].map((file) => ({
@@ -1028,7 +1067,7 @@ test.describe('Review Workflow E2E', () => {
     const note = page.locator('.review-note').first();
     await note.locator('button', { hasText: 'Accept' }).click();
     await expect(note).toContainText('Accepted');
-    await expect(page.locator('#comment-count')).toHaveText('1');
+    await expect(page.locator('#comment-count')).toHaveText('0');
     await note.locator('button', { hasText: 'Undo' }).click();
     await expect(note.locator('button', { hasText: 'Accept' })).toHaveCount(1);
     await expect(page.locator('#comment-count')).toHaveText('0');

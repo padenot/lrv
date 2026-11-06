@@ -261,7 +261,7 @@ impl CommentStore {
         let mut stmt = conn.prepare(
             "SELECT s.id, s.updated_at, s.submitted_at, s.working_directory,
                     s.git_branch, s.title, s.commit_hash, s.is_series, s.overall_comment,
-                    (SELECT COUNT(*) FROM comments c WHERE c.session_id = s.id)
+                    (SELECT COUNT(*) FROM comments c WHERE c.session_id = s.id) + CASE WHEN s.submitted_at IS NULL THEN (SELECT COUNT(*) FROM note_dispositions n WHERE n.session_id = s.id AND n.disposition = 'accepted') ELSE 0 END
              FROM sessions s
              ORDER BY s.id DESC
              LIMIT ?1",
@@ -285,7 +285,7 @@ impl CommentStore {
                 .query_row(
                     "SELECT s.id, s.updated_at, s.submitted_at, s.working_directory,
                             s.git_branch, s.title, s.commit_hash, s.is_series, s.overall_comment,
-                            (SELECT COUNT(*) FROM comments c WHERE c.session_id = s.id)
+                            (SELECT COUNT(*) FROM comments c WHERE c.session_id = s.id) + CASE WHEN s.submitted_at IS NULL THEN (SELECT COUNT(*) FROM note_dispositions n WHERE n.session_id = s.id AND n.disposition = 'accepted') ELSE 0 END
                      FROM sessions s WHERE s.id = ?1",
                     params![id],
                     read_session,
@@ -295,9 +295,11 @@ impl CommentStore {
                 .query_row(
                     "SELECT s.id, s.updated_at, s.submitted_at, s.working_directory,
                             s.git_branch, s.title, s.commit_hash, s.is_series, s.overall_comment,
-                            COUNT(c.id)
-                     FROM sessions s JOIN comments c ON c.session_id = s.id
-                     GROUP BY s.id ORDER BY s.id DESC LIMIT 1",
+                            (SELECT COUNT(*) FROM comments c WHERE c.session_id = s.id) +
+                            (SELECT COUNT(*) FROM note_dispositions n WHERE n.session_id = s.id AND n.disposition = 'accepted' AND s.submitted_at IS NULL)
+                     FROM sessions s WHERE EXISTS (SELECT 1 FROM comments c WHERE c.session_id = s.id)
+                        OR EXISTS (SELECT 1 FROM note_dispositions n WHERE n.session_id = s.id)
+                     ORDER BY s.id DESC LIMIT 1",
                     [],
                     read_session,
                 )
@@ -311,7 +313,7 @@ impl CommentStore {
             "SELECT file, line_start, line_end, side, body, commit_idx, in_reply_to
              FROM comments WHERE session_id = ?1 ORDER BY position",
         )?;
-        let comments = stmt
+        let mut comments = stmt
             .query_map(params![session.id], |row| {
                 let line_start: i64 = row.get(1)?;
                 let line_end: i64 = row.get(2)?;
@@ -335,6 +337,31 @@ impl CommentStore {
             .collect::<rusqlite::Result<Vec<_>>>()
             .context("Failed to read stored comments")?;
 
+        // Finish already stored the generated entries; drafts need them synthesized here.
+        if session.submitted_at.is_none() {
+            let mut stmt = conn.prepare(
+                "SELECT note FROM note_dispositions WHERE session_id = ?1 AND disposition = 'accepted' ORDER BY note_id"
+            )?;
+            let notes = stmt
+                .query_map(params![session.id], |row| row.get::<_, String>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            for json in notes {
+                let note: ReviewNote = serde_json::from_str(&json)?;
+                comments.push(Comment {
+                    file: note.file,
+                    line: note.line,
+                    side: note.side,
+                    body: String::new(),
+                    commit_idx: note.commit_idx,
+                    in_reply_to: Some(ReplyTarget {
+                        id: note.id,
+                        author: note.author,
+                        body: note.body,
+                        source_url: note.source_url,
+                    }),
+                });
+            }
+        }
         Ok(Some((session, comments)))
     }
 }
@@ -354,9 +381,11 @@ fn open_existing(path: &Path) -> Result<Option<Connection>> {
     if !path.exists() {
         return Ok(None);
     }
-    Connection::open(path)
-        .map(Some)
-        .with_context(|| format!("Failed to open comment database {}", path.display()))
+    let conn = Connection::open(path)
+        .with_context(|| format!("Failed to open comment database {}", path.display()))?;
+    conn.execute_batch(SCHEMA)?;
+    migrate(&conn)?;
+    Ok(Some(conn))
 }
 
 fn read_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredSession> {

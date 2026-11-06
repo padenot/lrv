@@ -537,6 +537,24 @@ var CommentManager = class {
 		this.listeners.forEach((l) => l());
 	}
 };
+function replyTarget(note) {
+	const target = { body: note.body };
+	if (note.id !== void 0) target.id = note.id;
+	if (note.author !== void 0) target.author = note.author;
+	if (note.source_url !== void 0) target.source_url = note.source_url;
+	return target;
+}
+/** Generated only when handing accepted notes to Finish or recovery. */
+function acceptedNoteEntries(notes) {
+	return notes.filter((note) => note.disposition === "accepted").map((note) => ({
+		file: note.file,
+		line: note.line,
+		side: note.side,
+		body: "",
+		...note.commit_idx === void 0 ? {} : { commit_idx: note.commit_idx },
+		in_reply_to: replyTarget(note)
+	}));
+}
 //#endregion
 //#region web/src/discussions.ts
 var DiscussionError = class extends Error {
@@ -12755,7 +12773,6 @@ var ReviewNoteMethods = class {
 			undo.addEventListener("click", (event) => {
 				event.preventDefault();
 				event.stopPropagation();
-				this.unqueueReviewNote(note);
 				this.reviewNoteManager.updateNote(note, { disposition: "open" });
 			});
 			actions.appendChild(undo);
@@ -12768,7 +12785,7 @@ var ReviewNoteMethods = class {
 		address.addEventListener("click", (event) => {
 			event.preventDefault();
 			event.stopPropagation();
-			this.queueReviewNoteForAgent(note);
+			this.reviewNoteManager.updateNote(note, { disposition: "accepted" });
 		});
 		const reply = el("button", {
 			className: "btn-secondary review-note-btn",
@@ -12816,6 +12833,7 @@ var ReviewNoteMethods = class {
 				return;
 			}
 			this.queueReviewNoteForAgent(note, instruction);
+			form.remove();
 		});
 		cancel.addEventListener("click", (event) => {
 			event.preventDefault();
@@ -12832,31 +12850,19 @@ var ReviewNoteMethods = class {
 			file: note.file,
 			line: note.line,
 			side: note.side,
-			body: instruction ?? "",
+			body: instruction,
 			in_reply_to: replyTarget(note)
 		};
 		this.commentManager.addComment(note.commit_idx === void 0 ? comment : {
 			...comment,
 			commit_idx: note.commit_idx
 		});
-		this.reviewNoteManager.updateNote(note, { disposition: "accepted" });
-	}
-	unqueueReviewNote(note) {
-		const index = this.commentManager.comments.findIndex(({ in_reply_to: target }) => target !== void 0 && target.id === note.id && target.author === note.author && target.body === note.body);
-		if (index >= 0) this.commentManager.removeComment(index);
 	}
 	reviewNoteHeightPx(body) {
 		const visualLines = body.split("\n").reduce((total, line) => total + Math.max(1, Math.ceil(line.length / 86)), 0);
 		return Math.max(124, Math.min(460, 88 + visualLines * 18));
 	}
 };
-function replyTarget(note) {
-	const target = { body: note.body };
-	if (note.id !== void 0) target.id = note.id;
-	if (note.author !== void 0) target.author = note.author;
-	if (note.source_url !== void 0) target.source_url = note.source_url;
-	return target;
-}
 //#endregion
 //#region web/src/dialog-methods.ts
 function commentKey(comment) {
@@ -13098,7 +13104,8 @@ var DialogMethods = class {
 	}
 	async showSubmitConfirmation() {
 		const submissionComments = this.commentManager.getComments().filter((c) => !this.publishedCommentKeys.has(commentKey(c)));
-		const comments = submissionComments;
+		const accepted = acceptedNoteEntries(this.reviewNoteManager.getNotes());
+		const comments = [...submissionComments, ...accepted];
 		const submitLabel = "Finish";
 		let submit = () => {};
 		const { overlay, modal, body, footer, close } = openModal({
@@ -13119,13 +13126,14 @@ var DialogMethods = class {
 				}
 			}
 		});
-		if (submissionComments.length === 0) {
+		if (comments.length === 0) {
 			const noCommentsMsg = el("p", { text: "No comments. Finish to approve this review." });
 			noCommentsMsg.style.padding = "20px";
 			noCommentsMsg.style.textAlign = "center";
 			noCommentsMsg.style.color = "var(--text-secondary)";
 			body.appendChild(noCommentsMsg);
 		}
+		if (accepted.length) body.appendChild(el("p", { text: `${accepted.length} accepted ${accepted.length === 1 ? "note" : "notes"} will be sent` }));
 		const discussionCount = this.discussionManager.getOpenThreadCount();
 		if (discussionCount) body.appendChild(el("p", {
 			className: "submit-discussion-warning",
@@ -13438,7 +13446,7 @@ var PublishDialogMethods = class {
 		const originals = this.commentManager.getComments().filter((c) => !this.publishedCommentKeys.has(commentKey(c)));
 		const forRevision = (id) => {
 			const revision = status.revisions.find((r) => r.id === id);
-			return originals.filter((c) => revision.commit_idxs.includes(c.commit_idx ?? 0) && !isAcceptRequest(c));
+			return originals.filter((c) => revision.commit_idxs.includes(c.commit_idx ?? 0));
 		};
 		const panel = el("div", { className: "publish-panel" });
 		body.appendChild(panel);
@@ -13447,7 +13455,7 @@ var PublishDialogMethods = class {
 			panel.appendChild(el("p", { text: "Revision unavailable." }));
 			return;
 		}
-		const unassigned = originals.filter((c) => revision.commit_idxs.includes(c.commit_idx ?? 0) && isAcceptRequest(c));
+		const unassigned = acceptedNoteEntries(this.reviewNoteManager.getNotes()).filter((c) => revision.commit_idxs.includes(c.commit_idx ?? 0));
 		let rendering = 0;
 		const render = () => {
 			const generation = ++rendering;
@@ -14735,7 +14743,14 @@ var MonacoApp = class {
 	}
 	async restorePersistedComments() {
 		if (!this.commentDraftKey) return;
-		const { comments, dispositions } = await loadCommentDraft(this.commentDraftKey);
+		const draft = await loadCommentDraft(this.commentDraftKey);
+		const dispositions = { ...draft.dispositions };
+		const comments = draft.comments.filter((comment) => {
+			if (!isAcceptRequest(comment)) return true;
+			const id = comment.in_reply_to?.id;
+			if (id && dispositions[id] === void 0) dispositions[id] = "accepted";
+			return false;
+		});
 		const dispositionCount = Object.values(dispositions).filter((value) => value !== "open").length;
 		if (comments.length === 0 && dispositionCount === 0) {
 			this.commentDraftRestorePending = false;

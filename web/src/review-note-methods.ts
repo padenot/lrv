@@ -6,7 +6,7 @@ import {
   commentEndLine,
   commentLineLabel,
   commentStartLine,
-  type ReplyTarget,
+  replyTarget,
   type ReviewComment,
 } from './comments';
 import type { AppContext } from './types/app';
@@ -297,7 +297,6 @@ export class ReviewNoteMethods {
       undo.addEventListener('click', (event) => {
         event.preventDefault();
         event.stopPropagation();
-        this.unqueueReviewNote(note);
         this.reviewNoteManager.updateNote(note, { disposition: 'open' });
       });
       actions.appendChild(undo);
@@ -308,7 +307,7 @@ export class ReviewNoteMethods {
     address.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
-      this.queueReviewNoteForAgent(note);
+      this.reviewNoteManager.updateNote(note, { disposition: 'accepted' });
     });
 
     const reply = el('button', { className: 'btn-secondary review-note-btn', text: 'Reply' });
@@ -352,6 +351,7 @@ export class ReviewNoteMethods {
         return;
       }
       this.queueReviewNoteForAgent(note, instruction);
+      form.remove();
     });
     cancel.addEventListener('click', (event) => {
       event.preventDefault();
@@ -365,31 +365,17 @@ export class ReviewNoteMethods {
     textarea.focus();
   }
 
-  private queueReviewNoteForAgent(note: ReviewNote, instruction?: string) {
+  private queueReviewNoteForAgent(note: ReviewNote, instruction: string) {
     const comment: ReviewComment = {
       file: note.file,
       line: note.line,
       side: note.side,
-      body: instruction ?? '',
+      body: instruction,
       in_reply_to: replyTarget(note),
     };
     this.commentManager.addComment(
       note.commit_idx === undefined ? comment : { ...comment, commit_idx: note.commit_idx },
     );
-    this.reviewNoteManager.updateNote(note, { disposition: 'accepted' });
-  }
-
-  private unqueueReviewNote(note: ReviewNote) {
-    const index = this.commentManager.comments.findIndex(
-      ({ in_reply_to: target }) =>
-        target !== undefined &&
-        target.id === note.id &&
-        target.author === note.author &&
-        target.body === note.body,
-    );
-    if (index >= 0) {
-      this.commentManager.removeComment(index);
-    }
   }
 
   private reviewNoteHeightPx(body: string) {
@@ -398,18 +384,4 @@ export class ReviewNoteMethods {
       .reduce((total, line) => total + Math.max(1, Math.ceil(line.length / 86)), 0);
     return Math.max(124, Math.min(460, 88 + visualLines * 18));
   }
-}
-
-function replyTarget(note: ReviewNote): ReplyTarget {
-  const target: ReplyTarget = { body: note.body };
-  if (note.id !== undefined) {
-    target.id = note.id;
-  }
-  if (note.author !== undefined) {
-    target.author = note.author;
-  }
-  if (note.source_url !== undefined) {
-    target.source_url = note.source_url;
-  }
-  return target;
 }

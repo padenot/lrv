@@ -1,5 +1,5 @@
 import { $, clearEl, el } from './dom';
-import { CommentManager } from './comments';
+import { isAcceptRequest, CommentManager } from './comments';
 import { DiscussionManager, type Discussion } from './discussions';
 import { ConnectAgentMethods } from './connect-agent-methods';
 import { DiscussionMethods } from './discussion-methods';
@@ -418,7 +418,14 @@ export class MonacoApp {
       return;
     }
 
-    const { comments, dispositions } = await loadCommentDraft(this.commentDraftKey);
+    const draft = await loadCommentDraft(this.commentDraftKey);
+    const dispositions = { ...draft.dispositions };
+    const comments = draft.comments.filter((comment) => {
+      if (!isAcceptRequest(comment)) return true;
+      const id = comment.in_reply_to?.id;
+      if (id && dispositions[id] === undefined) dispositions[id] = 'accepted';
+      return false;
+    });
     const dispositionCount = Object.values(dispositions).filter((value) => value !== 'open').length;
     if (comments.length === 0 && dispositionCount === 0) {
       this.commentDraftRestorePending = false;

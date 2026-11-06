@@ -2,7 +2,7 @@ import { el } from './dom';
 import { openModal } from './modal';
 import { fetchJSON } from './api';
 import { commentKey } from './dialog-methods';
-import { isAcceptRequest, type ReviewComment } from './comments';
+import { acceptedNoteEntries, type ReviewComment } from './comments';
 import type { AppContext, PhabStatus, PublishState, ReviewAction } from './types/app';
 
 // Phabricator status values: green when accepted, blue when it needs review, grey while
@@ -30,6 +30,7 @@ const REVISION_STATE_CLASSES: Record<string, string> = {
 };
 
 export class PublishDialogMethods {
+  declare reviewNoteManager: AppContext['reviewNoteManager'];
   declare commentManager: AppContext['commentManager'];
   declare seriesInfo: AppContext['seriesInfo'];
   declare publishedCommentKeys: Set<string>;
@@ -158,9 +159,7 @@ export class PublishDialogMethods {
       .filter((c) => !this.publishedCommentKeys.has(commentKey(c)));
     const forRevision = (id: string) => {
       const revision = status.revisions.find((r) => r.id === id)!;
-      return originals.filter(
-        (c) => revision.commit_idxs.includes(c.commit_idx ?? 0) && !isAcceptRequest(c),
-      );
+      return originals.filter((c) => revision.commit_idxs.includes(c.commit_idx ?? 0));
     };
     const panel = el('div', { className: 'publish-panel' });
     body.appendChild(panel);
@@ -169,8 +168,8 @@ export class PublishDialogMethods {
       panel.appendChild(el('p', { text: 'Revision unavailable.' }));
       return;
     }
-    const unassigned = originals.filter(
-      (c) => revision.commit_idxs.includes(c.commit_idx ?? 0) && isAcceptRequest(c),
+    const unassigned = acceptedNoteEntries(this.reviewNoteManager.getNotes()).filter((c) =>
+      revision.commit_idxs.includes(c.commit_idx ?? 0),
     );
     let rendering = 0;
     const render = () => {

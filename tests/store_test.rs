@@ -281,3 +281,45 @@ fn dispositions_create_sessions_replace_and_freeze() {
         .unwrap();
     assert_eq!(state, "ignored");
 }
+
+#[test]
+fn accepted_note_recovery_matches_legacy_output() {
+    use lrv::output::{format_output, OutputFormat};
+    use lrv::store::{NoteDisposition, StoredNoteDisposition};
+    let path = db_path("accepted-output");
+    let store = CommentStore::open(&path, meta()).unwrap();
+    let note = serde_json::from_value(serde_json::json!({
+        "id": "note-1", "file": "a.rs", "line": [2, 3], "side": "old", "body": "Fix this", "author": "Alice"
+    })).unwrap();
+    store
+        .replace_draft(
+            &[],
+            &[StoredNoteDisposition {
+                note,
+                disposition: NoteDisposition::Accepted,
+            }],
+        )
+        .unwrap();
+    let (session, recovered) = CommentStore::load_session(&path, None).unwrap().unwrap();
+    assert_eq!(session.comment_count, 1);
+    let legacy: Comment = serde_json::from_value(serde_json::json!({
+        "file": "a.rs", "line": [2, 3], "side": "old", "body": "",
+        "in_reply_to": { "id": "note-1", "body": "Fix this", "author": "Alice" }
+    }))
+    .unwrap();
+    for format in [OutputFormat::Json, OutputFormat::Text] {
+        assert_eq!(
+            format_output(recovered.clone(), &format, &[], false, None),
+            format_output(vec![legacy.clone()], &format, &[], false, None)
+        );
+    }
+    store.finish(&recovered, None).unwrap();
+    assert_eq!(
+        CommentStore::load_session(&path, None)
+            .unwrap()
+            .unwrap()
+            .1
+            .len(),
+        1
+    );
+}

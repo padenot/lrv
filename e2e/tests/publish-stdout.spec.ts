@@ -122,13 +122,18 @@ test('Finish prints remaining comments and published URLs to stdout and exits', 
         side: 'new',
         body: 'Publish this',
       });
-      window.__APP!.commentManager.addComment({
-        file: 'a.txt',
-        line: 1,
-        side: 'new',
-        body: '',
-        in_reply_to: { id: 'address', body: 'Fix this', author: 'Reviewer' },
-      });
+      const manager = window.__APP!.reviewNoteManager;
+      manager.setNotes([
+        {
+          id: 'address',
+          file: 'a.txt',
+          line: 1,
+          side: 'new',
+          body: 'Fix this',
+          author: 'Reviewer',
+        },
+      ]);
+      manager.updateNote(manager.getNotes()[0]!, { disposition: 'accepted' });
     });
     await page.locator('#publish-commit').click();
     await page.locator('.publish-revision').click();

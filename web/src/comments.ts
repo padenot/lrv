@@ -1,3 +1,5 @@
+import type { ReviewNote } from './review-notes';
+
 export type CommentLine = number | [number, number];
 
 /** A copy of the review note a comment responds to. */
@@ -129,4 +131,32 @@ export class CommentManager {
   notifyListeners(): void {
     this.listeners.forEach((l) => l());
   }
+}
+
+export function replyTarget(note: ReviewNote): ReplyTarget {
+  const target: ReplyTarget = { body: note.body };
+  if (note.id !== undefined) {
+    target.id = note.id;
+  }
+  if (note.author !== undefined) {
+    target.author = note.author;
+  }
+  if (note.source_url !== undefined) {
+    target.source_url = note.source_url;
+  }
+  return target;
+}
+
+/** Generated only when handing accepted notes to Finish or recovery. */
+export function acceptedNoteEntries(notes: ReviewNote[]): ReviewComment[] {
+  return notes
+    .filter((note) => note.disposition === 'accepted')
+    .map((note) => ({
+      file: note.file,
+      line: note.line,
+      side: note.side,
+      body: '',
+      ...(note.commit_idx === undefined ? {} : { commit_idx: note.commit_idx }),
+      in_reply_to: replyTarget(note),
+    }));
 }
