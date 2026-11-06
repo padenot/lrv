@@ -2571,13 +2571,16 @@ body:not(.agent-attached) .discuss-hint {
   cursor: default;
 }
 
-/* Links in the bar (bug numbers, the revision) use the accent colour, which
-   stays readable in every theme, unlike the browser's default blue. */
+/* Linkified text (bug numbers, revisions, URLs) and the bar's links use the
+   accent colour, which stays readable in every theme, unlike the browser's
+   default blue. */
+.auto-link,
 #commit-bar a {
   color: var(--accent-color);
   text-decoration: none;
 }
 
+.auto-link:hover,
 #commit-bar a:hover {
   text-decoration: underline;
 }
