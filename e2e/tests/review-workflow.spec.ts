@@ -973,6 +973,15 @@ test.describe('Review Workflow E2E', () => {
     await expect(page.locator('#comment-count')).toHaveText('0');
   });
 
+  test('preloader hides once the stacked view renders at startup', async ({ page }) => {
+    await isolateConfig(page, { stacked_view: true });
+    await page.goto((serverUrl ?? 'http://localhost:9999') + '/');
+    await page.locator('.stacked-code-view diffs-container').first().waitFor({ timeout: 10000 });
+    // The preloader falls back to hiding after 5 s, so this must beat it.
+    await expect(page.locator('#preloader-overlay')).toHaveCount(0, { timeout: 2000 });
+    expect(await page.evaluate(() => (window as any).__APP_READY)).toBe(true);
+  });
+
   test('stacked mode should add, edit, and delete a comment', async ({ page }) => {
     await openStackedView(page);
 
