@@ -1,7 +1,10 @@
+import type { ReviewNote } from './review-notes';
+
 export type CommentLine = number | [number, number];
 
 /** A copy of the review note a comment responds to. */
 export type ReplyTarget = {
+  origin?: 'agent' | 'host';
   id?: string;
   author?: string;
   body: string;
@@ -19,17 +22,17 @@ export type ReviewComment = {
 };
 
 /** A reply with no body only asks the agent to address the note, so it is never published. */
-export function isAddressRequest(comment: ReviewComment): boolean {
+export function isAcceptRequest(comment: ReviewComment): boolean {
   return comment.in_reply_to !== undefined && !comment.body.trim();
 }
 
 /** Text to show for a comment, which for a bare address request is a description of it. */
 export function commentDisplayText(comment: ReviewComment): string {
-  if (!isAddressRequest(comment)) {
+  if (!isAcceptRequest(comment)) {
     return comment.body;
   }
   const author = comment.in_reply_to?.author;
-  return `Address review comment${author ? ` from ${author}` : ''}`;
+  return `Accepted review comment${author ? ` from ${author}` : ''}`;
 }
 
 export function commentStartLine(comment: Pick<ReviewComment, 'line'>): number {
@@ -129,4 +132,35 @@ export class CommentManager {
   notifyListeners(): void {
     this.listeners.forEach((l) => l());
   }
+}
+
+export function replyTarget(note: ReviewNote): ReplyTarget {
+  const target: ReplyTarget = { body: note.body };
+  if (note.origin !== undefined) {
+    target.origin = note.origin;
+  }
+  if (note.id !== undefined) {
+    target.id = note.id;
+  }
+  if (note.author !== undefined) {
+    target.author = note.author;
+  }
+  if (note.source_url !== undefined) {
+    target.source_url = note.source_url;
+  }
+  return target;
+}
+
+/** Generated only when handing accepted notes to Finish or recovery. */
+export function acceptedNoteEntries(notes: ReviewNote[]): ReviewComment[] {
+  return notes
+    .filter((note) => note.disposition === 'accepted')
+    .map((note) => ({
+      file: note.file,
+      line: note.line,
+      side: note.side,
+      body: '',
+      ...(note.commit_idx === undefined ? {} : { commit_idx: note.commit_idx }),
+      in_reply_to: replyTarget(note),
+    }));
 }

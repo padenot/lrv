@@ -1,4 +1,4 @@
-use crate::types::{Comment, CommentLine, ReviewAction, ReviewNote, Side};
+use crate::types::{Comment, CommentLine, NoteOrigin, ReviewAction, ReviewNote, Side};
 use anyhow::{Context, Result};
 use reqwest::Client;
 use serde::Deserialize;
@@ -376,6 +376,7 @@ impl PhabricatorClient {
                 .as_ref()
                 .or(transaction.author_phid.as_ref());
             notes.push(ReviewNote {
+                origin: NoteOrigin::Host,
                 id: Some(comment.id.to_string()),
                 file: file_path.to_string(),
                 line: line.clone(),
@@ -1597,6 +1598,7 @@ mod tests {
     #[test]
     fn revision_publish_skips_replies_without_a_body() {
         let note = ReplyTarget {
+            origin: crate::types::NoteOrigin::Agent,
             id: Some("7".into()),
             author: Some("alice".into()),
             body: "Why?".into(),

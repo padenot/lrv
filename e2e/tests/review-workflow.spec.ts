@@ -770,7 +770,7 @@ test.describe('Review Workflow E2E', () => {
       } else {
         await button.click();
         const dialog = page.locator('.publish-dialog');
-        await expect(dialog.getByRole('button', { name: 'Accept', exact: true })).toBeDisabled();
+        await expect(dialog.locator('button', { hasText: 'Accept' })).toBeDisabled();
         await expect(dialog.getByRole('button', { name: 'Request Changes' })).toBeDisabled();
         await expect(dialog).toContainText('closed or abandoned');
         await expect(dialog).toContainText('You are the author of D123');
@@ -880,7 +880,7 @@ test.describe('Review Workflow E2E', () => {
     await expect(button).toHaveAttribute('title', /Failed to verify revisions/);
   });
 
-  test('publishing sends only reply bodies, leaves Address items for Finish and omits published comments', async ({
+  test('publishing sends only reply bodies, leaves Accept items for Finish and omits published comments', async ({
     page,
   }) => {
     await page.route('**/api/context', async (route) => {
@@ -926,6 +926,7 @@ test.describe('Review Workflow E2E', () => {
           },
           {
             id: file + '-address',
+            origin: 'host',
             file,
             line: 2,
             side: 'new',
@@ -947,12 +948,12 @@ test.describe('Review Workflow E2E', () => {
     });
     await openApp(page);
     const note = page.locator('.review-note').first();
-    await expect(note.locator('button', { hasText: 'Address' })).toHaveCount(1);
+    await expect(note.locator('button', { hasText: 'Accept' })).toHaveCount(1);
     await expect(note.locator('button', { hasText: 'Ignore' })).toHaveCount(1);
     await note.locator('button', { hasText: 'Reply' }).click();
     await note.locator('.review-note-reply-text').fill('Because of the cache.');
     await note.locator('button', { hasText: 'Queue' }).click();
-    await page.locator('.review-note').nth(1).locator('button', { hasText: 'Address' }).click();
+    await page.locator('.review-note').nth(1).locator('button', { hasText: 'Accept' }).click();
     await page.locator('#publish-commit').click();
     const dialog = page.locator('.publish-dialog');
     await expect(dialog.locator('.comment-preview-text')).toHaveText('Because of the cache.');
@@ -963,7 +964,10 @@ test.describe('Review Workflow E2E', () => {
     expect(published.comments[0].body).toBe('Because of the cache.');
     await page.locator('#submit-review').click();
     await expect(page.locator('.submit-review-modal')).toContainText('Already published to D123');
-    await expect(page.locator('.comment-preview')).toHaveCount(1);
+    await expect(page.locator('.comment-preview')).toHaveCount(0);
+    await expect(page.locator('.submit-review-modal')).toContainText(
+      '1 accepted note will be sent',
+    );
     await page.locator('.confirm-submit-btn').click();
     await expect(page.locator('#submit-review')).toHaveText('Review finished');
     expect(sent.comments).toHaveLength(1);
@@ -971,11 +975,203 @@ test.describe('Review Workflow E2E', () => {
     expect(sent.comments[0].in_reply_to).toEqual({
       id: `${sent.comments[0].file}-address`,
       author: 'Author',
+      origin: 'host',
       body: 'Please fix this.',
     });
   });
 
-  test('undoing a queued review note removes its comment', async ({ page }) => {
+  for (const own of [false, true]) {
+    test(`routes accepted notes on ${own ? 'own' : 'other authors’'} revisions`, async ({
+      page,
+    }) => {
+      await page.route('**/api/context', async (route) => {
+        const response = await route.fetch();
+        await route.fulfill({
+          response,
+          json: {
+            ...(await response.json()),
+            phabricator_available: true,
+            phabricator_revisions: ['D123'],
+          },
+        });
+      });
+      await page.route('**/api/phabricator', (route) =>
+        route.fulfill({
+          json: {
+            user: 'reviewer',
+            revisions: [
+              {
+                id: 'D123',
+                title: 'Revision',
+                url: 'https://phab.example/D123',
+                commit_idxs: [0],
+                own,
+                closed: false,
+                publishable: true,
+                published: false,
+              },
+            ],
+          },
+        }),
+      );
+      let published: any;
+      await page.route('**/api/phabricator/publish', async (route) => {
+        published = route.request().postDataJSON();
+        await route.fulfill({ json: { url: 'https://phab.example/D123' } });
+      });
+      let finished: any;
+      await page.route('**/api/complete', async (route) => {
+        finished = route.request().postDataJSON();
+        await route.fulfill({ status: 200, body: '' });
+      });
+      await openApp(page);
+      await page.evaluate(() => {
+        const app = (window as any).__APP;
+        const file = app.files[0].path;
+        app.reviewNoteManager.setNotes([
+          { id: 'default-agent', file, line: 1, side: 'new', body: 'Default agent finding' },
+          {
+            id: 'agent',
+            origin: 'agent',
+            file,
+            line: 1,
+            side: 'new',
+            body: 'Explicit agent finding',
+          },
+          { id: 'host', origin: 'host', file, line: 1, side: 'new', body: 'Human finding' },
+          { id: 'ignored', origin: 'agent', file, line: 1, side: 'new', body: 'Ignored finding' },
+          { id: 'open', origin: 'agent', file, line: 1, side: 'new', body: 'Open finding' },
+          {
+            id: 'other-commit',
+            origin: 'agent',
+            file,
+            line: 1,
+            side: 'new',
+            body: 'Other commit finding',
+            commit_idx: 1,
+          },
+        ]);
+        app.reviewNoteManager.applyDispositions({
+          'default-agent': 'accepted',
+          agent: 'accepted',
+          host: 'accepted',
+          ignored: 'ignored',
+          'other-commit': 'accepted',
+        });
+        app.commentManager.addComment({ file, line: 1, side: 'new', body: 'User comment' });
+      });
+      await page.locator('#publish-commit').click();
+      const dialog = page.locator('.publish-dialog');
+      await expect(dialog).toContainText(
+        own
+          ? '3 comments stay in the review and are printed on Finish.'
+          : '1 comment stays in the review and is printed on Finish.',
+      );
+      await expect(dialog.locator('.comment-preview')).toHaveCount(own ? 1 : 3);
+      await dialog.locator('.publish-revision').click();
+      await expect(dialog).toHaveCount(0);
+      expect(published.comments.map((c: any) => c.body)).toEqual(
+        own
+          ? ['User comment']
+          : ['User comment', 'Default agent finding', 'Explicit agent finding'],
+      );
+      expect(published.comments.every((c: any) => !c.in_reply_to)).toBe(true);
+      await expect(page.locator('.review-note-status', { hasText: 'Published' })).toHaveCount(
+        own ? 0 : 2,
+      );
+      await page.locator('#submit-review').click();
+      await page.locator('.confirm-submit-btn').click();
+      await expect(page.locator('#submit-review')).toHaveText('Review finished');
+      expect(finished.comments.map((c: any) => c.in_reply_to.id)).toEqual(
+        own ? ['default-agent', 'agent', 'host', 'other-commit'] : ['host', 'other-commit'],
+      );
+    });
+  }
+
+  test('restores accepted and ignored note dispositions after reload', async ({ page }) => {
+    await page.route('**/api/review-notes', (route) =>
+      route.fulfill({
+        json: ['test.txt', 'file2.txt', 'file3.txt'].flatMap((file) =>
+          [1, 2].map((line) => ({
+            id: `${file}-${line}`,
+            file,
+            line,
+            side: 'new',
+            body: `Note ${line}`,
+          })),
+        ),
+      }),
+    );
+    await openApp(page);
+    await page.locator('.review-note').nth(0).locator('button', { hasText: 'Accept' }).click();
+    await page.locator('.review-note').nth(1).locator('button', { hasText: 'Ignore' }).click();
+    await expect(page.locator('.review-note-status-ignored')).toHaveCount(1);
+    await page.waitForFunction(async () => {
+      const db = await new Promise<IDBDatabase>((resolve) => {
+        const request = indexedDB.open('lrv-comment-drafts', 1);
+        request.onsuccess = () => resolve(request.result);
+      });
+      const records: any[] = await new Promise((resolve) => {
+        const request = db.transaction('drafts').objectStore('drafts').getAll();
+        request.onsuccess = () => resolve(request.result);
+      });
+      return records.some((r) => Object.values(r.dispositions ?? {}).includes('ignored'));
+    });
+    await page.reload();
+    await expect(page.locator('#restore-banner')).toBeVisible();
+    await expect(page.locator('#restore-banner')).toContainText('2 note dispositions');
+    // A live note arriving while restore is pending must not replace the saved draft.
+    await page.evaluate(async () => {
+      const app = (window as any).__APP;
+      app.reviewNoteManager.mergeNotes([
+        { id: 'incoming', file: app.files[0].path, line: 1, side: 'new', body: 'Incoming note' },
+      ]);
+      await app.commentDraftWrite;
+    });
+    await page.reload();
+    await expect(page.locator('#restore-banner')).toContainText('2 note dispositions');
+    await page.locator('#restore-yes-btn').click();
+    await expect(page.locator('.review-note-status-accepted')).toHaveCount(1);
+    await expect(page.locator('.review-note-status-ignored')).toHaveCount(1);
+  });
+
+  test('migrates legacy empty replies into accepted dispositions', async ({ page }) => {
+    await page.route('**/api/review-notes', (route) =>
+      route.fulfill({
+        json: ['test.txt', 'file2.txt', 'file3.txt'].map((file) => ({
+          id: file,
+          file,
+          line: 1,
+          side: 'new',
+          body: 'Legacy note',
+        })),
+      }),
+    );
+    await openApp(page);
+    await page.evaluate(() => {
+      const app = (window as any).__APP;
+      const note = app.reviewNoteManager.getNotesForFile(app.files[0].path)[0];
+      app.commentManager.addComment({
+        file: note.file,
+        line: note.line,
+        side: note.side,
+        body: '',
+        in_reply_to: { id: note.id, body: note.body },
+      });
+    });
+    await expect.poll(() => commentDraftCount(page)).toBe(1);
+    await page.reload();
+    await page.locator('#restore-yes-btn').click();
+    await expect(page.locator('#comment-count')).toHaveText('0');
+    await expect(page.locator('.review-note-status-accepted')).toHaveCount(1);
+    await page.locator('#submit-review').click();
+    await expect(page.locator('.submit-review-modal')).toContainText(
+      '1 accepted note will be sent',
+    );
+    await expect(page.locator('.comment-preview')).toHaveCount(0);
+  });
+
+  test('accepting and undoing a note adds no comments', async ({ page }) => {
     await page.route('**/api/review-notes', (route) =>
       route.fulfill({
         json: ['test.txt', 'file2.txt', 'file3.txt'].map((file) => ({
@@ -989,11 +1185,11 @@ test.describe('Review Workflow E2E', () => {
     );
     await openApp(page);
     const note = page.locator('.review-note').first();
-    await note.locator('button', { hasText: 'Address' }).click();
-    await expect(note).toContainText('Queued for agent');
-    await expect(page.locator('#comment-count')).toHaveText('1');
+    await note.locator('button', { hasText: 'Accept' }).click();
+    await expect(note).toContainText('Accepted');
+    await expect(page.locator('#comment-count')).toHaveText('0');
     await note.locator('button', { hasText: 'Undo' }).click();
-    await expect(note.locator('button', { hasText: 'Address' })).toHaveCount(1);
+    await expect(note.locator('button', { hasText: 'Accept' })).toHaveCount(1);
     await expect(page.locator('#comment-count')).toHaveText('0');
   });
 

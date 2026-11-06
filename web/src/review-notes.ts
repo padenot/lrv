@@ -1,7 +1,11 @@
 import { commentContainsLine } from './comments';
 import type { CommentLine } from './comments';
 
+export type NoteDisposition = 'open' | 'accepted' | 'ignored';
+export type NoteDispositions = Record<string, NoteDisposition>;
+
 export type ReviewNote = {
+  origin?: 'agent' | 'host';
   id?: string;
   discussion_id?: string;
   summary?: boolean;
@@ -14,11 +18,12 @@ export type ReviewNote = {
   source_url?: string;
   commit_idx?: number;
   read_only?: boolean;
-  disposition?: 'open' | 'addressed' | 'ignored';
+  disposition?: NoteDisposition;
 };
 
 export class ReviewNoteManager {
   private notes: ReviewNote[];
+  private dispositions: NoteDispositions = {};
   private listeners: Array<() => void>;
   private summaryWaiters: Array<() => boolean> = [];
   currentCommitIdx: number | null;
@@ -30,7 +35,7 @@ export class ReviewNoteManager {
   }
 
   setNotes(notes: ReviewNote[]): void {
-    this.notes = [...notes];
+    this.notes = notes.map((note) => this.withDisposition(note));
     this.notifyListeners();
   }
 
@@ -38,7 +43,7 @@ export class ReviewNoteManager {
     let added = false;
     for (const note of notes) {
       if (!this.notes.some((existing) => this.isSameNote(existing, note))) {
-        this.notes.push(note);
+        this.notes.push(this.withDisposition(note));
         added = true;
       }
     }
@@ -51,8 +56,22 @@ export class ReviewNoteManager {
     if (this.currentCommitIdx !== null && note.commit_idx === undefined) {
       note = { ...note, commit_idx: this.currentCommitIdx };
     }
-    this.notes.push(note);
+    this.notes.push(this.withDisposition(note));
     this.notifyListeners();
+  }
+
+  getDispositions(): NoteDispositions {
+    return { ...this.dispositions };
+  }
+
+  applyDispositions(map: NoteDispositions): void {
+    this.dispositions = { ...map };
+    this.notes = this.notes.map((note) => this.withDisposition(note));
+    this.notifyListeners();
+  }
+
+  private withDisposition(note: ReviewNote): ReviewNote {
+    return { ...note, disposition: (note.id && this.dispositions[note.id]) || 'open' };
   }
 
   getNotes(): ReviewNote[] {
@@ -96,6 +115,9 @@ export class ReviewNoteManager {
     const idx = this.notes.findIndex((note) => this.isSameNote(note, target));
     if (idx < 0) {
       return;
+    }
+    if (target.id && patch.disposition) {
+      this.dispositions[target.id] = patch.disposition;
     }
     this.notes[idx] = { ...this.notes[idx]!, ...patch };
     this.notifyListeners();

@@ -217,6 +217,7 @@ fn reply(body: &str) -> lrv::types::Comment {
         body: body.to_string(),
         commit_idx: None,
         in_reply_to: Some(lrv::types::ReplyTarget {
+            origin: lrv::types::NoteOrigin::Agent,
             id: Some("42".to_string()),
             author: Some("alice".to_string()),
             body: "Why a Vec?\nIt is searched a lot.".to_string(),

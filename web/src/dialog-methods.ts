@@ -1,5 +1,10 @@
 import { el } from './dom';
-import { commentEndLine, commentLineLabel, commentStartLine } from './comments';
+import {
+  acceptedNoteEntries,
+  commentEndLine,
+  commentLineLabel,
+  commentStartLine,
+} from './comments';
 import type { ReviewComment } from './comments';
 import { openModal } from './modal';
 import { fetchJSON } from './api';
@@ -20,7 +25,9 @@ export function commentKey(comment: ReviewComment): string {
 }
 
 export class DialogMethods {
+  declare reviewNoteManager: AppContext['reviewNoteManager'];
   declare publishedCommentKeys: Set<string>;
+  declare publishedNoteIds: Set<string>;
   declare publishedRevisionIds: Set<string>;
   declare config: AppContext['config'];
   declare isInline: boolean;
@@ -375,7 +382,12 @@ export class DialogMethods {
     const submissionComments = this.commentManager
       .getComments()
       .filter((c) => !this.publishedCommentKeys.has(commentKey(c)));
-    const comments = submissionComments;
+    const accepted = acceptedNoteEntries(
+      this.reviewNoteManager
+        .getNotes()
+        .filter((note) => !note.id || !this.publishedNoteIds.has(note.id)),
+    );
+    const comments = [...submissionComments, ...accepted];
     const submitLabel = 'Finish';
     let submit: () => void | Promise<void> = () => {};
 
@@ -397,12 +409,20 @@ export class DialogMethods {
       },
     });
 
-    if (submissionComments.length === 0) {
+    if (comments.length === 0) {
       const noCommentsMsg = el('p', { text: 'No comments. Finish to approve this review.' });
       noCommentsMsg.style.padding = '20px';
       noCommentsMsg.style.textAlign = 'center';
       noCommentsMsg.style.color = 'var(--text-secondary)';
       body.appendChild(noCommentsMsg);
+    }
+
+    if (accepted.length) {
+      body.appendChild(
+        el('p', {
+          text: `${accepted.length} accepted ${accepted.length === 1 ? 'note' : 'notes'} will be sent`,
+        }),
+      );
     }
 
     const discussionCount = this.discussionManager.getOpenThreadCount();
