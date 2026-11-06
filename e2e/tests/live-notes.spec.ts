@@ -21,6 +21,7 @@ for (const stacked of [false, true]) {
       ...process.env,
       LRV_SERVER_DIR: serverDir,
       LRV_COMMENT_DB: path.join(root, 'comments.db'),
+      LRV_AGENT_LEASE_SECS: '1',
       XDG_CONFIG_HOME: path.join(root, 'config'),
     };
     let child: ChildProcess | null = null;

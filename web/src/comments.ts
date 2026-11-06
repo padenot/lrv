@@ -136,7 +136,9 @@ export class CommentManager {
 
 export function replyTarget(note: ReviewNote): ReplyTarget {
   const target: ReplyTarget = { body: note.body };
-  if (note.origin !== undefined) target.origin = note.origin;
+  if (note.origin !== undefined) {
+    target.origin = note.origin;
+  }
   if (note.id !== undefined) {
     target.id = note.id;
   }

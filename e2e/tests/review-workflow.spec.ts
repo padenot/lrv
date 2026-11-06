@@ -981,7 +981,7 @@ test.describe('Review Workflow E2E', () => {
   });
 
   for (const own of [false, true]) {
-    test(`publishes accepted agent notes only on ${own ? 'own' : 'other authors’'} revisions`, async ({
+    test(`routes accepted notes on ${own ? 'own' : 'other authors’'} revisions`, async ({
       page,
     }) => {
       await page.route('**/api/context', async (route) => {
@@ -1119,6 +1119,16 @@ test.describe('Review Workflow E2E', () => {
     });
     await page.reload();
     await expect(page.locator('#restore-banner')).toBeVisible();
+    await expect(page.locator('#restore-banner')).toContainText('2 note dispositions');
+    // A live note arriving while restore is pending must not replace the saved draft.
+    await page.evaluate(async () => {
+      const app = (window as any).__APP;
+      app.reviewNoteManager.mergeNotes([
+        { id: 'incoming', file: app.files[0].path, line: 1, side: 'new', body: 'Incoming note' },
+      ]);
+      await app.commentDraftWrite;
+    });
+    await page.reload();
     await expect(page.locator('#restore-banner')).toContainText('2 note dispositions');
     await page.locator('#restore-yes-btn').click();
     await expect(page.locator('.review-note-status-accepted')).toHaveCount(1);

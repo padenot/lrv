@@ -2618,3 +2618,7 @@ body:not(.agent-attached) .discuss-hint {
   stroke-linecap: round;
   stroke-linejoin: round;
 }
+
+body.agent-attached .review-note-reply-btn {
+  display: none;
+}

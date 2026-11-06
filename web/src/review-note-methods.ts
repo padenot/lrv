@@ -1,4 +1,4 @@
-import type { Discussion } from './discussions';
+import { DiscussionError, type Discussion } from './discussions';
 import type { CommentLine } from './comments';
 import { el } from './dom';
 import { appendLinkifiedText } from './linkify';
@@ -313,18 +313,31 @@ export class ReviewNoteMethods {
       return actions;
     }
 
-    const address = el('button', { className: 'btn-primary review-note-btn', text: 'Accept' });
-    address.addEventListener('click', (event) => {
+    const accept = el('button', { className: 'btn-primary review-note-btn', text: 'Accept' });
+    accept.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
       this.reviewNoteManager.updateNote(note, { disposition: 'accepted' });
     });
 
-    const reply = el('button', { className: 'btn-secondary review-note-btn', text: 'Reply' });
+    const reply = el('button', {
+      className: 'btn-secondary review-note-btn review-note-reply-btn',
+      text: 'Reply',
+    });
     reply.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
       this.showReviewNoteReplyForm(actions, note);
+    });
+
+    const discuss = el('button', {
+      className: 'btn-secondary review-note-btn discuss-btn',
+      text: 'Discuss',
+    });
+    discuss.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.showReviewNoteReplyForm(actions, note, true);
     });
 
     const ignore = el('button', { className: 'btn-secondary review-note-btn', text: 'Ignore' });
@@ -334,11 +347,11 @@ export class ReviewNoteMethods {
       this.reviewNoteManager.updateNote(note, { disposition: 'ignored' });
     });
 
-    actions.append(address, reply, ignore);
+    actions.append(accept, ignore, reply, discuss);
     return actions;
   }
 
-  private showReviewNoteReplyForm(actions: HTMLElement, note: ReviewNote) {
+  private showReviewNoteReplyForm(actions: HTMLElement, note: ReviewNote, discuss = false) {
     if (actions.querySelector('.review-note-reply')) {
       return;
     }
@@ -346,13 +359,18 @@ export class ReviewNoteMethods {
     const form = el('div', { className: 'review-note-reply' });
     const textarea = el('textarea', {
       className: 'review-note-reply-text',
-      attrs: { placeholder: 'Instructions for the agent...' },
+      attrs: { placeholder: discuss ? 'Question about this note...' : 'Reply to this note...' },
     });
     const controls = el('div', { className: 'review-note-reply-actions' });
-    const save = el('button', { className: 'btn-primary review-note-btn', text: 'Queue' });
+    const save = el('button', {
+      className: 'btn-primary review-note-btn',
+      text: discuss ? 'Discuss' : 'Queue',
+    });
+    const error = el('div', { className: 'comment-error' });
+    error.hidden = true;
     const cancel = el('button', { className: 'btn-secondary review-note-btn', text: 'Cancel' });
 
-    save.addEventListener('click', (event) => {
+    save.addEventListener('click', async (event) => {
       event.preventDefault();
       event.stopPropagation();
       const instruction = textarea.value.trim();
@@ -360,8 +378,34 @@ export class ReviewNoteMethods {
         textarea.focus();
         return;
       }
-      this.queueReviewNoteForAgent(note, instruction);
-      form.remove();
+      if (save.disabled) {
+        return;
+      }
+      save.disabled = true;
+      error.hidden = true;
+      try {
+        if (discuss) {
+          await this.discussionManager.send({
+            file: note.file,
+            line: note.line,
+            side: note.side,
+            body: instruction,
+            ...(note.commit_idx === undefined ? {} : { commit_idx: note.commit_idx }),
+            note: replyTarget(note),
+          });
+        } else {
+          this.queueReviewNoteForAgent(note, instruction);
+        }
+        form.remove();
+      } catch (err) {
+        error.textContent =
+          err instanceof DiscussionError && err.status === 409
+            ? 'No agent is listening any more'
+            : 'Failed to send discussion. Try again.';
+        error.hidden = false;
+      } finally {
+        save.disabled = false;
+      }
     });
     cancel.addEventListener('click', (event) => {
       event.preventDefault();
@@ -370,7 +414,7 @@ export class ReviewNoteMethods {
     });
 
     controls.append(save, cancel);
-    form.append(textarea, controls);
+    form.append(error, textarea, controls);
     actions.appendChild(form);
     textarea.focus();
   }

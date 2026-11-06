@@ -265,10 +265,18 @@ function sanitizeComment(value: unknown): ReviewComment | null {
   if (raw.in_reply_to && typeof raw.in_reply_to.body === 'string') {
     const { body, id, author, source_url, origin } = raw.in_reply_to;
     comment.in_reply_to = { body };
-    if (origin === 'agent' || origin === 'host') comment.in_reply_to.origin = origin;
-    if (typeof id === 'string') comment.in_reply_to.id = id;
-    if (typeof author === 'string') comment.in_reply_to.author = author;
-    if (typeof source_url === 'string') comment.in_reply_to.source_url = source_url;
+    if (origin === 'agent' || origin === 'host') {
+      comment.in_reply_to.origin = origin;
+    }
+    if (typeof id === 'string') {
+      comment.in_reply_to.id = id;
+    }
+    if (typeof author === 'string') {
+      comment.in_reply_to.author = author;
+    }
+    if (typeof source_url === 'string') {
+      comment.in_reply_to.source_url = source_url;
+    }
   }
   return comment;
 }
@@ -306,7 +314,9 @@ function hashString(value: string): string {
 }
 
 function sanitizeDispositions(value: unknown): NoteDispositions {
-  if (!value || typeof value !== 'object') return {};
+  if (!value || typeof value !== 'object') {
+    return {};
+  }
   return Object.fromEntries(
     Object.entries(value).filter(
       ([, disposition]) =>

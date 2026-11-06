@@ -422,9 +422,13 @@ export class MonacoApp {
     const draft = await loadCommentDraft(this.commentDraftKey);
     const dispositions = { ...draft.dispositions };
     const comments = draft.comments.filter((comment) => {
-      if (!isAcceptRequest(comment)) return true;
+      if (!isAcceptRequest(comment)) {
+        return true;
+      }
       const id = comment.in_reply_to?.id;
-      if (id && dispositions[id] === undefined) dispositions[id] = 'accepted';
+      if (id && dispositions[id] === undefined) {
+        dispositions[id] = 'accepted';
+      }
       return false;
     });
     const dispositionCount = Object.values(dispositions).filter((value) => value !== 'open').length;
