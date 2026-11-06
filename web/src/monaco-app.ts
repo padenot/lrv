@@ -24,6 +24,7 @@ import { FileDataMethods } from './file-data-methods';
 import { FileListMethods } from './file-list-methods';
 import { FileLoadingMethods } from './file-loading-methods';
 import { NavigationMethods } from './navigation-methods';
+import { CommitBarMethods } from './commit-bar-methods';
 import { CommitMethods } from './commit-methods';
 import { CommentsUIMethods } from './comments-ui-methods';
 import { ReviewNoteMethods } from './review-note-methods';
@@ -558,7 +559,10 @@ export class MonacoApp {
     });
   }
 
+  declare renderCommitBar: () => void;
+
   renderProjectInfo() {
+    this.renderCommitBar();
     const container = $('#project-info');
     if (!container) {
       return;
@@ -745,3 +749,5 @@ applyMixin(MonacoApp, StackedViewMethods);
 applyMixin(MonacoApp, PublishDialogMethods);
 
 applyMixin(MonacoApp, ConnectAgentMethods);
+
+applyMixin(MonacoApp, CommitBarMethods);

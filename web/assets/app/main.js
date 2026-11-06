@@ -11864,6 +11864,56 @@ var NavigationMethods = class {
 	}
 };
 //#endregion
+//#region web/src/commit-bar-methods.ts
+var CommitBarMethods = class {
+	renderCommitBar() {
+		const bar = document.getElementById("commit-bar");
+		const context = document.getElementById("commit-bar-context");
+		if (!bar || !context) return;
+		const commit = (this.seriesInfo?.is_series ? this.seriesInfo.commits[this.currentCommitIdx] : void 0) ?? this.diff;
+		const hash = commit?.commit_hash ?? "";
+		const message = commit?.commit_message ?? "";
+		const id = this.revisionIdFor(this.currentCommitIdx);
+		bar.hidden = !hash && !message && !id;
+		context.replaceChildren();
+		if (this.seriesInfo?.is_series) {
+			const nav = el("div", { className: "commit-bar-nav" });
+			const previous = el("button", {
+				className: "commit-bar-nav-btn",
+				text: "‹",
+				attrs: { "aria-label": "Previous commit" }
+			});
+			previous.disabled = this.currentCommitIdx === 0;
+			previous.onclick = () => this.previousCommit();
+			const next = el("button", {
+				className: "commit-bar-nav-btn",
+				text: "›",
+				attrs: { "aria-label": "Next commit" }
+			});
+			next.disabled = this.currentCommitIdx === this.seriesInfo.commits.length - 1;
+			next.onclick = () => this.nextCommit();
+			nav.append(previous, el("span", {
+				className: "commit-bar-position",
+				text: `${this.currentCommitIdx + 1}/${this.seriesInfo.commits.length}`
+			}), next);
+			context.append(nav);
+		}
+		const title = el("span", { attrs: {
+			id: "commit-bar-title",
+			title: message
+		} });
+		appendLinkifiedText(title, message.split("\n")[0] ?? "");
+		context.append(title, el("span", {
+			attrs: {
+				id: "commit-bar-hash",
+				title: hash
+			},
+			text: hash.slice(0, 8)
+		}), el("span", { attrs: { id: "commit-revision" } }));
+		this.updatePublishButton();
+	}
+};
+//#endregion
 //#region web/src/modal.ts
 function openModal({ title, titleId, modalClass = "", footerContent = [], onKeydown }) {
 	const overlay = el("div", { className: "submit-modal-overlay" });
@@ -12099,7 +12149,6 @@ var CommitMethods = class {
 			const viewEl = el("div", { className: "commit-view" });
 			viewEl.style.padding = "16px";
 			viewEl.style.overflow = "auto";
-			viewEl.style.height = "calc(100vh - 48px)";
 			host.appendChild(viewEl);
 			this._commitViewEl = viewEl;
 		}
@@ -13267,6 +13316,18 @@ var DialogMethods = class {
 };
 //#endregion
 //#region web/src/publish-dialog-methods.ts
+const SVG_NS = "http://www.w3.org/2000/svg";
+/** A small "opens elsewhere" arrow, drawn in the link's current colour. */
+function externalLinkIcon() {
+	const svg = document.createElementNS(SVG_NS, "svg");
+	svg.setAttribute("class", "external-link-icon");
+	svg.setAttribute("viewBox", "0 0 12 12");
+	svg.setAttribute("aria-hidden", "true");
+	const path = document.createElementNS(SVG_NS, "path");
+	path.setAttribute("d", "M7 1h4v4M11 1 5.5 6.5M9.5 7.5V11h-8.5V2.5H4.5");
+	svg.appendChild(path);
+	return svg;
+}
 const REVISION_STATE_CLASSES = {
 	accepted: "revision-accepted",
 	"needs-review": "revision-needs-review",
@@ -13297,7 +13358,9 @@ var PublishDialogMethods = class {
 	updatePublishButton() {
 		const button = document.getElementById("publish-commit");
 		if (!button) return;
+		const chip = document.getElementById("commit-revision");
 		const id = this.revisionIdFor(this.currentCommitIdx);
+		if (chip) chip.hidden = !id;
 		button.hidden = !id;
 		if (!id) return;
 		const status = this.phabRevisionStatus;
@@ -13306,11 +13369,25 @@ var PublishDialogMethods = class {
 		const error = this.phabValidationError ?? status?.error;
 		const verifying = !status && !error;
 		button.classList.toggle("verifying", verifying);
-		for (const state of Object.values(REVISION_STATE_CLASSES)) button.classList.remove(state);
+		for (const state of Object.values(REVISION_STATE_CLASSES)) chip?.classList.remove(state);
 		const stateClass = REVISION_STATE_CLASSES[revision?.status ?? ""];
-		if (stateClass) button.classList.add(stateClass);
-		const stateName = revision?.status_name ? ` · ${revision.status_name}` : "";
-		button.textContent = published ? `Published ${id} ✓` : `Publish ${id}${stateName}`;
+		if (stateClass) chip?.classList.add(stateClass);
+		if (chip) {
+			const label = revision?.url ? el("a", {
+				className: "commit-revision-link",
+				text: id,
+				attrs: {
+					href: revision.url,
+					target: "_blank",
+					rel: "noopener noreferrer"
+				}
+			}) : document.createTextNode(id);
+			if (revision?.url) label.appendChild(externalLinkIcon());
+			chip.replaceChildren(label);
+			if (revision?.status_name) chip.append(` · ${revision.status_name}`);
+		}
+		button.textContent = published ? "Published ✓" : "Publish";
+		button.setAttribute("aria-label", published ? `Published ${id}` : `Publish ${id}`);
 		button.disabled = verifying || published || !!error || !revision || !revision.publishable;
 		button.title = verifying ? `Verifying ${id}…` : error ?? revision?.reason ?? "";
 	}
@@ -13561,7 +13638,7 @@ var SeriesMethods = class {
 		return row;
 	}
 	renderSeriesNav() {
-		this.updatePublishButton();
+		this.renderCommitBar();
 		const container = document.getElementById("commit-strip");
 		const resizer = document.getElementById("commit-strip-resizer");
 		if (!container) return;
@@ -14753,6 +14830,7 @@ var MonacoApp = class {
 		});
 	}
 	renderProjectInfo() {
+		this.renderCommitBar();
 		const container = $$1("#project-info");
 		if (!container) return;
 		clearEl(container);
@@ -14894,6 +14972,7 @@ applyMixin(MonacoApp, SeriesMethods);
 applyMixin(MonacoApp, StackedViewMethods);
 applyMixin(MonacoApp, PublishDialogMethods);
 applyMixin(MonacoApp, ConnectAgentMethods);
+applyMixin(MonacoApp, CommitBarMethods);
 //#endregion
 //#region web/src/main.ts
 document.title = "lrv — Loading…";

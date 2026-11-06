@@ -114,7 +114,7 @@ test('Finish prints remaining comments and published URLs to stdout and exits', 
     });
     await isolateConfig(page);
     await page.goto(url);
-    await expect(page.locator('#publish-commit')).toHaveText('Publish D123');
+    await expect(page.locator('#publish-commit')).toHaveText('Publish');
     await page.evaluate(() => {
       window.__APP!.commentManager.addComment({
         file: 'a.txt',
@@ -132,7 +132,7 @@ test('Finish prints remaining comments and published URLs to stdout and exits', 
     });
     await page.locator('#publish-commit').click();
     await page.locator('.publish-revision').click();
-    await expect(page.locator('#publish-commit')).toHaveText('Published D123 ✓');
+    await expect(page.locator('#publish-commit')).toHaveText('Published ✓');
     expect(calls).toContain('differential.createinline');
     expect(calls).toContain('differential.createcomment');
     await page.locator('#submit-review').click();

@@ -207,7 +207,6 @@ export class CommitMethods {
       const viewEl = el('div', { className: 'commit-view' });
       viewEl.style.padding = '16px';
       viewEl.style.overflow = 'auto';
-      viewEl.style.height = 'calc(100vh - 48px)';
       host.appendChild(viewEl);
       this._commitViewEl = viewEl;
     }

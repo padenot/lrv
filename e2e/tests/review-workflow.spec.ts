@@ -632,6 +632,7 @@ test.describe('Review Workflow E2E', () => {
     await submit.click();
     await expect(page.locator('#submit-menu')).toHaveCount(0);
     await expect(page.locator('#publish-commit')).toBeHidden();
+    await expect(page.locator('#commit-bar')).toBeHidden();
     await expect(page.locator('.submit-review-modal')).toBeVisible();
   });
 
@@ -718,7 +719,7 @@ test.describe('Review Workflow E2E', () => {
     await expect(dialog.locator('.publish-revision')).toBeEnabled();
     await dialog.getByRole('textbox').press('Control+Enter');
     await expect(dialog).toHaveCount(0);
-    await expect(page.locator('#publish-commit')).toHaveText('Published D123 ✓');
+    await expect(page.locator('#publish-commit')).toHaveText('Published ✓');
     await expect(page.locator('#publish-commit')).toBeDisabled();
     expect(bodies[1].action).toBe('request-changes');
     expect(bodies[1].overall_comment).toBe('Overall for D123');
@@ -762,7 +763,7 @@ test.describe('Review Workflow E2E', () => {
       );
       await openApp(page);
       const button = page.locator('#publish-commit');
-      await expect(button).toHaveText('Publish D123');
+      await expect(button).toHaveText('Publish');
       if (!own) {
         await expect(button).toBeDisabled();
         await expect(button).toHaveAttribute('title', 'Diff mismatch');
@@ -821,16 +822,39 @@ test.describe('Review Workflow E2E', () => {
     });
     await openApp(page);
     const button = page.locator('#publish-commit');
-    await expect(button).toHaveText('Publish D123');
+    await expect(button).toHaveText('Publish');
     await expect(button).toBeDisabled();
     await expect(button).toHaveClass(/verifying/);
     await expect(button).toHaveAttribute('title', 'Verifying D123…');
 
     releaseStatus('accepted');
-    await expect(button).toHaveText('Publish D123 · Accepted');
+    await expect(button).toHaveText('Publish');
     await expect(button).toBeEnabled();
     await expect(button).not.toHaveClass(/verifying/);
-    await expect(button).toHaveClass(/revision-accepted/);
+    await expect(page.locator('#commit-revision')).toHaveClass(/revision-accepted/);
+    await expect(page.locator('#commit-revision')).toHaveText('D123 · Accepted');
+    await expect(page.locator('#commit-revision a')).toHaveAttribute(
+      'href',
+      'https://phab.example/D123',
+    );
+  });
+
+  test('single commit bar hides series navigation', async ({ page }) => {
+    await page.route('**/api/diff*', async (route) => {
+      const response = await route.fetch();
+      await route.fulfill({
+        json: {
+          ...(await response.json()),
+          commit_hash: 'abcdef123456',
+          commit_message: 'Single commit',
+        },
+      });
+    });
+    await openApp(page);
+    await expect(page.locator('#commit-bar')).toBeVisible();
+    await expect(page.locator('#commit-bar-title')).toHaveText('Single commit');
+    await expect(page.locator('#commit-bar-hash')).toHaveText('abcdef12');
+    await expect(page.locator('.commit-bar-nav')).toHaveCount(0);
   });
 
   test('publish button reports a verification failure', async ({ page }) => {
@@ -850,7 +874,7 @@ test.describe('Review Workflow E2E', () => {
     );
     await openApp(page);
     const button = page.locator('#publish-commit');
-    await expect(button).toHaveText('Publish D123');
+    await expect(button).toHaveText('Publish');
     await expect(button).toBeDisabled();
     await expect(button).not.toHaveClass(/verifying/);
     await expect(button).toHaveAttribute('title', /Failed to verify revisions/);

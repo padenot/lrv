@@ -282,7 +282,6 @@
           title="The agent is waiting for discussion comments"
           >Connected</span
         >
-        <button id="publish-commit" hidden>Publish</button>
         <button id="submit-review">Finish</button>
       </div>
     </div>
@@ -341,6 +340,12 @@
         </div>
       </div>
       <div class="content">
+        <div id="commit-bar" hidden>
+          <div id="commit-bar-context"></div>
+          <div class="commit-bar-actions">
+            <button id="publish-commit" hidden>Publish</button>
+          </div>
+        </div>
         <div id="editor-container"></div>
         <div id="stacked-container" style="display: none"></div>
       </div>
