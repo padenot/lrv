@@ -12763,6 +12763,13 @@ var ReviewNoteMethods = class {
 	buildReviewNoteActions(note) {
 		const actions = el("div", { className: "review-note-actions" });
 		const disposition = note.disposition ?? "open";
+		if (note.id && this.publishedNoteIds.has(note.id)) {
+			actions.appendChild(el("span", {
+				className: "review-note-status review-note-status-accepted",
+				text: "Published"
+			}));
+			return actions;
+		}
 		if (disposition === "accepted" || disposition === "ignored") {
 			actions.appendChild(el("span", {
 				className: `review-note-status review-note-status-${disposition}`,
@@ -13106,7 +13113,7 @@ var DialogMethods = class {
 	}
 	async showSubmitConfirmation() {
 		const submissionComments = this.commentManager.getComments().filter((c) => !this.publishedCommentKeys.has(commentKey(c)));
-		const accepted = acceptedNoteEntries(this.reviewNoteManager.getNotes());
+		const accepted = acceptedNoteEntries(this.reviewNoteManager.getNotes().filter((note) => !note.id || !this.publishedNoteIds.has(note.id)));
 		const comments = [...submissionComments, ...accepted];
 		const submitLabel = "Finish";
 		let submit = () => {};
@@ -13446,9 +13453,20 @@ var PublishDialogMethods = class {
 			text: status.error
 		}));
 		const originals = this.commentManager.getComments().filter((c) => !this.publishedCommentKeys.has(commentKey(c)));
+		const accepted = this.reviewNoteManager.getNotes().filter((note) => note.disposition === "accepted" && note.id && !this.publishedNoteIds.has(note.id));
+		const publishableNotes = (id) => {
+			const revision = status.revisions.find((r) => r.id === id);
+			return accepted.filter((note) => !revision.own && (note.origin ?? "agent") === "agent" && revision.commit_idxs.includes(note.commit_idx ?? 0));
+		};
 		const forRevision = (id) => {
 			const revision = status.revisions.find((r) => r.id === id);
-			return originals.filter((c) => revision.commit_idxs.includes(c.commit_idx ?? 0));
+			return [...originals.filter((c) => revision.commit_idxs.includes(c.commit_idx ?? 0)), ...publishableNotes(id).map((note) => ({
+				file: note.file,
+				line: note.line,
+				side: note.side,
+				body: note.body,
+				...note.commit_idx === void 0 ? {} : { commit_idx: note.commit_idx }
+			}))];
 		};
 		const panel = el("div", { className: "publish-panel" });
 		body.appendChild(panel);
@@ -13457,7 +13475,7 @@ var PublishDialogMethods = class {
 			panel.appendChild(el("p", { text: "Revision unavailable." }));
 			return;
 		}
-		const unassigned = acceptedNoteEntries(this.reviewNoteManager.getNotes()).filter((c) => revision.commit_idxs.includes(c.commit_idx ?? 0));
+		const unassigned = accepted.filter((note) => revision.commit_idxs.includes(note.commit_idx ?? 0) && (revision.own || note.origin === "host"));
 		let rendering = 0;
 		const render = () => {
 			const generation = ++rendering;
@@ -13577,7 +13595,9 @@ var PublishDialogMethods = class {
 					if (!response.ok) throw new Error((await response.text()).trim() || `HTTP ${response.status}`);
 					revision.published = true;
 					comments.forEach((c) => this.publishedCommentKeys.add(commentKey(c)));
+					publishableNotes(revision.id).forEach((note) => this.publishedNoteIds.add(note.id));
 					this.publishedRevisionIds.add(revision.id);
+					this.renderReviewNotes();
 					this.renderSeriesNav();
 					close();
 				} catch (error) {
@@ -14505,6 +14525,7 @@ function applyMixin(TargetClass, MethodsClass) {
 var MonacoApp = class {
 	agentAttached = false;
 	publishedCommentKeys = /* @__PURE__ */ new Set();
+	publishedNoteIds = /* @__PURE__ */ new Set();
 	publishedRevisionIds = /* @__PURE__ */ new Set();
 	publishStates = /* @__PURE__ */ new Map();
 	phabStatus = null;

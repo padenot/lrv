@@ -24,6 +24,7 @@ type InlineThread = {
 };
 
 export class ReviewNoteMethods {
+  declare publishedNoteIds: Set<string>;
   declare editor: AppContext['editor'];
   declare files: AppContext['files'];
   declare currentFileIndex: number;
@@ -285,6 +286,15 @@ export class ReviewNoteMethods {
   private buildReviewNoteActions(note: ReviewNote) {
     const actions = el('div', { className: 'review-note-actions' });
     const disposition = note.disposition ?? 'open';
+    if (note.id && this.publishedNoteIds.has(note.id)) {
+      actions.appendChild(
+        el('span', {
+          className: 'review-note-status review-note-status-accepted',
+          text: 'Published',
+        }),
+      );
+      return actions;
+    }
 
     if (disposition === 'accepted' || disposition === 'ignored') {
       actions.appendChild(

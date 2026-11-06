@@ -66,6 +66,7 @@ function applyMixin(TargetClass: Constructor, MethodsClass: Constructor) {
 export class MonacoApp {
   agentAttached = false;
   publishedCommentKeys = new Set<string>();
+  publishedNoteIds = new Set<string>();
   publishedRevisionIds = new Set<string>();
   publishStates = new Map<string, PublishState>();
   phabStatus: Promise<PhabStatus> | null = null;

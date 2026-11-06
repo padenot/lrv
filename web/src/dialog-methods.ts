@@ -27,6 +27,7 @@ export function commentKey(comment: ReviewComment): string {
 export class DialogMethods {
   declare reviewNoteManager: AppContext['reviewNoteManager'];
   declare publishedCommentKeys: Set<string>;
+  declare publishedNoteIds: Set<string>;
   declare publishedRevisionIds: Set<string>;
   declare config: AppContext['config'];
   declare isInline: boolean;
@@ -381,7 +382,11 @@ export class DialogMethods {
     const submissionComments = this.commentManager
       .getComments()
       .filter((c) => !this.publishedCommentKeys.has(commentKey(c)));
-    const accepted = acceptedNoteEntries(this.reviewNoteManager.getNotes());
+    const accepted = acceptedNoteEntries(
+      this.reviewNoteManager
+        .getNotes()
+        .filter((note) => !note.id || !this.publishedNoteIds.has(note.id)),
+    );
     const comments = [...submissionComments, ...accepted];
     const submitLabel = 'Finish';
     let submit: () => void | Promise<void> = () => {};

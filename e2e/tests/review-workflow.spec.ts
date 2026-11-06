@@ -926,6 +926,7 @@ test.describe('Review Workflow E2E', () => {
           },
           {
             id: file + '-address',
+            origin: 'host',
             file,
             line: 2,
             side: 'new',
@@ -974,9 +975,118 @@ test.describe('Review Workflow E2E', () => {
     expect(sent.comments[0].in_reply_to).toEqual({
       id: `${sent.comments[0].file}-address`,
       author: 'Author',
+      origin: 'host',
       body: 'Please fix this.',
     });
   });
+
+  for (const own of [false, true]) {
+    test(`publishes accepted agent notes only on ${own ? 'own' : 'other authors’'} revisions`, async ({
+      page,
+    }) => {
+      await page.route('**/api/context', async (route) => {
+        const response = await route.fetch();
+        await route.fulfill({
+          response,
+          json: {
+            ...(await response.json()),
+            phabricator_available: true,
+            phabricator_revisions: ['D123'],
+          },
+        });
+      });
+      await page.route('**/api/phabricator', (route) =>
+        route.fulfill({
+          json: {
+            user: 'reviewer',
+            revisions: [
+              {
+                id: 'D123',
+                title: 'Revision',
+                url: 'https://phab.example/D123',
+                commit_idxs: [0],
+                own,
+                closed: false,
+                publishable: true,
+                published: false,
+              },
+            ],
+          },
+        }),
+      );
+      let published: any;
+      await page.route('**/api/phabricator/publish', async (route) => {
+        published = route.request().postDataJSON();
+        await route.fulfill({ json: { url: 'https://phab.example/D123' } });
+      });
+      let finished: any;
+      await page.route('**/api/complete', async (route) => {
+        finished = route.request().postDataJSON();
+        await route.fulfill({ status: 200, body: '' });
+      });
+      await openApp(page);
+      await page.evaluate(() => {
+        const app = (window as any).__APP;
+        const file = app.files[0].path;
+        app.reviewNoteManager.setNotes([
+          { id: 'default-agent', file, line: 1, side: 'new', body: 'Default agent finding' },
+          {
+            id: 'agent',
+            origin: 'agent',
+            file,
+            line: 1,
+            side: 'new',
+            body: 'Explicit agent finding',
+          },
+          { id: 'host', origin: 'host', file, line: 1, side: 'new', body: 'Human finding' },
+          { id: 'ignored', origin: 'agent', file, line: 1, side: 'new', body: 'Ignored finding' },
+          { id: 'open', origin: 'agent', file, line: 1, side: 'new', body: 'Open finding' },
+          {
+            id: 'other-commit',
+            origin: 'agent',
+            file,
+            line: 1,
+            side: 'new',
+            body: 'Other commit finding',
+            commit_idx: 1,
+          },
+        ]);
+        app.reviewNoteManager.applyDispositions({
+          'default-agent': 'accepted',
+          agent: 'accepted',
+          host: 'accepted',
+          ignored: 'ignored',
+          'other-commit': 'accepted',
+        });
+        app.commentManager.addComment({ file, line: 1, side: 'new', body: 'User comment' });
+      });
+      await page.locator('#publish-commit').click();
+      const dialog = page.locator('.publish-dialog');
+      await expect(dialog).toContainText(
+        own
+          ? '3 comments stay in the review and are printed on Finish.'
+          : '1 comment stays in the review and is printed on Finish.',
+      );
+      await expect(dialog.locator('.comment-preview')).toHaveCount(own ? 1 : 3);
+      await dialog.locator('.publish-revision').click();
+      await expect(dialog).toHaveCount(0);
+      expect(published.comments.map((c: any) => c.body)).toEqual(
+        own
+          ? ['User comment']
+          : ['User comment', 'Default agent finding', 'Explicit agent finding'],
+      );
+      expect(published.comments.every((c: any) => !c.in_reply_to)).toBe(true);
+      await expect(page.locator('.review-note-status', { hasText: 'Published' })).toHaveCount(
+        own ? 0 : 2,
+      );
+      await page.locator('#submit-review').click();
+      await page.locator('.confirm-submit-btn').click();
+      await expect(page.locator('#submit-review')).toHaveText('Review finished');
+      expect(finished.comments.map((c: any) => c.in_reply_to.id)).toEqual(
+        own ? ['default-agent', 'agent', 'host', 'other-commit'] : ['host', 'other-commit'],
+      );
+    });
+  }
 
   test('restores accepted and ignored note dispositions after reload', async ({ page }) => {
     await page.route('**/api/review-notes', (route) =>
