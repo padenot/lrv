@@ -850,6 +850,8 @@ pub struct RevisionStatusInfo {
     pub outdated: bool,
     #[serde(skip)]
     diff_id: u64,
+    #[serde(skip)]
+    ownership_known: bool,
 }
 
 pub struct Validation {
@@ -857,6 +859,23 @@ pub struct Validation {
     pub error: Option<String>,
     pub revisions: Vec<RevisionStatusInfo>,
     client: Option<PhabricatorClient>,
+}
+
+/// Ownership is only known after authentication and a successful author lookup.
+pub fn own_revisions(validation: &Validation, commit_count: usize) -> Vec<Option<bool>> {
+    let mut ownership = vec![None; commit_count];
+    if validation.error.is_none() {
+        for revision in &validation.revisions {
+            if revision.ownership_known {
+                for &idx in &revision.commit_idxs {
+                    if let Some(own) = ownership.get_mut(idx) {
+                        *own = Some(revision.own);
+                    }
+                }
+            }
+        }
+    }
+    ownership
 }
 
 /// Revisions by someone else whose latest diff the local commit doesn't match.
@@ -903,6 +922,7 @@ impl Publisher {
                     published: false,
                     outdated: false,
                     diff_id: 1,
+                    ownership_known: true,
                 }],
             })
             .ok()
@@ -935,6 +955,14 @@ impl Publisher {
             .iter()
             .map(|target| target.as_ref().map(|target| format!("D{}", target.id)))
             .collect()
+    }
+
+    /// Read startup ownership without retrying a timed-out validation or requiring a token.
+    pub fn own_revisions(&self) -> Vec<Option<bool>> {
+        match self.validation.get() {
+            Some(validation) => own_revisions(validation, self.targets.len()),
+            None => vec![None; self.targets.len()],
+        }
     }
 
     pub async fn validate(&self) -> &Validation {
@@ -976,6 +1004,7 @@ impl Publisher {
                         published: false,
                         outdated: false,
                         diff_id: 0,
+                        ownership_known: false,
                         reason: (target.base_url != *base)
                             .then(|| "Revision is on a different server".into()),
                     });
@@ -1038,6 +1067,7 @@ impl Publisher {
                             }
                             revision.title = active.title;
                             revision.url = active.uri;
+                            revision.ownership_known = active.author_phid.is_some();
                             revision.own =
                                 active.author_phid.as_deref() == Some(viewer.phid.as_str());
                             revision.closed = active.closed;
@@ -1259,7 +1289,31 @@ mod tests {
             published: false,
             outdated,
             diff_id: 1,
+            ownership_known: true,
         }
+    }
+
+    #[test]
+    fn ownership_requires_authenticated_known_authors() {
+        let mut own = revision_status("D1", true, false);
+        own.commit_idxs = vec![0, 2];
+        let mut foreign = revision_status("D2", false, true);
+        foreign.commit_idxs = vec![1];
+        let mut unknown = revision_status("D3", false, false);
+        unknown.commit_idxs = vec![3];
+        unknown.ownership_known = false;
+        let mut validation = Validation {
+            user: "reviewer".into(),
+            error: None,
+            revisions: vec![own, foreign, unknown],
+            client: None,
+        };
+        assert_eq!(
+            super::own_revisions(&validation, 5),
+            vec![Some(true), Some(false), Some(true), None, None]
+        );
+        validation.error = Some("Authentication failed".into());
+        assert_eq!(super::own_revisions(&validation, 5), vec![None; 5]);
     }
 
     #[test]
@@ -1446,8 +1500,13 @@ mod tests {
                     })
                     .to_vec(),
             );
+            assert_eq!(publisher.own_revisions(), vec![None, None]);
             let validation = publisher.validate().await;
             assert!(validation.error.is_none());
+            assert_eq!(
+                publisher.own_revisions(),
+                vec![Some(false), if missing { None } else { Some(false) }]
+            );
             assert!(validation.revisions[0].publishable);
             assert_eq!(validation.revisions[0].diff_id, 11);
             if missing {

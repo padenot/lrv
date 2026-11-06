@@ -160,9 +160,8 @@ test('Finish prints remaining comments and published URLs to stdout and exits', 
     await expect.poll(() => server.exitCode).toBe(0);
     const result = JSON.parse(stdout);
     expect(result.published).toEqual([`${base}/D123`]);
-    expect(result.comments).toHaveLength(1);
-    expect(result.comments[0].in_reply_to.id).toBe('address');
-    expect(result.comments[0].body).toBe('');
+    // A stale accepted host note on someone else's revision is excluded from Finish.
+    expect(result.comments).toEqual([]);
   } finally {
     if (child && child.exitCode === null) {
       child.kill('SIGKILL');

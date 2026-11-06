@@ -545,9 +545,12 @@ function replyTarget(note) {
 	if (note.source_url !== void 0) target.source_url = note.source_url;
 	return target;
 }
+function isForeignHostNote(note, ownRevisions) {
+	return (note.origin ?? "agent") === "host" && ownRevisions?.[note.commit_idx ?? 0] === false;
+}
 /** Generated only when handing accepted notes to Finish or recovery. */
-function acceptedNoteEntries(notes) {
-	return notes.filter((note) => note.disposition === "accepted").map((note) => ({
+function acceptedNoteEntries(notes, ownRevisions) {
+	return notes.filter((note) => note.disposition === "accepted" && !isForeignHostNote(note, ownRevisions)).map((note) => ({
 		file: note.file,
 		line: note.line,
 		side: note.side,
@@ -12770,6 +12773,20 @@ var ReviewNoteMethods = class {
 			}));
 			return actions;
 		}
+		const foreignHost = isForeignHostNote(note, this.context.own_revisions);
+		const reply = el("button", {
+			className: `btn-secondary review-note-btn${foreignHost ? "" : " review-note-reply-btn"}`,
+			text: "Reply"
+		});
+		reply.addEventListener("click", (event) => {
+			event.preventDefault();
+			event.stopPropagation();
+			this.showReviewNoteReplyForm(actions, note);
+		});
+		if (foreignHost) {
+			actions.appendChild(reply);
+			return actions;
+		}
 		if (disposition === "accepted" || disposition === "ignored") {
 			actions.appendChild(el("span", {
 				className: `review-note-status review-note-status-${disposition}`,
@@ -12795,15 +12812,6 @@ var ReviewNoteMethods = class {
 			event.preventDefault();
 			event.stopPropagation();
 			this.reviewNoteManager.updateNote(note, { disposition: "accepted" });
-		});
-		const reply = el("button", {
-			className: "btn-secondary review-note-btn review-note-reply-btn",
-			text: "Reply"
-		});
-		reply.addEventListener("click", (event) => {
-			event.preventDefault();
-			event.stopPropagation();
-			this.showReviewNoteReplyForm(actions, note);
 		});
 		const discuss = el("button", {
 			className: "btn-secondary review-note-btn discuss-btn",
@@ -13142,7 +13150,7 @@ var DialogMethods = class {
 	}
 	async showSubmitConfirmation() {
 		const submissionComments = this.commentManager.getComments().filter((c) => !this.publishedCommentKeys.has(commentKey(c)));
-		const accepted = acceptedNoteEntries(this.reviewNoteManager.getNotes().filter((note) => !note.id || !this.publishedNoteIds.has(note.id)));
+		const accepted = acceptedNoteEntries(this.reviewNoteManager.getNotes().filter((note) => !note.id || !this.publishedNoteIds.has(note.id)), this.context.own_revisions);
 		const comments = [...submissionComments, ...accepted];
 		const submitLabel = "Finish";
 		let submit = () => {};
@@ -13504,7 +13512,7 @@ var PublishDialogMethods = class {
 			panel.appendChild(el("p", { text: "Revision unavailable." }));
 			return;
 		}
-		const unassigned = accepted.filter((note) => revision.commit_idxs.includes(note.commit_idx ?? 0) && (revision.own || note.origin === "host"));
+		const unassigned = accepted.filter((note) => revision.commit_idxs.includes(note.commit_idx ?? 0) && revision.own);
 		let rendering = 0;
 		const render = () => {
 			const generation = ++rendering;

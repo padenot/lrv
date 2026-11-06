@@ -194,9 +194,7 @@ export class PublishDialogMethods {
       return;
     }
     const unassigned = accepted.filter(
-      (note) =>
-        revision.commit_idxs.includes(note.commit_idx ?? 0) &&
-        (revision.own || note.origin === 'host'),
+      (note) => revision.commit_idxs.includes(note.commit_idx ?? 0) && revision.own,
     );
     let rendering = 0;
     const render = () => {

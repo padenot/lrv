@@ -891,6 +891,7 @@ test.describe('Review Workflow E2E', () => {
           ...(await response.json()),
           phabricator_available: true,
           phabricator_revisions: ['D123'],
+          own_revisions: [true],
         },
       });
     });
@@ -904,7 +905,7 @@ test.describe('Review Workflow E2E', () => {
               title: 'Revision',
               url: 'https://phab.example/D123',
               commit_idxs: [0],
-              own: false,
+              own: true,
               closed: false,
               publishable: true,
               published: false,
@@ -992,6 +993,7 @@ test.describe('Review Workflow E2E', () => {
             ...(await response.json()),
             phabricator_available: true,
             phabricator_revisions: ['D123'],
+            own_revisions: [own],
           },
         });
       });
@@ -1062,11 +1064,13 @@ test.describe('Review Workflow E2E', () => {
       });
       await page.locator('#publish-commit').click();
       const dialog = page.locator('.publish-dialog');
-      await expect(dialog).toContainText(
-        own
-          ? '3 comments stay in the review and are printed on Finish.'
-          : '1 comment stays in the review and is printed on Finish.',
-      );
+      if (own) {
+        await expect(dialog).toContainText(
+          '3 comments stay in the review and are printed on Finish.',
+        );
+      } else {
+        await expect(dialog).not.toContainText('comment stays in the review');
+      }
       await expect(dialog.locator('.comment-preview')).toHaveCount(own ? 1 : 3);
       await dialog.locator('.publish-revision').click();
       await expect(dialog).toHaveCount(0);
@@ -1083,7 +1087,7 @@ test.describe('Review Workflow E2E', () => {
       await page.locator('.confirm-submit-btn').click();
       await expect(page.locator('#submit-review')).toHaveText('Review finished');
       expect(finished.comments.map((c: any) => c.in_reply_to.id)).toEqual(
-        own ? ['default-agent', 'agent', 'host', 'other-commit'] : ['host', 'other-commit'],
+        own ? ['default-agent', 'agent', 'host', 'other-commit'] : ['other-commit'],
       );
     });
   }

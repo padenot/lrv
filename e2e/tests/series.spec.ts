@@ -1058,10 +1058,10 @@ test.describe('Series spanning several GitHub PRs', () => {
       fakeGh,
       `#!/bin/bash
 case "$*" in
-  *"commits/${one}/pulls"*) echo '[["o/r",7,"First PR","https://github.com/o/r/pull/7"]]' ;;
-  *"commits/${two}/pulls"*) echo '[["o/r",9,"Second PR","https://github.com/o/r/pull/9"],["o/r",7,"First PR","https://github.com/o/r/pull/7"]]' ;;
+  *"commits/${one}/pulls"*) echo '[["o/r",7,"First PR","https://github.com/o/r/pull/7","author"]]' ;;
+  *"commits/${two}/pulls"*) echo '[["o/r",9,"Second PR","https://github.com/o/r/pull/9","author"],["o/r",7,"First PR","https://github.com/o/r/pull/7","author"]]' ;;
   *"commits/${three}/pulls"*) echo '[]' ;;
-  *"commits/${four}/pulls"*) echo '[["o/r",9,"Second PR","https://github.com/o/r/pull/9"]]' ;;
+  *"commits/${four}/pulls"*) echo '[["o/r",9,"Second PR","https://github.com/o/r/pull/9","author"]]' ;;
   *"pulls/7/comments"*)
     echo '{"id":1,"body":"note on first","path":"one.txt","line":1,"side":"RIGHT","commit_id":"${one}","user":{"login":"alice"}}' ;;
   *"/comments"* | *"/reviews"*) ;;

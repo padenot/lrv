@@ -268,6 +268,9 @@ pub struct ProjectContext {
     /// doesn't wait for Conduit validation to show it.
     #[serde(default)]
     pub phabricator_revisions: Vec<Option<String>>,
+    /// Per-commit ownership; unknown ownership preserves all review note actions.
+    #[serde(default)]
+    pub own_revisions: Vec<Option<bool>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -300,6 +303,8 @@ pub struct PrInfo {
     pub number: u64,
     pub title: Option<String>,
     pub url: Option<String>,
+    #[serde(default)]
+    pub author: Option<String>,
 }
 
 /// Which pull request each commit of the series belongs to.

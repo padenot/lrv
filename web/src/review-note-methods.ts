@@ -7,6 +7,7 @@ import {
   commentLineLabel,
   commentStartLine,
   replyTarget,
+  isForeignHostNote,
   type ReviewComment,
 } from './comments';
 import type { AppContext } from './types/app';
@@ -24,6 +25,7 @@ type InlineThread = {
 };
 
 export class ReviewNoteMethods {
+  declare context: AppContext['context'];
   declare publishedNoteIds: Set<string>;
   declare editor: AppContext['editor'];
   declare files: AppContext['files'];
@@ -296,6 +298,22 @@ export class ReviewNoteMethods {
       return actions;
     }
 
+    const foreignHost = isForeignHostNote(note, this.context.own_revisions);
+    const reply = el('button', {
+      className: `btn-secondary review-note-btn${foreignHost ? '' : ' review-note-reply-btn'}`,
+      text: 'Reply',
+    });
+    reply.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.showReviewNoteReplyForm(actions, note);
+    });
+
+    if (foreignHost) {
+      actions.appendChild(reply);
+      return actions;
+    }
+
     if (disposition === 'accepted' || disposition === 'ignored') {
       actions.appendChild(
         el('span', {
@@ -318,16 +336,6 @@ export class ReviewNoteMethods {
       event.preventDefault();
       event.stopPropagation();
       this.reviewNoteManager.updateNote(note, { disposition: 'accepted' });
-    });
-
-    const reply = el('button', {
-      className: 'btn-secondary review-note-btn review-note-reply-btn',
-      text: 'Reply',
-    });
-    reply.addEventListener('click', (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      this.showReviewNoteReplyForm(actions, note);
     });
 
     const discuss = el('button', {

@@ -36,6 +36,7 @@ fn test_app_state_construction() {
         comment_store_error: None,
         phabricator_available: false,
         phabricator_revisions: Vec::new(),
+        own_revisions: Vec::new(),
     };
 
     let (shutdown_tx, _rx) = tokio::sync::mpsc::channel::<()>(1);
@@ -98,6 +99,7 @@ fn test_create_router() {
         comment_store_error: None,
         phabricator_available: false,
         phabricator_revisions: Vec::new(),
+        own_revisions: Vec::new(),
     };
 
     let (shutdown_tx, _rx) = tokio::sync::mpsc::channel::<()>(1);
@@ -160,6 +162,7 @@ fn review_note_state() -> lrv::server::AppState {
         comment_store_error: None,
         phabricator_available: false,
         phabricator_revisions: Vec::new(),
+        own_revisions: Vec::new(),
     };
 
     let (shutdown_tx, _rx) = tokio::sync::mpsc::channel::<()>(1);

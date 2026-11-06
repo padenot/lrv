@@ -151,10 +151,17 @@ export function replyTarget(note: ReviewNote): ReplyTarget {
   return target;
 }
 
+export function isForeignHostNote(note: ReviewNote, ownRevisions?: (boolean | null)[]): boolean {
+  return (note.origin ?? 'agent') === 'host' && ownRevisions?.[note.commit_idx ?? 0] === false;
+}
+
 /** Generated only when handing accepted notes to Finish or recovery. */
-export function acceptedNoteEntries(notes: ReviewNote[]): ReviewComment[] {
+export function acceptedNoteEntries(
+  notes: ReviewNote[],
+  ownRevisions?: (boolean | null)[],
+): ReviewComment[] {
   return notes
-    .filter((note) => note.disposition === 'accepted')
+    .filter((note) => note.disposition === 'accepted' && !isForeignHostNote(note, ownRevisions))
     .map((note) => ({
       file: note.file,
       line: note.line,

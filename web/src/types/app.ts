@@ -81,6 +81,7 @@ export type AppContextData = {
   comment_store_error?: string | null;
   phabricator_available?: boolean;
   phabricator_revisions?: (string | null)[];
+  own_revisions?: (boolean | null)[];
 };
 
 export type UserTheme = {

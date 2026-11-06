@@ -71,6 +71,7 @@ fn get_project_context() -> ProjectContext {
         comment_store_error: None,
         phabricator_available: false,
         phabricator_revisions: Vec::new(),
+        own_revisions: Vec::new(),
     }
 }
 
@@ -1306,6 +1307,7 @@ async fn main() -> Result<()> {
         (vec![diff], vec![diff_text], vec![], vec![], false)
     };
 
+    project_context.own_revisions = vec![None; diffs.len()];
     let mut review_notes = Vec::new();
     for path in &args.review_notes_file {
         review_notes.extend(load_startup_review_notes_file(path)?);
@@ -1375,6 +1377,11 @@ async fn main() -> Result<()> {
         tokio::join!(named, trailers)
     };
     let (outdated, (named_notes, trailer_notes)) = tokio::join!(validation, fetch_notes);
+    if let Some(publisher) = &publisher {
+        if !args.phab_revisions.is_empty() || config_fetch {
+            project_context.own_revisions = publisher.own_revisions();
+        }
+    }
     // An explicit --phab-revision aborts; comments fetched because of the config are skipped.
     if !args.phab_revisions.is_empty() && !outdated.is_empty() {
         let reasons = outdated
@@ -1448,6 +1455,17 @@ async fn main() -> Result<()> {
                 if let Some((notes, prs)) = auto_fetch_github(&diffs).await {
                     review_notes.extend(notes);
                     pull_requests = prs;
+                }
+            }
+        }
+    }
+    if !pull_requests.prs.is_empty() {
+        let login = github::viewer_login().await;
+        for (idx, pr) in pull_requests.commit_prs.iter().enumerate() {
+            if project_context.own_revisions[idx].is_none() {
+                if let Some(pr) = pr {
+                    project_context.own_revisions[idx] =
+                        github::is_own_pr(&pull_requests.prs[*pr], login.as_deref());
                 }
             }
         }
