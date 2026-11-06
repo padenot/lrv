@@ -880,7 +880,7 @@ test.describe('Review Workflow E2E', () => {
     await expect(button).toHaveAttribute('title', /Failed to verify revisions/);
   });
 
-  test('publishing sends only reply bodies, leaves Address items for Finish and omits published comments', async ({
+  test('publishing sends only reply bodies, leaves Accept items for Finish and omits published comments', async ({
     page,
   }) => {
     await page.route('**/api/context', async (route) => {
@@ -947,12 +947,12 @@ test.describe('Review Workflow E2E', () => {
     });
     await openApp(page);
     const note = page.locator('.review-note').first();
-    await expect(note.locator('button', { hasText: 'Address' })).toHaveCount(1);
+    await expect(note.locator('button', { hasText: 'Accept' })).toHaveCount(1);
     await expect(note.locator('button', { hasText: 'Ignore' })).toHaveCount(1);
     await note.locator('button', { hasText: 'Reply' }).click();
     await note.locator('.review-note-reply-text').fill('Because of the cache.');
     await note.locator('button', { hasText: 'Queue' }).click();
-    await page.locator('.review-note').nth(1).locator('button', { hasText: 'Address' }).click();
+    await page.locator('.review-note').nth(1).locator('button', { hasText: 'Accept' }).click();
     await page.locator('#publish-commit').click();
     const dialog = page.locator('.publish-dialog');
     await expect(dialog.locator('.comment-preview-text')).toHaveText('Because of the cache.');
@@ -989,11 +989,11 @@ test.describe('Review Workflow E2E', () => {
     );
     await openApp(page);
     const note = page.locator('.review-note').first();
-    await note.locator('button', { hasText: 'Address' }).click();
-    await expect(note).toContainText('Queued for agent');
+    await note.locator('button', { hasText: 'Accept' }).click();
+    await expect(note).toContainText('Accepted');
     await expect(page.locator('#comment-count')).toHaveText('1');
     await note.locator('button', { hasText: 'Undo' }).click();
-    await expect(note.locator('button', { hasText: 'Address' })).toHaveCount(1);
+    await expect(note.locator('button', { hasText: 'Accept' })).toHaveCount(1);
     await expect(page.locator('#comment-count')).toHaveText('0');
   });
 

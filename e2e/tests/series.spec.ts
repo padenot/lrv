@@ -1019,7 +1019,7 @@ test.describe('Commit-message notes in a one-commit series', () => {
     await page.locator('.tree-row-summary', { hasText: 'Commit message' }).click();
 
     const actionable = page.locator('.review-note', { hasText: 'commit-level note' });
-    await expect(actionable.getByRole('button', { name: 'Address' })).toBeVisible();
+    await expect(actionable.getByRole('button', { name: 'Accept' })).toBeVisible();
     const readOnly = page.locator('.review-note', { hasText: 'overall note' });
     await expect(readOnly).toBeVisible();
     await expect(readOnly.locator('.review-note-actions')).toHaveCount(0);

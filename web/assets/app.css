@@ -1497,11 +1497,11 @@ body {
   border-left-color: var(--text-secondary);
 }
 
-.review-note-addressed {
+.review-note-accepted {
   border-left-color: #22c55e;
 }
 
-.review-note-status-addressed {
+.review-note-status-accepted {
   color: #22c55e;
 }
 

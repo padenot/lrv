@@ -19,17 +19,17 @@ export type ReviewComment = {
 };
 
 /** A reply with no body only asks the agent to address the note, so it is never published. */
-export function isAddressRequest(comment: ReviewComment): boolean {
+export function isAcceptRequest(comment: ReviewComment): boolean {
   return comment.in_reply_to !== undefined && !comment.body.trim();
 }
 
 /** Text to show for a comment, which for a bare address request is a description of it. */
 export function commentDisplayText(comment: ReviewComment): string {
-  if (!isAddressRequest(comment)) {
+  if (!isAcceptRequest(comment)) {
     return comment.body;
   }
   const author = comment.in_reply_to?.author;
-  return `Address review comment${author ? ` from ${author}` : ''}`;
+  return `Accepted review comment${author ? ` from ${author}` : ''}`;
 }
 
 export function commentStartLine(comment: Pick<ReviewComment, 'line'>): number {

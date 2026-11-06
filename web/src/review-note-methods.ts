@@ -286,11 +286,11 @@ export class ReviewNoteMethods {
     const actions = el('div', { className: 'review-note-actions' });
     const disposition = note.disposition ?? 'open';
 
-    if (disposition === 'addressed' || disposition === 'ignored') {
+    if (disposition === 'accepted' || disposition === 'ignored') {
       actions.appendChild(
         el('span', {
           className: `review-note-status review-note-status-${disposition}`,
-          text: disposition === 'addressed' ? 'Queued for agent' : 'Ignored',
+          text: disposition === 'accepted' ? 'Accepted' : 'Ignored',
         }),
       );
       const undo = el('button', { className: 'btn-secondary review-note-btn', text: 'Undo' });
@@ -304,7 +304,7 @@ export class ReviewNoteMethods {
       return actions;
     }
 
-    const address = el('button', { className: 'btn-primary review-note-btn', text: 'Address' });
+    const address = el('button', { className: 'btn-primary review-note-btn', text: 'Accept' });
     address.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
@@ -376,7 +376,7 @@ export class ReviewNoteMethods {
     this.commentManager.addComment(
       note.commit_idx === undefined ? comment : { ...comment, commit_idx: note.commit_idx },
     );
-    this.reviewNoteManager.updateNote(note, { disposition: 'addressed' });
+    this.reviewNoteManager.updateNote(note, { disposition: 'accepted' });
   }
 
   private unqueueReviewNote(note: ReviewNote) {

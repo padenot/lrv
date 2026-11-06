@@ -459,14 +459,14 @@ const clearEl = (node) => {
 //#endregion
 //#region web/src/comments.ts
 /** A reply with no body only asks the agent to address the note, so it is never published. */
-function isAddressRequest(comment) {
+function isAcceptRequest(comment) {
 	return comment.in_reply_to !== void 0 && !comment.body.trim();
 }
 /** Text to show for a comment, which for a bare address request is a description of it. */
 function commentDisplayText(comment) {
-	if (!isAddressRequest(comment)) return comment.body;
+	if (!isAcceptRequest(comment)) return comment.body;
 	const author = comment.in_reply_to?.author;
-	return `Address review comment${author ? ` from ${author}` : ""}`;
+	return `Accepted review comment${author ? ` from ${author}` : ""}`;
 }
 function commentStartLine(comment) {
 	return Array.isArray(comment.line) ? comment.line[0] : comment.line;
@@ -12697,10 +12697,10 @@ var ReviewNoteMethods = class {
 	buildReviewNoteActions(note) {
 		const actions = el("div", { className: "review-note-actions" });
 		const disposition = note.disposition ?? "open";
-		if (disposition === "addressed" || disposition === "ignored") {
+		if (disposition === "accepted" || disposition === "ignored") {
 			actions.appendChild(el("span", {
 				className: `review-note-status review-note-status-${disposition}`,
-				text: disposition === "addressed" ? "Queued for agent" : "Ignored"
+				text: disposition === "accepted" ? "Accepted" : "Ignored"
 			}));
 			const undo = el("button", {
 				className: "btn-secondary review-note-btn",
@@ -12717,7 +12717,7 @@ var ReviewNoteMethods = class {
 		}
 		const address = el("button", {
 			className: "btn-primary review-note-btn",
-			text: "Address"
+			text: "Accept"
 		});
 		address.addEventListener("click", (event) => {
 			event.preventDefault();
@@ -12793,7 +12793,7 @@ var ReviewNoteMethods = class {
 			...comment,
 			commit_idx: note.commit_idx
 		});
-		this.reviewNoteManager.updateNote(note, { disposition: "addressed" });
+		this.reviewNoteManager.updateNote(note, { disposition: "accepted" });
 	}
 	unqueueReviewNote(note) {
 		const index = this.commentManager.comments.findIndex(({ in_reply_to: target }) => target !== void 0 && target.id === note.id && target.author === note.author && target.body === note.body);
@@ -13392,7 +13392,7 @@ var PublishDialogMethods = class {
 		const originals = this.commentManager.getComments().filter((c) => !this.publishedCommentKeys.has(commentKey(c)));
 		const forRevision = (id) => {
 			const revision = status.revisions.find((r) => r.id === id);
-			return originals.filter((c) => revision.commit_idxs.includes(c.commit_idx ?? 0) && !isAddressRequest(c));
+			return originals.filter((c) => revision.commit_idxs.includes(c.commit_idx ?? 0) && !isAcceptRequest(c));
 		};
 		const panel = el("div", { className: "publish-panel" });
 		body.appendChild(panel);
@@ -13401,7 +13401,7 @@ var PublishDialogMethods = class {
 			panel.appendChild(el("p", { text: "Revision unavailable." }));
 			return;
 		}
-		const unassigned = originals.filter((c) => revision.commit_idxs.includes(c.commit_idx ?? 0) && isAddressRequest(c));
+		const unassigned = originals.filter((c) => revision.commit_idxs.includes(c.commit_idx ?? 0) && isAcceptRequest(c));
 		let rendering = 0;
 		const render = () => {
 			const generation = ++rendering;

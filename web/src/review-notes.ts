@@ -14,7 +14,7 @@ export type ReviewNote = {
   source_url?: string;
   commit_idx?: number;
   read_only?: boolean;
-  disposition?: 'open' | 'addressed' | 'ignored';
+  disposition?: 'open' | 'accepted' | 'ignored';
 };
 
 export class ReviewNoteManager {

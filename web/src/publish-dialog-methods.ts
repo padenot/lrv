@@ -2,7 +2,7 @@ import { el } from './dom';
 import { openModal } from './modal';
 import { fetchJSON } from './api';
 import { commentKey } from './dialog-methods';
-import { isAddressRequest, type ReviewComment } from './comments';
+import { isAcceptRequest, type ReviewComment } from './comments';
 import type { AppContext, PhabStatus, PublishState, ReviewAction } from './types/app';
 
 // Phabricator status values: green when accepted, blue when it needs review, grey while
@@ -159,7 +159,7 @@ export class PublishDialogMethods {
     const forRevision = (id: string) => {
       const revision = status.revisions.find((r) => r.id === id)!;
       return originals.filter(
-        (c) => revision.commit_idxs.includes(c.commit_idx ?? 0) && !isAddressRequest(c),
+        (c) => revision.commit_idxs.includes(c.commit_idx ?? 0) && !isAcceptRequest(c),
       );
     };
     const panel = el('div', { className: 'publish-panel' });
@@ -170,7 +170,7 @@ export class PublishDialogMethods {
       return;
     }
     const unassigned = originals.filter(
-      (c) => revision.commit_idxs.includes(c.commit_idx ?? 0) && isAddressRequest(c),
+      (c) => revision.commit_idxs.includes(c.commit_idx ?? 0) && isAcceptRequest(c),
     );
     let rendering = 0;
     const render = () => {
