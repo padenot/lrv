@@ -149,7 +149,10 @@ The output defaults to JSON (`--format json`), with a `status` field:
     are no findings. Listen again afterwards.
   - `type: "discussion"` has `discussion` containing `id`, `created_at`,
     `file`, `line`, `side`, `body`, and optional `thread_id`, `summarize` and
-    `commit_idx`. Reply with `lrv --add-notes <file>`, setting `discussion_id` to
+    `commit_idx`, and an optional `note` on root discussions. `discussion.note` is
+    a copy of a review note (`id`, `author`, `body`, `source_url`, `origin`): the
+    user is challenging this review note. Address their question in that context.
+    Follow-ups refer to the root with `thread_id` and cannot supply a new `note`. Reply with `lrv --add-notes <file>`, setting `discussion_id` to
     `thread_id` if present, otherwise `id`. It must name the root discussion;
     using a follow-up's own id is rejected. Copy `file`, `line`, and `side`
     (required even though the server moves the reply to the thread), and set

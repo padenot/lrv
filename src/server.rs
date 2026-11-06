@@ -2001,3 +2001,53 @@ async fn publish_phabricator(
         }
     }
 }
+
+#[cfg(test)]
+mod discussion_note_tests {
+    use super::DiscussionRequest;
+    use crate::agent::AgentChannel;
+    use serde_json::json;
+    use std::time::Duration;
+
+    fn request() -> serde_json::Value {
+        json!({
+            "file": "a.rs", "line": [2, 4], "side": "old", "body": "Why this finding?",
+            "note": {"id": "note-1", "body": "Finding", "author": "Reviewer", "origin": "host", "source_url": "https://example.com/note"}
+        })
+    }
+
+    #[test]
+    fn note_context_is_valid_only_on_root_discussions() {
+        let mut value = request();
+        assert!(serde_json::from_value::<DiscussionRequest>(value.clone())
+            .unwrap()
+            .is_valid());
+        value["thread_id"] = json!("lrv-discussion-1");
+        assert!(!serde_json::from_value::<DiscussionRequest>(value.clone())
+            .unwrap()
+            .is_valid());
+        value.as_object_mut().unwrap().remove("note");
+        assert!(serde_json::from_value::<DiscussionRequest>(value)
+            .unwrap()
+            .is_valid());
+    }
+
+    #[tokio::test]
+    async fn note_context_survives_storage_listing_and_agent_events() {
+        let channel = AgentChannel::new(Duration::from_secs(300));
+        let request = request();
+        let discussion = channel
+            .add_discussion(serde_json::from_value(request.clone()).unwrap())
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(&discussion).unwrap()["note"],
+            request["note"]
+        );
+        assert_eq!(
+            serde_json::to_value(channel.discussions()).unwrap()[0]["note"],
+            request["note"]
+        );
+        let events = serde_json::to_value(channel.wait(0, Duration::ZERO).await).unwrap();
+        assert_eq!(events["events"][0]["discussion"]["note"], request["note"]);
+    }
+}
