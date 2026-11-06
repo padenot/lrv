@@ -17,13 +17,13 @@ import {
 } from './comment-draft-storage';
 import { CUSTOM_THEMES } from './themes';
 import { markAppReady } from './ui-signals';
-import { appendLinkifiedText } from './linkify';
 import { sortDiffFiles } from './file-order';
 
 import { FileDataMethods } from './file-data-methods';
 import { FileListMethods } from './file-list-methods';
 import { FileLoadingMethods } from './file-loading-methods';
 import { NavigationMethods } from './navigation-methods';
+import { CommitBarMethods } from './commit-bar-methods';
 import { CommitMethods } from './commit-methods';
 import { CommentsUIMethods } from './comments-ui-methods';
 import { ReviewNoteMethods } from './review-note-methods';
@@ -113,7 +113,6 @@ export class MonacoApp {
   originalModel: editor.ITextModel | null;
   modifiedModel: editor.ITextModel | null;
   _eagerPrefetchStarted: boolean;
-  _commitPopoverEl: HTMLElement | null;
   currentFileIsCommit: boolean;
   _commitViewEl: HTMLElement | null;
   collapsedDirs: Set<string>;
@@ -131,7 +130,6 @@ export class MonacoApp {
   declare nextCommit: () => void;
   declare previousCommit: () => void;
   declare loadFile: (index: number) => Promise<void>;
-  declare showCommitMessagePopover: (anchorEl: HTMLElement, message: string, rev: string) => void;
   declare loadCommitView: () => void;
   declare showSettingsModal: () => void;
   declare showKeyboardHelp: () => void;
@@ -153,6 +151,8 @@ export class MonacoApp {
   agentState: AgentState = { attached: false, busy: false, launch: 'idle' };
   declare setAgentState: (state: AgentState) => void;
   declare setupConnectAgent: () => void;
+  declare setupRequestReview: () => void;
+  declare updateCommitBarVisibility: () => void;
 
   constructor() {
     this.commentManager = new CommentManager();
@@ -186,7 +186,6 @@ export class MonacoApp {
     this.originalModel = null;
     this.modifiedModel = null;
     this._eagerPrefetchStarted = false;
-    this._commitPopoverEl = null;
     this.currentFileIsCommit = false;
     this._commitViewEl = null;
     this.collapsedDirs = new Set();
@@ -558,7 +557,10 @@ export class MonacoApp {
     });
   }
 
+  declare renderCommitBar: () => void;
+
   renderProjectInfo() {
+    this.renderCommitBar();
     const container = $('#project-info');
     if (!container) {
       return;
@@ -569,7 +571,6 @@ export class MonacoApp {
       container.appendChild(
         el('span', { className: 'project-info-value', text: t, attrs: { title: t } }),
       );
-      // fall through to optionally show commit message as well
     }
     const wd = this.context.working_directory ?? '';
     const dirName = wd.split('/').pop() || wd;
@@ -581,31 +582,6 @@ export class MonacoApp {
       container.appendChild(
         el('span', { className: 'project-info-value git-branch', text: this.context.git_branch }),
       );
-    }
-
-    // Optional commit message from diff (when reviewing full commits)
-    if (this.diff && (this.diff.commit_message || this.diff.commit_hash)) {
-      container.appendChild(el('span', { className: 'project-info-separator', text: '·' }));
-      const mm = el('span', { className: 'commit-message' });
-      const rev = this.diff.commit_hash ? `${this.diff.commit_hash.substring(0, 7)}: ` : '';
-      const firstLine = (this.diff.commit_message ?? '').split('\n')[0];
-      appendLinkifiedText(mm, rev + firstLine);
-      if (this.diff.commit_message) {
-        mm.title = this.diff.commit_message;
-      }
-      mm.addEventListener('click', (ev) => {
-        const target = ev.target as Element | null;
-        if (target?.closest('a')) {
-          ev.stopPropagation();
-          return;
-        }
-        this.showCommitMessagePopover(
-          ev.currentTarget as HTMLElement,
-          this.diff?.commit_message ?? '',
-          this.diff?.commit_hash ?? '',
-        );
-      });
-      container.appendChild(mm);
     }
   }
 
@@ -647,6 +623,7 @@ export class MonacoApp {
     // Help button
     $('#help-btn')?.addEventListener('click', () => this.showKeyboardHelp());
 
+    this.setupRequestReview();
     this.setupConnectAgent();
 
     $('#submit-review')?.addEventListener('click', () => {
@@ -745,3 +722,5 @@ applyMixin(MonacoApp, StackedViewMethods);
 applyMixin(MonacoApp, PublishDialogMethods);
 
 applyMixin(MonacoApp, ConnectAgentMethods);
+
+applyMixin(MonacoApp, CommitBarMethods);

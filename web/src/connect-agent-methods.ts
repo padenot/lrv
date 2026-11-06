@@ -15,14 +15,14 @@ export class ConnectAgentMethods {
     const badge = $<HTMLElement>('#agent-status')!;
     button.hidden = !available || active;
     badge.hidden = !available || !active;
-    const busy =
-      state.busy || state.initial_review || (!state.attached && state.launch === 'running');
+    const busy = state.busy || (!state.attached && state.launch === 'running');
     badge.classList.toggle('busy', busy);
     badge.title = busy ? 'The agent is working' : 'The agent is waiting for discussion comments';
     if (active) {
       $<HTMLElement>('#connect-agent-popover')!.hidden = true;
       button.setAttribute('aria-expanded', 'false');
     }
+    this.updateCommitBarVisibility();
   }
 
   setupConnectAgent(this: AppContext): void {
@@ -32,7 +32,6 @@ export class ConnectAgentMethods {
     const provider = $<HTMLSelectElement>('#agent-provider')!;
     const model = $<HTMLInputElement>('#agent-model')!;
     const effort = $<HTMLInputElement>('#agent-effort')!;
-    const review = $<HTMLInputElement>('#agent-initial-review')!;
     const error = $<HTMLElement>('#agent-launch-error')!;
     const submit = $<HTMLButtonElement>('#agent-launch-submit')!;
     try {
@@ -41,7 +40,6 @@ export class ConnectAgentMethods {
         provider.value = saved.provider === 'codex' ? 'codex' : 'claude';
         model.value = typeof saved.model === 'string' ? saved.model : '';
         effort.value = typeof saved.effort === 'string' ? saved.effort : '';
-        review.checked = saved.initial_review !== false;
       }
     } catch {
       /* Storage may be unavailable. */
@@ -50,7 +48,6 @@ export class ConnectAgentMethods {
       provider: provider.value as LaunchRequest['provider'],
       model: model.value.trim(),
       effort: effort.value.trim(),
-      initial_review: review.checked,
     });
     const save = () => {
       try {
@@ -100,7 +97,6 @@ export class ConnectAgentMethods {
               attached: this.agentAttached,
               busy: true,
               launch: 'running',
-              initial_review: req.initial_review,
             });
           }
           close();

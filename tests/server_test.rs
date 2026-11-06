@@ -1054,3 +1054,48 @@ async fn launch_validates_requests_and_refuses_public_untrusted_or_attached() {
         StatusCode::FORBIDDEN
     );
 }
+
+#[tokio::test]
+async fn test_request_review_api() {
+    let mut state = review_note_state();
+    let diff = &mut Arc::make_mut(&mut state.diffs)[0];
+    diff.commit_hash = Some("abc123".into());
+    diff.commit_message = Some("Subject\n\nDetails".into());
+    let app = lrv::server::create_router(state.clone(), false);
+    let request = |idx| {
+        Request::builder()
+            .method("POST")
+            .uri("/api/agent/review")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::json!({"commit_idx": idx}).to_string(),
+            ))
+            .unwrap()
+    };
+    assert_eq!(
+        app.clone().oneshot(request(0)).await.unwrap().status(),
+        StatusCode::CONFLICT
+    );
+    assert_eq!(
+        app.clone().oneshot(request(1)).await.unwrap().status(),
+        StatusCode::BAD_REQUEST
+    );
+    state.agent.touch();
+    let response = app.oneshot(request(0)).await.unwrap();
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    assert_eq!(response_json(response).await, serde_json::json!({"seq": 1}));
+    let poll = state.agent.wait(0, std::time::Duration::from_secs(1)).await;
+    assert_eq!(
+        serde_json::to_value(&poll.events).unwrap(),
+        serde_json::json!([
+            {"seq": 1, "type": "review_request", "commit_idx": 0, "commit_hash": "abc123", "subject": "Subject"}
+        ])
+    );
+    assert!(state.agent.discussions().is_empty());
+    Arc::make_mut(&mut state.context).is_public = true;
+    let app = lrv::server::create_router(state, false);
+    assert_eq!(
+        app.oneshot(request(0)).await.unwrap().status(),
+        StatusCode::FORBIDDEN
+    );
+}

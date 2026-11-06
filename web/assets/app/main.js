@@ -651,6 +651,13 @@ async function fetchJSON(url, options) {
 		}
 	}
 }
+function requestReview(commitIdx) {
+	return fetchJSON("/api/agent/review", {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ commit_idx: commitIdx })
+	});
+}
 function launchAgent(request) {
 	return fetchJSON("/api/agent/launch", {
 		method: "POST",
@@ -672,13 +679,14 @@ var ConnectAgentMethods = class {
 		const badge = $$1("#agent-status");
 		button.hidden = !available || active;
 		badge.hidden = !available || !active;
-		const busy = state.busy || state.initial_review || !state.attached && state.launch === "running";
+		const busy = state.busy || !state.attached && state.launch === "running";
 		badge.classList.toggle("busy", busy);
 		badge.title = busy ? "The agent is working" : "The agent is waiting for discussion comments";
 		if (active) {
 			$$1("#connect-agent-popover").hidden = true;
 			button.setAttribute("aria-expanded", "false");
 		}
+		this.updateCommitBarVisibility();
 	}
 	setupConnectAgent() {
 		const button = $$1("#connect-agent");
@@ -687,7 +695,6 @@ var ConnectAgentMethods = class {
 		const provider = $$1("#agent-provider");
 		const model = $$1("#agent-model");
 		const effort = $$1("#agent-effort");
-		const review = $$1("#agent-initial-review");
 		const error = $$1("#agent-launch-error");
 		const submit = $$1("#agent-launch-submit");
 		try {
@@ -696,14 +703,12 @@ var ConnectAgentMethods = class {
 				provider.value = saved.provider === "codex" ? "codex" : "claude";
 				model.value = typeof saved.model === "string" ? saved.model : "";
 				effort.value = typeof saved.effort === "string" ? saved.effort : "";
-				review.checked = saved.initial_review !== false;
 			}
 		} catch {}
 		const values = () => ({
 			provider: provider.value,
 			model: model.value.trim(),
-			effort: effort.value.trim(),
-			initial_review: review.checked
+			effort: effort.value.trim()
 		});
 		const save = () => {
 			try {
@@ -745,8 +750,7 @@ var ConnectAgentMethods = class {
 				if (this.agentState === previousState) this.setAgentState({
 					attached: this.agentAttached,
 					busy: true,
-					launch: "running",
-					initial_review: req.initial_review
+					launch: "running"
 				});
 				close();
 			}).catch((reason) => {
@@ -11864,6 +11868,102 @@ var NavigationMethods = class {
 	}
 };
 //#endregion
+//#region web/src/commit-bar-methods.ts
+var CommitBarMethods = class {
+	pendingReviewState = null;
+	reviewError = null;
+	reviewErrorTimer;
+	setupRequestReview() {
+		this.pendingReviewState = null;
+		document.getElementById("request-review").addEventListener("click", () => {
+			this.pendingReviewState = this.agentState;
+			this.reviewError = null;
+			window.clearTimeout(this.reviewErrorTimer);
+			this.updateRequestReviewButton();
+			requestReview(this.currentCommitIdx).catch((error) => {
+				const message = error instanceof Error ? error.message : String(error);
+				this.pendingReviewState = null;
+				this.reviewError = /\b409\b/.test(message) ? "The agent is no longer connected." : /\b403\b/.test(message) ? "Review requests are disabled in public mode." : "Could not send the review request. Try again.";
+				this.updateRequestReviewButton();
+				this.reviewErrorTimer = window.setTimeout(() => {
+					this.reviewError = null;
+					this.updateRequestReviewButton();
+				}, 3e3);
+			});
+		});
+	}
+	updateRequestReviewButton() {
+		const button = document.getElementById("request-review");
+		button.hidden = !this.agentState.attached || !!this.context?.is_public;
+		button.disabled = this.agentState.busy || this.pendingReviewState === this.agentState;
+		button.textContent = this.reviewError ? "Request failed" : "Request Review";
+		button.title = this.reviewError ?? (button.disabled ? "The agent is working" : "");
+		button.setAttribute("aria-label", this.reviewError ?? `Request review of commit ${this.currentCommitIdx + 1}`);
+	}
+	/** The current commit's identity; while a commit loads, this.diff still holds the previous one. */
+	currentCommitInfo() {
+		const commit = (this.seriesInfo?.is_series ? this.seriesInfo.commits[this.currentCommitIdx] : void 0) ?? this.diff;
+		return {
+			hash: commit?.commit_hash ?? "",
+			message: commit?.commit_message ?? "",
+			id: this.revisionIdFor(this.currentCommitIdx)
+		};
+	}
+	/** Agent state only affects visibility, so it needn't rebuild the bar's contents. */
+	updateCommitBarVisibility() {
+		const bar = document.getElementById("commit-bar");
+		if (bar) {
+			const { hash, message, id } = this.currentCommitInfo();
+			bar.hidden = !hash && !message && !id && !this.agentAttached;
+		}
+		this.updateRequestReviewButton();
+	}
+	renderCommitBar() {
+		const bar = document.getElementById("commit-bar");
+		const context = document.getElementById("commit-bar-context");
+		if (!bar || !context) return;
+		const { hash, message, id } = this.currentCommitInfo();
+		bar.hidden = !hash && !message && !id && !this.agentAttached;
+		context.replaceChildren();
+		if (this.seriesInfo?.is_series) {
+			const nav = el("div", { className: "commit-bar-nav" });
+			const previous = el("button", {
+				className: "commit-bar-nav-btn",
+				text: "‹",
+				attrs: { "aria-label": "Previous commit" }
+			});
+			previous.disabled = this.currentCommitIdx === 0;
+			previous.onclick = () => this.previousCommit();
+			const next = el("button", {
+				className: "commit-bar-nav-btn",
+				text: "›",
+				attrs: { "aria-label": "Next commit" }
+			});
+			next.disabled = this.currentCommitIdx === this.seriesInfo.commits.length - 1;
+			next.onclick = () => this.nextCommit();
+			nav.append(previous, el("span", {
+				className: "commit-bar-position",
+				text: `${this.currentCommitIdx + 1}/${this.seriesInfo.commits.length}`
+			}), next);
+			context.append(nav);
+		}
+		const title = el("span", { attrs: {
+			id: "commit-bar-title",
+			title: message
+		} });
+		appendLinkifiedText(title, message.split("\n")[0] ?? "");
+		context.append(title, el("span", {
+			attrs: {
+				id: "commit-bar-hash",
+				title: hash
+			},
+			text: hash.slice(0, 8)
+		}), el("span", { attrs: { id: "commit-revision" } }));
+		this.updatePublishButton();
+		this.updateRequestReviewButton();
+	}
+};
+//#endregion
 //#region web/src/modal.ts
 function openModal({ title, titleId, modalClass = "", footerContent = [], onKeydown }) {
 	const overlay = el("div", { className: "submit-modal-overlay" });
@@ -11993,98 +12093,6 @@ var CommitMethods = class {
 			autoResize();
 		}, 0);
 	}
-	showCommitMessagePopover(anchorEl, message, rev) {
-		if (this._commitPopoverEl) {
-			this._commitPopoverEl.remove();
-			this._commitPopoverEl = null;
-			return;
-		}
-		const pop = el("div", { className: "commit-popover" });
-		const first = message.split("\n")[0] || "(no message)";
-		const title = el("div", {
-			className: "commit-popover-title",
-			text: rev ? `${rev}: ${first}` : first
-		});
-		const body = el("div", { className: "commit-popover-body" });
-		appendLinkifiedText(body, message);
-		pop.appendChild(title);
-		pop.appendChild(body);
-		const form = el("div");
-		form.style.marginTop = "10px";
-		const ta = el("textarea");
-		ta.rows = 3;
-		ta.style.width = "100%";
-		ta.placeholder = "Comment on this commit…";
-		const controls = el("div");
-		controls.style.display = "flex";
-		controls.style.gap = "8px";
-		controls.style.marginTop = "6px";
-		const addBtn = el("button", {
-			className: "btn-secondary",
-			text: "Add Comment"
-		});
-		const cancelBtn = el("button", {
-			className: "btn-secondary",
-			text: "Cancel"
-		});
-		controls.appendChild(addBtn);
-		controls.appendChild(cancelBtn);
-		form.appendChild(ta);
-		form.appendChild(controls);
-		pop.appendChild(form);
-		document.body.appendChild(pop);
-		const r = anchorEl.getBoundingClientRect();
-		const pad = 6;
-		let top = r.bottom + pad;
-		let left = r.left;
-		const vw = window.innerWidth;
-		const vh = window.innerHeight;
-		const rect = pop.getBoundingClientRect();
-		if (left + rect.width + pad > vw) left = Math.max(pad, vw - rect.width - pad);
-		if (top + rect.height + pad > vh) top = Math.max(pad, r.top - rect.height - pad);
-		pop.style.left = `${Math.max(pad, left)}px`;
-		pop.style.top = `${Math.max(pad, top)}px`;
-		const onDocClick = (e) => {
-			const target = e.target;
-			if (!target || !pop.contains(target) && target !== anchorEl) cleanup();
-		};
-		const onEsc = (e) => {
-			if (e.key === "Escape") cleanup();
-		};
-		const cleanup = () => {
-			if (this._commitPopoverEl) {
-				this._commitPopoverEl.remove();
-				this._commitPopoverEl = null;
-			}
-			document.removeEventListener("click", onDocClick, true);
-			document.removeEventListener("keydown", onEsc, true);
-		};
-		this._commitPopoverEl = pop;
-		setTimeout(() => {
-			document.addEventListener("click", onDocClick, true);
-			document.addEventListener("keydown", onEsc, true);
-		}, 0);
-		cancelBtn.onclick = (e) => {
-			e.preventDefault();
-			cleanup();
-		};
-		addBtn.onclick = (e) => {
-			e.preventDefault();
-			const body = ta.value.trim();
-			if (!body) {
-				ta.focus();
-				return;
-			}
-			const comment = {
-				file: "(commit)",
-				line: 1,
-				side: "new",
-				body
-			};
-			this.commentManager.addComment(comment);
-			cleanup();
-		};
-	}
 	loadCommitView() {
 		this.resetFileView();
 		this.currentFileIsCommit = true;
@@ -12099,7 +12107,6 @@ var CommitMethods = class {
 			const viewEl = el("div", { className: "commit-view" });
 			viewEl.style.padding = "16px";
 			viewEl.style.overflow = "auto";
-			viewEl.style.height = "calc(100vh - 48px)";
 			host.appendChild(viewEl);
 			this._commitViewEl = viewEl;
 		}
@@ -13267,6 +13274,18 @@ var DialogMethods = class {
 };
 //#endregion
 //#region web/src/publish-dialog-methods.ts
+const SVG_NS = "http://www.w3.org/2000/svg";
+/** A small "opens elsewhere" arrow, drawn in the link's current colour. */
+function externalLinkIcon() {
+	const svg = document.createElementNS(SVG_NS, "svg");
+	svg.setAttribute("class", "external-link-icon");
+	svg.setAttribute("viewBox", "0 0 12 12");
+	svg.setAttribute("aria-hidden", "true");
+	const path = document.createElementNS(SVG_NS, "path");
+	path.setAttribute("d", "M7 1h4v4M11 1 5.5 6.5M9.5 7.5V11h-8.5V2.5H4.5");
+	svg.appendChild(path);
+	return svg;
+}
 const REVISION_STATE_CLASSES = {
 	accepted: "revision-accepted",
 	"needs-review": "revision-needs-review",
@@ -13297,7 +13316,9 @@ var PublishDialogMethods = class {
 	updatePublishButton() {
 		const button = document.getElementById("publish-commit");
 		if (!button) return;
+		const chip = document.getElementById("commit-revision");
 		const id = this.revisionIdFor(this.currentCommitIdx);
+		if (chip) chip.hidden = !id;
 		button.hidden = !id;
 		if (!id) return;
 		const status = this.phabRevisionStatus;
@@ -13306,11 +13327,25 @@ var PublishDialogMethods = class {
 		const error = this.phabValidationError ?? status?.error;
 		const verifying = !status && !error;
 		button.classList.toggle("verifying", verifying);
-		for (const state of Object.values(REVISION_STATE_CLASSES)) button.classList.remove(state);
+		for (const state of Object.values(REVISION_STATE_CLASSES)) chip?.classList.remove(state);
 		const stateClass = REVISION_STATE_CLASSES[revision?.status ?? ""];
-		if (stateClass) button.classList.add(stateClass);
-		const stateName = revision?.status_name ? ` · ${revision.status_name}` : "";
-		button.textContent = published ? `Published ${id} ✓` : `Publish ${id}${stateName}`;
+		if (stateClass) chip?.classList.add(stateClass);
+		if (chip) {
+			const label = revision?.url ? el("a", {
+				className: "commit-revision-link",
+				text: id,
+				attrs: {
+					href: revision.url,
+					target: "_blank",
+					rel: "noopener noreferrer"
+				}
+			}) : document.createTextNode(id);
+			if (revision?.url) label.appendChild(externalLinkIcon());
+			chip.replaceChildren(label);
+			if (revision?.status_name) chip.append(` · ${revision.status_name}`);
+		}
+		button.textContent = published ? "Published ✓" : "Publish";
+		button.setAttribute("aria-label", published ? `Published ${id}` : `Publish ${id}`);
 		button.disabled = verifying || published || !!error || !revision || !revision.publishable;
 		button.title = verifying ? `Verifying ${id}…` : error ?? revision?.reason ?? "";
 	}
@@ -13561,7 +13596,7 @@ var SeriesMethods = class {
 		return row;
 	}
 	renderSeriesNav() {
-		this.updatePublishButton();
+		this.renderCommitBar();
 		const container = document.getElementById("commit-strip");
 		const resizer = document.getElementById("commit-strip-resizer");
 		if (!container) return;
@@ -14451,7 +14486,6 @@ var MonacoApp = class {
 	originalModel;
 	modifiedModel;
 	_eagerPrefetchStarted;
-	_commitPopoverEl;
 	currentFileIsCommit;
 	_commitViewEl;
 	collapsedDirs;
@@ -14502,7 +14536,6 @@ var MonacoApp = class {
 		this.originalModel = null;
 		this.modifiedModel = null;
 		this._eagerPrefetchStarted = false;
-		this._commitPopoverEl = null;
 		this.currentFileIsCommit = false;
 		this._commitViewEl = null;
 		this.collapsedDirs = /* @__PURE__ */ new Set();
@@ -14753,6 +14786,7 @@ var MonacoApp = class {
 		});
 	}
 	renderProjectInfo() {
+		this.renderCommitBar();
 		const container = $$1("#project-info");
 		if (!container) return;
 		clearEl(container);
@@ -14781,25 +14815,6 @@ var MonacoApp = class {
 				text: this.context.git_branch
 			}));
 		}
-		if (this.diff && (this.diff.commit_message || this.diff.commit_hash)) {
-			container.appendChild(el("span", {
-				className: "project-info-separator",
-				text: "·"
-			}));
-			const mm = el("span", { className: "commit-message" });
-			const rev = this.diff.commit_hash ? `${this.diff.commit_hash.substring(0, 7)}: ` : "";
-			const firstLine = (this.diff.commit_message ?? "").split("\n")[0];
-			appendLinkifiedText(mm, rev + firstLine);
-			if (this.diff.commit_message) mm.title = this.diff.commit_message;
-			mm.addEventListener("click", (ev) => {
-				if (ev.target?.closest("a")) {
-					ev.stopPropagation();
-					return;
-				}
-				this.showCommitMessagePopover(ev.currentTarget, this.diff?.commit_message ?? "", this.diff?.commit_hash ?? "");
-			});
-			container.appendChild(mm);
-		}
 	}
 	setupUI() {
 		$$1("#file-list")?.addEventListener("click", (e) => {
@@ -14826,6 +14841,7 @@ var MonacoApp = class {
 			this.showSettingsModal();
 		});
 		$$1("#help-btn")?.addEventListener("click", () => this.showKeyboardHelp());
+		this.setupRequestReview();
 		this.setupConnectAgent();
 		$$1("#submit-review")?.addEventListener("click", () => {
 			this.showSubmitConfirmation();
@@ -14894,6 +14910,7 @@ applyMixin(MonacoApp, SeriesMethods);
 applyMixin(MonacoApp, StackedViewMethods);
 applyMixin(MonacoApp, PublishDialogMethods);
 applyMixin(MonacoApp, ConnectAgentMethods);
+applyMixin(MonacoApp, CommitBarMethods);
 //#endregion
 //#region web/src/main.ts
 document.title = "lrv — Loading…";

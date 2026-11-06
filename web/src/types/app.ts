@@ -132,6 +132,7 @@ export interface AppContext {
   agentState: AgentState;
   setAgentState(state: AgentState): void;
   setupConnectAgent(): void;
+  updateCommitBarVisibility(): void;
   commentManager: {
     comments: ReviewComment[];
     currentCommitIdx: number | null;
@@ -196,7 +197,6 @@ export interface AppContext {
   originalModel: editor.ITextModel | null;
   modifiedModel: editor.ITextModel | null;
   _eagerPrefetchStarted: boolean;
-  _commitPopoverEl: HTMLElement | null;
   currentFileIsCommit: boolean;
   _commitViewEl: HTMLElement | null;
   collapsedDirs: Set<string>;
@@ -228,7 +228,6 @@ export interface AppContext {
   clearStackedView(): void;
   loadCommitView(): void;
   showCommitLineCommentDialog(lineNum: number): void;
-  showCommitMessagePopover(anchorEl: HTMLElement, message: string, rev: string): void;
   applyThemeToUI(themeName: string): void;
   showSettingsModal(): void;
   showSubmitConfirmation(): Promise<void>;
@@ -265,12 +264,10 @@ export type AgentState = {
   attached: boolean;
   busy: boolean;
   launch: 'idle' | 'running' | 'failed';
-  initial_review?: boolean;
   error?: string | null;
 };
 export type LaunchRequest = {
   provider: 'claude' | 'codex';
   model: string;
   effort: string;
-  initial_review: boolean;
 };

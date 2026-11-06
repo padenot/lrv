@@ -164,7 +164,7 @@ Delete removes a discussion thread and its agent replies; the agent receives a
 Agent replies are notes with `discussion_id` naming the root discussion
 (use `thread_id` from a follow-up event). Send them with `--add-notes`, not
 `--review-notes-file`. Finish ends the review: comments go to the terminal
-that started lrv, and a pending listener reports `ended`. Attached agents only handle discussions and never receive the final review.
+that started lrv, and a pending listener reports `ended`. Attached agents handle review requests and discussions and never receive the final review.
 
 When Phabricator is available, **Publish D123** beside Finish follows the selected
 commit. It opens a dialog for that revision's verdict and overall comment.
@@ -176,8 +176,9 @@ Convert discussions to comments before Finish to keep them.
 
 Click **Connect Agent** beside Finish to start a local `claude` or `codex`
 CLI (installed and authenticated on the server machine). Choose a provider and
-optionally a model and effort; empty fields use the CLI defaults. **Perform
-initial review** posts findings before the agent starts listening for discussions.
+optionally a model and effort; empty fields use the CLI defaults. Once the agent
+is attached, **Request Review** in the commit bar asks it to review the current
+commit. It posts findings only against that commit, then listens again.
 Your choices are remembered in this browser.
 
 The button is replaced by a **Connected** badge whose dot is green while the

@@ -224,6 +224,42 @@ test.describe('Series mode E2E', () => {
     }
   });
 
+  test('Request Review follows the selected commit and stays disabled until agent state changes', async ({
+    page,
+  }) => {
+    await openApp(page);
+    await page.evaluate(() =>
+      (window as any).__APP.setAgentState({ attached: true, busy: false, launch: 'idle' }),
+    );
+    const button = page.locator('#request-review');
+    await expect(button).toBeVisible();
+    await expect(button).toHaveAttribute('aria-label', 'Request review of commit 1');
+    await page.locator('#commit-strip .series-commit').nth(1).click();
+    await expect(button).toHaveAttribute('aria-label', 'Request review of commit 2');
+    let payload: unknown;
+    await page.route('**/api/agent/review', async (route) => {
+      payload = route.request().postDataJSON();
+      await route.fulfill({ status: 202, json: { seq: 1 } });
+    });
+    await button.click();
+    await expect(button).toBeDisabled();
+    expect(payload).toEqual({ commit_idx: 1 });
+    await page.locator('#commit-strip .series-commit').first().click();
+    await expect(button).toBeDisabled();
+    await page.evaluate(() =>
+      (window as any).__APP.setAgentState({ attached: true, busy: false, launch: 'idle' }),
+    );
+    await expect(button).toBeEnabled();
+    await page.route('**/api/agent/review', async (route) => {
+      await route.fulfill({ status: 409, body: 'No attached agent' });
+    });
+    await button.click();
+    await expect(button).toHaveText('Request failed');
+    await expect(button).toHaveAttribute('title', 'The agent is no longer connected.');
+    await expect(button).toBeEnabled();
+    await expect(button).toHaveText('Request Review', { timeout: 5000 });
+  });
+
   test('commit strip shows correct number of commits', async ({ page }) => {
     await openApp(page);
 
@@ -282,7 +318,9 @@ test.describe('Series mode E2E', () => {
     await expect(page.locator('.series-revision-badge')).toHaveText('D123');
     await expect(page.locator('#publish-commit')).toBeHidden();
     await page.locator('.series-commit').nth(1).click();
-    await expect(page.locator('#publish-commit')).toHaveText('Publish D123');
+    await expect(page.locator('#publish-commit')).toHaveText('Publish');
+    await expect(page.locator('#publish-commit')).toHaveAccessibleName('Publish D123');
+    await expect(page.locator('#commit-revision')).toContainText('D123');
     await page.evaluate(() =>
       window.__APP!.commentManager.addComment({
         file: '(commit)',
@@ -300,7 +338,7 @@ test.describe('Series mode E2E', () => {
     await expect(dialog).toHaveCount(0);
     expect(published.comments).toHaveLength(1);
     expect(published.comments[0].commit_idx).toBe(1);
-    await expect(page.locator('#publish-commit')).toHaveText('Published D123 ✓');
+    await expect(page.locator('#publish-commit')).toHaveText('Published ✓');
     await expect(page.locator('#publish-commit')).toBeDisabled();
     await expect(page.locator('.series-revision-badge')).toHaveText('D123 ✓');
     await page.locator('.series-commit').nth(0).click();
@@ -351,6 +389,23 @@ test.describe('Series mode E2E', () => {
     await expect(fileTreeRow(page, 'beta.txt')).toHaveCount(0, { timeout: 5000 });
   });
 
+  test('commit bar follows commit navigation', async ({ page }) => {
+    await openApp(page);
+    await expect(page.locator('#commit-bar')).toBeVisible();
+    await expect(page.locator('#commit-bar-title')).toHaveText('Add beta');
+    const commits = await page.request.get(`${serverUrl}/api/series`).then((r) => r.json());
+    await expect(page.locator('#commit-bar-hash')).toHaveText(
+      commits.commits[0].commit_hash.slice(0, 8),
+    );
+    await expect(page.getByRole('button', { name: 'Previous commit', exact: true })).toBeDisabled();
+    await page.getByRole('button', { name: 'Next commit', exact: true }).click();
+    await expect(page.locator('#commit-bar-title')).toHaveText('Modify alpha');
+    await expect(page.locator('#commit-bar-hash')).toHaveText(
+      commits.commits[1].commit_hash.slice(0, 8),
+    );
+    await expect(page.getByRole('button', { name: 'Next commit', exact: true })).toBeDisabled();
+  });
+
   test('commit strip shows commit message preview', async ({ page }) => {
     await openApp(page);
 
@@ -384,7 +439,7 @@ test.describe('Series mode E2E', () => {
 
     await expect(page.locator('.commit-view')).toBeVisible();
     await expect(page.locator('.commit-message-card')).toContainText('Modify alpha');
-    await expect(page.locator('#project-info .commit-message')).toContainText('Modify alpha');
+    await expect(page.locator('#commit-bar-title')).toContainText('Modify alpha');
     await expect(page.locator('li[data-commit="1"]')).toHaveClass(/active/);
   });
 

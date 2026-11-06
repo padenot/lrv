@@ -322,3 +322,19 @@ fn listen_formats_timeout_and_ended() {
         assert_eq!(format_listen(&poll, &OutputFormat::Text), text);
     }
 }
+
+#[test]
+fn listen_formats_review_requests() {
+    use lrv::agent::Poll;
+    use lrv::output::{format_listen, OutputFormat};
+    let poll: Poll = serde_json::from_value(serde_json::json!({
+        "events": [
+            {"seq": 1, "type": "review_request", "commit_idx": 1, "commit_hash": "abc123", "subject": "Fix bug"},
+            {"seq": 2, "type": "review_request", "commit_idx": 0, "commit_hash": null, "subject": null}
+        ], "cursor": 2, "ended": false
+    })).unwrap();
+    assert_eq!(
+        format_listen(&poll, &OutputFormat::Text),
+        "Review request for commit 1 (abc123) Fix bug\n\nReview request for commit 0"
+    );
+}

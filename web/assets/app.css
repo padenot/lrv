@@ -254,48 +254,6 @@ body {
   overflow: hidden;
 }
 
-.commit-message {
-  color: var(--text-secondary);
-  font-size: 12px;
-  max-width: 40vw;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  cursor: pointer;
-}
-.commit-message:hover {
-  text-decoration: underline;
-}
-
-.auto-link {
-  color: var(--accent-color);
-  text-decoration: underline;
-}
-
-/* Popover for full commit message */
-.commit-popover {
-  position: fixed;
-  background: var(--bg-elevated);
-  color: var(--text-primary);
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  box-shadow: var(--shadow-md);
-  padding: 10px 12px;
-  z-index: 2147483647;
-  max-width: 60vw;
-  max-height: 50vh;
-  overflow: auto;
-}
-.commit-popover .commit-popover-title {
-  font-weight: 600;
-  margin-bottom: 6px;
-}
-.commit-popover .commit-popover-body {
-  white-space: pre-wrap;
-  font-family: var(--font-mono);
-  font-size: 12px;
-}
-
 .git-branch {
   color: var(--accent-color);
 }
@@ -372,7 +330,8 @@ body {
   font-weight: 500;
 }
 
-.header button {
+.header button,
+#publish-commit {
   background: var(--accent-color);
   color: white;
   border: none;
@@ -390,11 +349,13 @@ body {
   color: var(--text-primary);
 }
 
-.header button:hover {
+.header button:hover,
+#publish-commit:hover {
   opacity: 0.8;
 }
 
-.header button:disabled {
+.header button:disabled,
+#publish-commit:disabled {
   background: var(--text-tertiary);
   cursor: not-allowed;
 }
@@ -886,6 +847,9 @@ body {
 }
 
 .content {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
   flex: 1;
   overflow: hidden;
   position: relative;
@@ -894,7 +858,8 @@ body {
 /* ─── Stacked (Phabricator-style) view ────────────────────────────────────── */
 
 #stacked-container {
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -1259,7 +1224,8 @@ body {
 }
 
 #editor-container {
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   opacity: 0;
   transition: opacity 350ms ease;
   position: relative;
@@ -2445,11 +2411,6 @@ body:not(.agent-attached) .discuss-hint {
   border: 1px solid var(--border-color);
   border-radius: 4px;
 }
-.agent-review-option {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
 #agent-launch-error {
   color: var(--warning-color);
   overflow-wrap: anywhere;
@@ -2482,19 +2443,178 @@ body:not(.agent-attached) .discuss-hint {
   animation: fetch-spin 0.8s linear infinite;
 }
 
-/* The state colour stays when the button is disabled; dimming marks it unavailable. */
-#publish-commit.revision-accepted {
-  background: var(--success-color);
+/* Revision status is independent of whether publishing is available; it uses
+   the same dot-and-label form as the agent badge. */
+#commit-revision {
+  --revision-color: var(--text-tertiary);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
 }
 
-#publish-commit.revision-needs-review {
-  background: #2f81f7;
+#commit-revision::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--revision-color);
 }
 
-#publish-commit.revision-waiting {
+#commit-revision[hidden] {
+  display: none;
+}
+
+#commit-revision.revision-accepted {
+  --revision-color: var(--success-color);
+}
+
+#commit-revision.revision-needs-review {
+  --revision-color: #2f81f7;
+}
+
+/* Secondary beside Publish: styled like the header's Settings button. */
+#request-review {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  border: none;
+  padding: 6px 12px;
+  border-radius: 0px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  transition: background 0.15s ease;
+}
+
+#request-review:hover:not(:disabled) {
+  opacity: 0.8;
+}
+
+#request-review:disabled {
   background: var(--text-tertiary);
+  cursor: not-allowed;
 }
 
 #publish-commit:disabled:not(.verifying) {
   opacity: 0.6;
+}
+
+/* Finish (header) and Publish (commit bar) stack in the same right-hand column;
+   a shared width keeps their edges aligned whatever the label or spinner. */
+#submit-review,
+#request-review,
+#publish-commit {
+  min-width: 104px;
+  text-align: center;
+}
+
+#commit-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 16px;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  font-size: 12px;
+  z-index: 11;
+}
+
+#commit-bar[hidden] {
+  display: none;
+}
+
+/* Fills the space left under the commit bar. */
+.commit-view {
+  flex: 1;
+  min-height: 0;
+}
+
+#commit-bar-context {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  flex: 1;
+}
+
+#commit-bar-title {
+  color: var(--text-primary);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#commit-bar-hash {
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.commit-bar-nav,
+.commit-bar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+.commit-bar-position {
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Neutral controls, matching the header's Settings button. */
+.commit-bar-nav-btn {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  border: none;
+  border-radius: 0;
+  padding: 4px 10px;
+  font-size: 12px;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.commit-bar-nav-btn:hover:not(:disabled) {
+  background: var(--border-color);
+}
+
+.commit-bar-nav-btn:disabled {
+  color: var(--text-tertiary);
+  cursor: default;
+}
+
+/* Linkified text (bug numbers, revisions, URLs) and the bar's links use the
+   accent colour, which stays readable in every theme, unlike the browser's
+   default blue. */
+.auto-link,
+#commit-bar a {
+  color: var(--accent-color);
+  text-decoration: none;
+}
+
+.auto-link:hover,
+#commit-bar a:hover {
+  text-decoration: underline;
+}
+
+.commit-revision-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.external-link-icon {
+  width: 10px;
+  height: 10px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }

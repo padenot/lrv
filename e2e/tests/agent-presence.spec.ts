@@ -54,11 +54,13 @@ test('agent presence follows the listen poll and lease expiry', async ({ page })
     await expect(page.locator('.monaco-diff-editor')).toBeVisible();
     const badge = page.locator('#agent-status');
     await expect(badge).toBeHidden();
+    await expect(page.locator('#request-review')).toBeHidden();
     const connect = page.locator('#connect-agent');
     const popover = page.locator('#connect-agent-popover');
     await expect(connect).toBeVisible();
     await connect.click();
     await expect(popover).toBeVisible();
+    await expect(page.locator('#agent-initial-review')).toHaveCount(0);
     await expect(page.locator('#agent-provider')).toBeFocused();
     await page.keyboard.press('Escape');
     await expect(popover).toBeHidden();
@@ -67,7 +69,6 @@ test('agent presence follows the listen poll and lease expiry', async ({ page })
     await page.locator('#agent-provider').selectOption('codex');
     await page.locator('#agent-model').fill('test-model');
     await page.locator('#agent-effort').fill('high');
-    await page.locator('#agent-initial-review').uncheck();
     let payload: unknown;
     await page.route('**/api/agent/launch', async (route) => {
       payload = route.request().postDataJSON();
@@ -79,7 +80,6 @@ test('agent presence follows the listen poll and lease expiry', async ({ page })
       provider: 'codex',
       model: 'test-model',
       effort: 'high',
-      initial_review: false,
     });
     await page.locator('#settings-btn').click();
     await expect(popover).toBeHidden();
@@ -90,25 +90,32 @@ test('agent presence follows the listen poll and lease expiry', async ({ page })
     await expect(page.locator('#agent-provider')).toHaveValue('codex');
     await expect(page.locator('#agent-model')).toHaveValue('test-model');
     await expect(page.locator('#agent-effort')).toHaveValue('high');
-    await expect(page.locator('#agent-initial-review')).not.toBeChecked();
     await page.keyboard.press('Escape');
-    const listening = execFileAsync(binary, ['--listen', '--listen-timeout', '2'], {
+    const listening = execFileAsync(binary, ['--listen', '--listen-timeout', '10'], {
       cwd: root,
       env,
-      timeout: 10000,
+      timeout: 15000,
     });
     await expect(badge).toBeVisible();
     await expect(connect).toBeHidden();
     await expect(badge).not.toHaveClass(/busy/);
-    const result = await listening;
-    expect(JSON.parse(result.stdout).status).toBe('timeout');
+    const review = page.locator('#request-review');
+    await expect(review).toBeVisible();
+    await expect(page.locator('#commit-bar')).toBeVisible();
+    await expect(review).toHaveAttribute('aria-label', 'Request review of commit 1');
+    await review.click();
+    const result = JSON.parse((await listening).stdout);
+    expect(result.status).toBe('events');
+    expect(result.events[0]).toMatchObject({ type: 'review_request', commit_idx: 0 });
+    await expect(badge).toHaveClass(/busy/);
+    await expect(review).toBeDisabled();
     await expect(badge).toBeHidden({ timeout: 10000 });
     await expect(connect).toBeVisible();
+    await expect(review).toBeHidden();
     await page.route('**/api/agent/launch', async (route) => {
       await route.fulfill({ status: 202, json: { launch: 'running' } });
     });
     await connect.click();
-    await page.locator('#agent-initial-review').check();
     await page.locator('#agent-launch-submit').click();
     await expect(connect).toBeHidden();
     await expect(popover).toBeHidden();
