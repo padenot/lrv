@@ -1350,6 +1350,21 @@ function markAppReady() {
 			childList: true,
 			subtree: true
 		});
+		return;
+	}
+	const stacked = document.getElementById("stacked-container");
+	if (stacked && stacked.style.display !== "none") {
+		const obs = new MutationObserver(() => {
+			if (stacked.querySelector(STACKED_READY_SELECTOR)) {
+				recordFirstLineVisible();
+				setAppReady("[app] APP_READY: observer saw stacked diff");
+				obs.disconnect();
+			}
+		});
+		obs.observe(stacked, {
+			childList: true,
+			subtree: true
+		});
 	}
 }
 //#endregion
