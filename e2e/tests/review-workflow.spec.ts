@@ -1273,6 +1273,53 @@ test.describe('Review Workflow E2E', () => {
     await expect(fileListItem).toHaveAttribute('data-item-git-status', 'added');
   });
 
+  test('sidebar and editor fit the viewport while a banner is shown', async ({ page }) => {
+    await page.route('**/api/context', async (route) => {
+      const response = await route.fetch();
+      await route.fulfill({
+        response,
+        json: { ...(await response.json()), claude_skill_installed: false },
+      });
+    });
+
+    await openApp(page);
+    await expect(page.locator('#skill-banner')).toBeVisible();
+
+    const viewportHeight = page.viewportSize()!.height;
+    for (const selector of ['#sidebar', '#editor-container']) {
+      const box = (await page.locator(selector).boundingBox())!;
+      expect(box.y + box.height, selector).toBeLessThanOrEqual(viewportHeight);
+    }
+    const lastRow = (await fileTreeRows(page).last().boundingBox())!;
+    expect(lastRow.y + lastRow.height).toBeLessThanOrEqual(viewportHeight);
+  });
+
+  test('file tree scrolls down to its last row', async ({ page }) => {
+    if (!testRepoPath) {
+      throw new Error('Test repo not initialized');
+    }
+
+    await execAsync(
+      `cd "${testRepoPath}" && mkdir -p many && for i in $(seq 1 40); do echo $i > many/f$i.txt; done && ` +
+        `git add many`,
+    );
+    await stopServer();
+    await startServer();
+    await openApp(page);
+
+    const tree = page.locator('file-tree-container.lrv-file-tree');
+    const treeBox = (await tree.boundingBox())!;
+    await page.mouse.move(treeBox.x + treeBox.width / 2, treeBox.y + treeBox.height / 2);
+    const lastRow = fileTreeRow(page, 'test.txt');
+    await expect
+      .poll(async () => {
+        await page.mouse.wheel(0, 2000);
+        const box = await lastRow.boundingBox();
+        return box ? box.y + box.height : Infinity;
+      })
+      .toBeLessThanOrEqual(treeBox.y + treeBox.height);
+  });
+
   test('should display provided title in header', async ({ page }) => {
     // Restart server with a custom title
     await stopServer();

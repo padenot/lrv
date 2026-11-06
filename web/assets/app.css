@@ -433,13 +433,13 @@ body {
 .main {
   display: flex;
   flex: 1;
+  min-height: 0;
 }
 
 .sidebar {
   width: 280px;
   background: var(--bg-secondary);
   border-right: 1px solid var(--border-color);
-  height: calc(100vh - 48px);
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -894,7 +894,7 @@ body {
 /* ─── Stacked (Phabricator-style) view ────────────────────────────────────── */
 
 #stacked-container {
-  height: calc(100vh - 48px);
+  height: 100%;
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -1259,7 +1259,7 @@ body {
 }
 
 #editor-container {
-  height: calc(100vh - 48px);
+  height: 100%;
   opacity: 0;
   transition: opacity 350ms ease;
   position: relative;
