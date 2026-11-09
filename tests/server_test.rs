@@ -36,6 +36,7 @@ fn test_app_state_construction() {
         comment_store_error: None,
         phabricator_available: false,
         phabricator_revisions: Vec::new(),
+        own_revisions: Vec::new(),
     };
 
     let (shutdown_tx, _rx) = tokio::sync::mpsc::channel::<()>(1);
@@ -98,6 +99,7 @@ fn test_create_router() {
         comment_store_error: None,
         phabricator_available: false,
         phabricator_revisions: Vec::new(),
+        own_revisions: Vec::new(),
     };
 
     let (shutdown_tx, _rx) = tokio::sync::mpsc::channel::<()>(1);
@@ -160,6 +162,7 @@ fn review_note_state() -> lrv::server::AppState {
         comment_store_error: None,
         phabricator_available: false,
         phabricator_revisions: Vec::new(),
+        own_revisions: Vec::new(),
     };
 
     let (shutdown_tx, _rx) = tokio::sync::mpsc::channel::<()>(1);
@@ -479,6 +482,7 @@ async fn test_agent_events_api() {
         if uri == "/api/agent/events?timeout=1" {
             agent.push(lrv::agent::AgentEvent::Discussion {
                 discussion: lrv::agent::Discussion {
+                    note: None,
                     summarize: false,
                     thread_id: None,
                     id: "d1".into(),
@@ -684,13 +688,26 @@ async fn test_discussion_threads_and_agent_replies() {
     let root = response_json(
         app.clone()
             .oneshot(discussion_request(serde_json::json!({
-                "file": "root.rs", "line": [3, 5], "side": "old", "body": "Question"
+                "file": "root.rs", "line": [3, 5], "side": "old", "body": "Question",
+                "note": {"id": "note-1", "body": "Finding", "origin": "host"}
             })))
             .await
             .unwrap(),
     )
     .await;
     assert_eq!(root["commit_idx"], 0);
+    assert_eq!(
+        root["note"],
+        serde_json::json!({"id": "note-1", "body": "Finding", "origin": "host"})
+    );
+    let invalid = app
+        .clone()
+        .oneshot(discussion_request(serde_json::json!({
+            "thread_id": root["id"], "body": "Follow up", "note": root["note"]
+        })))
+        .await
+        .unwrap();
+    assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
     let follow = response_json(
         app.clone()
             .oneshot(discussion_request(serde_json::json!({
@@ -703,6 +720,7 @@ async fn test_discussion_threads_and_agent_replies() {
     for key in ["file", "line", "side", "commit_idx"] {
         assert_eq!(follow[key], root[key]);
     }
+    assert!(follow.get("note").is_none());
     assert_eq!(follow["thread_id"], root["id"]);
     assert_eq!(follow["summarize"], true);
     let listed = response_json(
@@ -842,6 +860,7 @@ async fn test_delete_discussion_removes_replies_and_skips_late_replies() {
     let root = state
         .agent
         .add_discussion(lrv::agent::DiscussionRequest {
+            note: None,
             file: Some("a.rs".into()),
             line: Some(lrv::types::CommentLine::Single(1)),
             side: Some(lrv::types::Side::New),
@@ -929,6 +948,7 @@ async fn test_delete_discussion_without_agent_and_public_mode() {
     let mut state = review_note_state();
     state.agent.push(lrv::agent::AgentEvent::Discussion {
         discussion: lrv::agent::Discussion {
+            note: None,
             id: "d1".into(),
             created_at: 0,
             summarize: false,
@@ -944,6 +964,7 @@ async fn test_delete_discussion_without_agent_and_public_mode() {
     let follow = state
         .agent
         .add_discussion(lrv::agent::DiscussionRequest {
+            note: None,
             file: None,
             line: None,
             side: None,

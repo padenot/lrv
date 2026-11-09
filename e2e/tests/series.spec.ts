@@ -1019,7 +1019,7 @@ test.describe('Commit-message notes in a one-commit series', () => {
     await page.locator('.tree-row-summary', { hasText: 'Commit message' }).click();
 
     const actionable = page.locator('.review-note', { hasText: 'commit-level note' });
-    await expect(actionable.getByRole('button', { name: 'Address' })).toBeVisible();
+    await expect(actionable.getByRole('button', { name: 'Accept' })).toBeVisible();
     const readOnly = page.locator('.review-note', { hasText: 'overall note' });
     await expect(readOnly).toBeVisible();
     await expect(readOnly.locator('.review-note-actions')).toHaveCount(0);
@@ -1058,10 +1058,10 @@ test.describe('Series spanning several GitHub PRs', () => {
       fakeGh,
       `#!/bin/bash
 case "$*" in
-  *"commits/${one}/pulls"*) echo '[["o/r",7,"First PR","https://github.com/o/r/pull/7"]]' ;;
-  *"commits/${two}/pulls"*) echo '[["o/r",9,"Second PR","https://github.com/o/r/pull/9"],["o/r",7,"First PR","https://github.com/o/r/pull/7"]]' ;;
+  *"commits/${one}/pulls"*) echo '[["o/r",7,"First PR","https://github.com/o/r/pull/7","author"]]' ;;
+  *"commits/${two}/pulls"*) echo '[["o/r",9,"Second PR","https://github.com/o/r/pull/9","author"],["o/r",7,"First PR","https://github.com/o/r/pull/7","author"]]' ;;
   *"commits/${three}/pulls"*) echo '[]' ;;
-  *"commits/${four}/pulls"*) echo '[["o/r",9,"Second PR","https://github.com/o/r/pull/9"]]' ;;
+  *"commits/${four}/pulls"*) echo '[["o/r",9,"Second PR","https://github.com/o/r/pull/9","author"]]' ;;
   *"pulls/7/comments"*)
     echo '{"id":1,"body":"note on first","path":"one.txt","line":1,"side":"RIGHT","commit_id":"${one}","user":{"login":"alice"}}' ;;
   *"/comments"* | *"/reviews"*) ;;

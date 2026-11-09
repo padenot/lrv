@@ -1,8 +1,9 @@
+import { acceptedBody } from './review-notes';
 import { el } from './dom';
 import { openModal } from './modal';
 import { fetchJSON } from './api';
 import { commentKey } from './dialog-methods';
-import { isAddressRequest, type ReviewComment } from './comments';
+import { type ReviewComment } from './comments';
 import type { AppContext, PhabStatus, PublishState, ReviewAction } from './types/app';
 
 // Phabricator status values: green when accepted, blue when it needs review, grey while
@@ -30,9 +31,12 @@ const REVISION_STATE_CLASSES: Record<string, string> = {
 };
 
 export class PublishDialogMethods {
+  declare reviewNoteManager: AppContext['reviewNoteManager'];
   declare commentManager: AppContext['commentManager'];
   declare seriesInfo: AppContext['seriesInfo'];
   declare publishedCommentKeys: Set<string>;
+  declare publishedNoteIds: Set<string>;
+  declare renderReviewNotes: () => void;
   declare publishedRevisionIds: Set<string>;
   declare publishStates: Map<string, PublishState>;
   declare currentCommitIdx: number;
@@ -156,11 +160,32 @@ export class PublishDialogMethods {
     const originals = this.commentManager
       .getComments()
       .filter((c) => !this.publishedCommentKeys.has(commentKey(c)));
-    const forRevision = (id: string) => {
-      const revision = status.revisions.find((r) => r.id === id)!;
-      return originals.filter(
-        (c) => revision.commit_idxs.includes(c.commit_idx ?? 0) && !isAddressRequest(c),
+    const accepted = this.reviewNoteManager
+      .getNotes()
+      .filter(
+        (note) => note.disposition === 'accepted' && note.id && !this.publishedNoteIds.has(note.id),
       );
+    const publishableNotes = (id: string) => {
+      const revision = status.revisions.find((r) => r.id === id)!;
+      return accepted.filter(
+        (note) =>
+          !revision.own &&
+          (note.origin ?? 'agent') === 'agent' &&
+          revision.commit_idxs.includes(note.commit_idx ?? 0),
+      );
+    };
+    const forRevision = (id: string): ReviewComment[] => {
+      const revision = status.revisions.find((r) => r.id === id)!;
+      return [
+        ...originals.filter((c) => revision.commit_idxs.includes(c.commit_idx ?? 0)),
+        ...publishableNotes(id).map((note) => ({
+          file: note.file,
+          line: note.line,
+          side: note.side,
+          body: acceptedBody(note),
+          ...(note.commit_idx === undefined ? {} : { commit_idx: note.commit_idx }),
+        })),
+      ];
     };
     const panel = el('div', { className: 'publish-panel' });
     body.appendChild(panel);
@@ -169,8 +194,8 @@ export class PublishDialogMethods {
       panel.appendChild(el('p', { text: 'Revision unavailable.' }));
       return;
     }
-    const unassigned = originals.filter(
-      (c) => revision.commit_idxs.includes(c.commit_idx ?? 0) && isAddressRequest(c),
+    const unassigned = accepted.filter(
+      (note) => revision.commit_idxs.includes(note.commit_idx ?? 0) && revision.own,
     );
     let rendering = 0;
     const render = () => {
@@ -320,7 +345,9 @@ export class PublishDialogMethods {
           }
           revision.published = true;
           comments.forEach((c) => this.publishedCommentKeys.add(commentKey(c)));
+          publishableNotes(revision.id).forEach((note) => this.publishedNoteIds.add(note.id!));
           this.publishedRevisionIds.add(revision.id);
+          this.renderReviewNotes();
           this.renderSeriesNav();
           close();
         } catch (error) {

@@ -1,4 +1,4 @@
-import type { Discussion } from './discussions';
+import { DiscussionError, type Discussion } from './discussions';
 import type { CommentLine } from './comments';
 import { el } from './dom';
 import { appendLinkifiedText } from './linkify';
@@ -6,11 +6,12 @@ import {
   commentEndLine,
   commentLineLabel,
   commentStartLine,
-  type ReplyTarget,
+  replyTarget,
+  isForeignHostNote,
   type ReviewComment,
 } from './comments';
 import type { AppContext } from './types/app';
-import type { ReviewNote } from './review-notes';
+import { acceptedBody, type ReviewNote } from './review-notes';
 import type { editor } from 'monaco-editor';
 
 type InlineThread = {
@@ -24,6 +25,8 @@ type InlineThread = {
 };
 
 export class ReviewNoteMethods {
+  declare context: AppContext['context'];
+  declare publishedNoteIds: Set<string>;
   declare editor: AppContext['editor'];
   declare files: AppContext['files'];
   declare currentFileIndex: number;
@@ -54,14 +57,22 @@ export class ReviewNoteMethods {
     }
 
     const notes: InlineThread[] = [
-      ...this.reviewNoteManager.getNotesForFile(file.path).map((note) => ({
-        file: note.file,
-        line: note.line,
-        side: note.side,
-        height: () => this.reviewNoteHeightPx(note.body),
-        hover: note.body,
-        node: this.buildReviewNoteNode(note),
-      })),
+      ...this.reviewNoteManager.getNotesForFile(file.path).map((note) => {
+        const node = this.buildReviewNoteNode(note);
+        return {
+          file: note.file,
+          line: note.line,
+          side: note.side,
+          height: () =>
+            this.reviewNoteHeightPx(acceptedBody(note)) +
+            (node.querySelector('.review-note-reply') ? 200 : 0) +
+            (node.querySelector('.review-note-original:not([hidden])')
+              ? this.reviewNoteHeightPx(note.body)
+              : 0),
+          hover: acceptedBody(note),
+          node,
+        };
+      }),
       ...this.discussionManager.getForFile(file.path).map((discussion) => {
         const node = this.buildDiscussionNode(discussion);
         return {
@@ -140,12 +151,10 @@ export class ReviewNoteMethods {
           heightInPx: note.height(),
         };
         const id = accessor.addZone(zone);
-        if (note.discussion) {
-          note.node.addEventListener('discussion-layout', () => {
-            zone.heightInPx = note.height();
-            targetEditor.changeViewZones((zones) => zones.layoutZone(id));
-          });
-        }
+        note.node.addEventListener(note.discussion ? 'discussion-layout' : 'note-layout', () => {
+          zone.heightInPx = note.height();
+          targetEditor.changeViewZones((zones) => zones.layoutZone(id));
+        });
         newIds.push(id);
       });
     });
@@ -273,9 +282,25 @@ export class ReviewNoteMethods {
     }
 
     const body = el('div', { className: 'review-note-body' });
-    appendLinkifiedText(body, note.body);
+    appendLinkifiedText(body, acceptedBody(note));
 
     box.append(meta, body);
+    if (note.accepted_body !== undefined) {
+      const original = el('div', { className: 'review-note-body review-note-original' });
+      original.hidden = true;
+      appendLinkifiedText(original, note.body);
+      const toggle = el('button', {
+        className: 'btn-secondary review-note-btn',
+        text: 'Show original',
+      });
+      toggle.addEventListener('click', () => {
+        original.hidden = !original.hidden;
+        toggle.textContent = original.hidden ? 'Show original' : 'Hide original';
+        box.dispatchEvent(new Event('note-layout'));
+      });
+      meta.appendChild(toggle);
+      box.appendChild(original);
+    }
     if (!note.read_only) {
       box.appendChild(this.buildReviewNoteActions(note));
     }
@@ -285,37 +310,76 @@ export class ReviewNoteMethods {
   private buildReviewNoteActions(note: ReviewNote) {
     const actions = el('div', { className: 'review-note-actions' });
     const disposition = note.disposition ?? 'open';
+    if (note.id && this.publishedNoteIds.has(note.id)) {
+      actions.appendChild(
+        el('span', {
+          className: 'review-note-status review-note-status-accepted',
+          text: 'Published',
+        }),
+      );
+      return actions;
+    }
 
-    if (disposition === 'addressed' || disposition === 'ignored') {
+    const foreignHost = isForeignHostNote(note, this.context.own_revisions);
+    const reply = el('button', {
+      className: `btn-secondary review-note-btn${foreignHost ? '' : ' review-note-reply-btn'}`,
+      text: 'Reply',
+    });
+    reply.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.showReviewNoteReplyForm(actions, note);
+    });
+
+    if (foreignHost) {
+      actions.appendChild(reply);
+      return actions;
+    }
+
+    if (disposition === 'accepted' || disposition === 'ignored') {
       actions.appendChild(
         el('span', {
           className: `review-note-status review-note-status-${disposition}`,
-          text: disposition === 'addressed' ? 'Queued for agent' : 'Ignored',
+          text:
+            disposition === 'accepted'
+              ? note.accepted_body === undefined
+                ? 'Accepted'
+                : 'Accepted (edited)'
+              : 'Ignored',
         }),
       );
       const undo = el('button', { className: 'btn-secondary review-note-btn', text: 'Undo' });
       undo.addEventListener('click', (event) => {
         event.preventDefault();
         event.stopPropagation();
-        this.unqueueReviewNote(note);
         this.reviewNoteManager.updateNote(note, { disposition: 'open' });
       });
       actions.appendChild(undo);
+      if (
+        disposition === 'accepted' &&
+        note.accepted_body !== undefined &&
+        (note.origin ?? 'agent') === 'agent'
+      ) {
+        actions.appendChild(this.buildReviewNoteEditButton(actions, note));
+      }
       return actions;
     }
 
-    const address = el('button', { className: 'btn-primary review-note-btn', text: 'Address' });
-    address.addEventListener('click', (event) => {
+    const accept = el('button', { className: 'btn-primary review-note-btn', text: 'Accept' });
+    accept.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
-      this.queueReviewNoteForAgent(note);
+      this.reviewNoteManager.updateNote(note, { disposition: 'accepted' });
     });
 
-    const reply = el('button', { className: 'btn-secondary review-note-btn', text: 'Reply' });
-    reply.addEventListener('click', (event) => {
+    const discuss = el('button', {
+      className: 'btn-secondary review-note-btn discuss-btn',
+      text: 'Discuss',
+    });
+    discuss.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
-      this.showReviewNoteReplyForm(actions, note);
+      this.showReviewNoteReplyForm(actions, note, true);
     });
 
     const ignore = el('button', { className: 'btn-secondary review-note-btn', text: 'Ignore' });
@@ -325,11 +389,71 @@ export class ReviewNoteMethods {
       this.reviewNoteManager.updateNote(note, { disposition: 'ignored' });
     });
 
-    actions.append(address, reply, ignore);
+    actions.appendChild(accept);
+    if ((note.origin ?? 'agent') === 'agent') {
+      actions.appendChild(this.buildReviewNoteEditButton(actions, note));
+    }
+    actions.append(ignore, reply, discuss);
     return actions;
   }
 
-  private showReviewNoteReplyForm(actions: HTMLElement, note: ReviewNote) {
+  private buildReviewNoteEditButton(actions: HTMLElement, note: ReviewNote) {
+    const edit = el('button', { className: 'btn-secondary review-note-btn', text: 'Edit' });
+    edit.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (actions.querySelector('.review-note-reply')) {
+        return;
+      }
+      const targetEditor = this.isStacked
+        ? null
+        : note.side === 'old'
+          ? this.editor?.getOriginalEditor()
+          : this.editor?.getModifiedEditor();
+      const scrollTop = targetEditor?.getScrollTop();
+      const restoreScroll = () => {
+        if (targetEditor && scrollTop !== undefined) {
+          targetEditor.setScrollTop(scrollTop);
+        }
+      };
+      const form = el('div', { className: 'review-note-reply' });
+      const textarea = el('textarea', { className: 'review-note-reply-text' });
+      textarea.value = acceptedBody(note);
+      const controls = el('div', { className: 'review-note-reply-actions' });
+      const accept = el('button', { className: 'btn-primary review-note-btn', text: 'Accept' });
+      const cancel = el('button', { className: 'btn-secondary review-note-btn', text: 'Cancel' });
+      const save = () => {
+        const text = textarea.value.trim();
+        if (!text) {
+          textarea.focus();
+          return;
+        }
+        this.reviewNoteManager.updateNote(note, { disposition: 'accepted', accepted_body: text });
+        restoreScroll();
+      };
+      accept.addEventListener('click', save);
+      textarea.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+          event.preventDefault();
+          event.stopPropagation();
+          save();
+        }
+      });
+      cancel.addEventListener('click', () => {
+        form.remove();
+        actions.closest('.review-note')?.dispatchEvent(new Event('note-layout'));
+        restoreScroll();
+      });
+      controls.append(accept, cancel);
+      form.append(textarea, controls);
+      actions.appendChild(form);
+      actions.closest('.review-note')?.dispatchEvent(new Event('note-layout'));
+      textarea.focus();
+    });
+    return edit;
+  }
+
+  private showReviewNoteReplyForm(actions: HTMLElement, note: ReviewNote, discuss = false) {
     if (actions.querySelector('.review-note-reply')) {
       return;
     }
@@ -337,13 +461,18 @@ export class ReviewNoteMethods {
     const form = el('div', { className: 'review-note-reply' });
     const textarea = el('textarea', {
       className: 'review-note-reply-text',
-      attrs: { placeholder: 'Instructions for the agent...' },
+      attrs: { placeholder: discuss ? 'Question about this note...' : 'Reply to this note...' },
     });
     const controls = el('div', { className: 'review-note-reply-actions' });
-    const save = el('button', { className: 'btn-primary review-note-btn', text: 'Queue' });
+    const save = el('button', {
+      className: 'btn-primary review-note-btn',
+      text: discuss ? 'Discuss' : 'Queue',
+    });
+    const error = el('div', { className: 'comment-error' });
+    error.hidden = true;
     const cancel = el('button', { className: 'btn-secondary review-note-btn', text: 'Cancel' });
 
-    save.addEventListener('click', (event) => {
+    save.addEventListener('click', async (event) => {
       event.preventDefault();
       event.stopPropagation();
       const instruction = textarea.value.trim();
@@ -351,7 +480,34 @@ export class ReviewNoteMethods {
         textarea.focus();
         return;
       }
-      this.queueReviewNoteForAgent(note, instruction);
+      if (save.disabled) {
+        return;
+      }
+      save.disabled = true;
+      error.hidden = true;
+      try {
+        if (discuss) {
+          await this.discussionManager.send({
+            file: note.file,
+            line: note.line,
+            side: note.side,
+            body: instruction,
+            ...(note.commit_idx === undefined ? {} : { commit_idx: note.commit_idx }),
+            note: replyTarget(note),
+          });
+        } else {
+          this.queueReviewNoteForAgent(note, instruction);
+        }
+        form.remove();
+      } catch (err) {
+        error.textContent =
+          err instanceof DiscussionError && err.status === 409
+            ? 'No agent is listening any more'
+            : 'Failed to send discussion. Try again.';
+        error.hidden = false;
+      } finally {
+        save.disabled = false;
+      }
     });
     cancel.addEventListener('click', (event) => {
       event.preventDefault();
@@ -360,36 +516,22 @@ export class ReviewNoteMethods {
     });
 
     controls.append(save, cancel);
-    form.append(textarea, controls);
+    form.append(error, textarea, controls);
     actions.appendChild(form);
     textarea.focus();
   }
 
-  private queueReviewNoteForAgent(note: ReviewNote, instruction?: string) {
+  private queueReviewNoteForAgent(note: ReviewNote, instruction: string) {
     const comment: ReviewComment = {
       file: note.file,
       line: note.line,
       side: note.side,
-      body: instruction ?? '',
+      body: instruction,
       in_reply_to: replyTarget(note),
     };
     this.commentManager.addComment(
       note.commit_idx === undefined ? comment : { ...comment, commit_idx: note.commit_idx },
     );
-    this.reviewNoteManager.updateNote(note, { disposition: 'addressed' });
-  }
-
-  private unqueueReviewNote(note: ReviewNote) {
-    const index = this.commentManager.comments.findIndex(
-      ({ in_reply_to: target }) =>
-        target !== undefined &&
-        target.id === note.id &&
-        target.author === note.author &&
-        target.body === note.body,
-    );
-    if (index >= 0) {
-      this.commentManager.removeComment(index);
-    }
   }
 
   private reviewNoteHeightPx(body: string) {
@@ -398,18 +540,4 @@ export class ReviewNoteMethods {
       .reduce((total, line) => total + Math.max(1, Math.ceil(line.length / 86)), 0);
     return Math.max(124, Math.min(460, 88 + visualLines * 18));
   }
-}
-
-function replyTarget(note: ReviewNote): ReplyTarget {
-  const target: ReplyTarget = { body: note.body };
-  if (note.id !== undefined) {
-    target.id = note.id;
-  }
-  if (note.author !== undefined) {
-    target.author = note.author;
-  }
-  if (note.source_url !== undefined) {
-    target.source_url = note.source_url;
-  }
-  return target;
 }

@@ -90,7 +90,7 @@ lrv --phab-mcp-comments /tmp/phab.md ...
 - Plan one fix per comment before touching any code. Never skip a comment.
 - Apply all fixes directly. No explanations or commentary.
 - A comment with `in_reply_to` responds to a review note (`author`, `body`,
-  `source_url`). An empty `body` means address that note; otherwise `body` is
+  `source_url`). An empty `body` means the user accepted that note for the agent to address; otherwise `body` is
   the user's reply, which tells you how they want it handled.
 - If the user asks for a local LLM pre-review, perform the review before
   starting `lrv`, write a JSON array of review notes, and pass it with
@@ -149,7 +149,11 @@ The output defaults to JSON (`--format json`), with a `status` field:
     are no findings. Listen again afterwards.
   - `type: "discussion"` has `discussion` containing `id`, `created_at`,
     `file`, `line`, `side`, `body`, and optional `thread_id`, `summarize` and
-    `commit_idx`. Reply with `lrv --add-notes <file>`, setting `discussion_id` to
+    `commit_idx`, and an optional `note` on root discussions. `discussion.note` is
+    a copy of a review note (`id`, `author`, `body`, `source_url`, `origin`): the
+    user is challenging this review note. Address their question in that context.
+    Follow-ups refer to the root with `thread_id` and cannot supply a new `note`.
+    Reply with `lrv --add-notes <file>`, setting `discussion_id` to
     `thread_id` if present, otherwise `id`. It must name the root discussion;
     using a follow-up's own id is rejected. Copy `file`, `line`, and `side`
     (required even though the server moves the reply to the thread), and set
@@ -197,3 +201,5 @@ otherwise), and don't retry inline after a rejection; write a file instead.
 
 `discussion_id` is accepted only by a running review, not by
 `--review-notes-file` or `--validate-review-notes`.
+
+Review notes and `in_reply_to` copies may have `origin: "host"` for comments imported from code hosts. Agent notes default to `"agent"`; leave `origin` out when posting findings.

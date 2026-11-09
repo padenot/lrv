@@ -1497,11 +1497,11 @@ body {
   border-left-color: var(--text-secondary);
 }
 
-.review-note-addressed {
+.review-note-accepted {
   border-left-color: #22c55e;
 }
 
-.review-note-status-addressed {
+.review-note-status-accepted {
   color: #22c55e;
 }
 
@@ -2617,4 +2617,8 @@ body:not(.agent-attached) .discuss-hint {
   stroke-width: 1.4;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+
+body.agent-attached .review-note-reply-btn {
+  display: none;
 }

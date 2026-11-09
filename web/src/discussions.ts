@@ -1,6 +1,7 @@
-import type { CommentLine } from './comments';
+import type { CommentLine, ReplyTarget } from './comments';
 
 export type Discussion = {
+  note?: ReplyTarget;
   id: string;
   thread_id?: string;
   summarize?: boolean;

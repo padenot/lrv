@@ -9,6 +9,7 @@ const TIMEOUT: Duration = Duration::from_secs(60);
 fn discussion() -> AgentEvent {
     AgentEvent::Discussion {
         discussion: Discussion {
+            note: None,
             summarize: false,
             thread_id: None,
             id: "d1".into(),
@@ -216,6 +217,7 @@ async fn add_discussion_uses_shared_sequence_and_wakes_waiter() {
     let task = tokio::spawn(async move {
         sleep(Duration::from_secs(1)).await;
         producer.add_discussion(lrv::agent::DiscussionRequest {
+            note: None,
             file: Some("src/lib.rs".into()),
             line: Some(CommentLine::Single(3)),
             side: Some(Side::New),
@@ -253,6 +255,7 @@ async fn delete_discussion_removes_thread_and_queues_event() {
     channel.push(discussion());
     let follow = channel
         .add_discussion(lrv::agent::DiscussionRequest {
+            note: None,
             file: None,
             line: None,
             side: None,
@@ -281,6 +284,7 @@ async fn delete_discussion_removes_thread_and_queues_event() {
     }
     let next = channel
         .add_discussion(lrv::agent::DiscussionRequest {
+            note: None,
             file: Some("a.rs".into()),
             line: Some(CommentLine::Single(1)),
             side: Some(Side::New),

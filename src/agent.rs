@@ -1,4 +1,4 @@
-use crate::types::{CommentLine, Side};
+use crate::types::{CommentLine, ReplyTarget, Side};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
@@ -8,6 +8,8 @@ use tokio::time::Instant;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Discussion {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<ReplyTarget>,
     pub id: String,
     #[serde(default)]
     pub created_at: u64,
@@ -25,6 +27,7 @@ pub struct Discussion {
 
 #[derive(Deserialize)]
 pub struct DiscussionRequest {
+    pub note: Option<ReplyTarget>,
     pub file: Option<String>,
     pub line: Option<CommentLine>,
     pub side: Option<Side>,
@@ -38,6 +41,7 @@ pub struct DiscussionRequest {
 impl DiscussionRequest {
     pub fn is_valid(&self) -> bool {
         !self.body.trim().is_empty()
+            && (self.note.is_none() || self.thread_id.is_none())
             && (!self.summarize || self.thread_id.is_some())
             && (self.thread_id.is_some()
                 || (self.file.as_ref().is_some_and(|file| !file.is_empty())
@@ -184,6 +188,7 @@ impl AgentChannel {
             (req.file?, req.line?, req.side?, req.commit_idx)
         };
         let discussion = Discussion {
+            note: req.note,
             id: format!("lrv-discussion-{}", inner.next_seq),
             created_at: SystemTime::now()
                 .duration_since(UNIX_EPOCH)

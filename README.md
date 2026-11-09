@@ -109,6 +109,7 @@ Notes:
   `lrv`, write its findings as review notes JSON, and pass that file with
   `--review-notes-file`. The author can then Address, Reply, or Ignore those
   local reviewer comments in the UI before finishing.
+- Edit accepts an agent note with replacement text for Finish, Publish and recovery; Undo discards the edit and restores the original.
 - Phabricator notes use `PHABRICATOR_API_KEY` or `PHABRICATOR_TOKEN`, falling back to the token in `~/.arcrc` (written by `moz-phab install-certificate`); set
   `PHABRICATOR_BASE_URL` or pass `--phab-base-url` for non-Mozilla instances.
 - `lrv --version` prints the current version and can warn if a newer release exists.

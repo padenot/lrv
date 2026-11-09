@@ -1,7 +1,12 @@
 import { commentContainsLine } from './comments';
 import type { CommentLine } from './comments';
 
+export type NoteDisposition = 'open' | 'accepted' | 'ignored';
+export type NoteDispositions = Record<string, NoteDisposition>;
+export type NoteEdits = Record<string, string>;
+
 export type ReviewNote = {
+  origin?: 'agent' | 'host';
   id?: string;
   discussion_id?: string;
   summary?: boolean;
@@ -14,11 +19,18 @@ export type ReviewNote = {
   source_url?: string;
   commit_idx?: number;
   read_only?: boolean;
-  disposition?: 'open' | 'addressed' | 'ignored';
+  disposition?: NoteDisposition;
+  accepted_body?: string | undefined;
 };
+
+export function acceptedBody(note: ReviewNote): string {
+  return note.accepted_body ?? note.body;
+}
 
 export class ReviewNoteManager {
   private notes: ReviewNote[];
+  private dispositions: NoteDispositions = {};
+  private edits: NoteEdits = {};
   private listeners: Array<() => void>;
   private summaryWaiters: Array<() => boolean> = [];
   currentCommitIdx: number | null;
@@ -30,7 +42,7 @@ export class ReviewNoteManager {
   }
 
   setNotes(notes: ReviewNote[]): void {
-    this.notes = [...notes];
+    this.notes = notes.map((note) => this.withDisposition(note));
     this.notifyListeners();
   }
 
@@ -38,7 +50,7 @@ export class ReviewNoteManager {
     let added = false;
     for (const note of notes) {
       if (!this.notes.some((existing) => this.isSameNote(existing, note))) {
-        this.notes.push(note);
+        this.notes.push(this.withDisposition(note));
         added = true;
       }
     }
@@ -51,8 +63,31 @@ export class ReviewNoteManager {
     if (this.currentCommitIdx !== null && note.commit_idx === undefined) {
       note = { ...note, commit_idx: this.currentCommitIdx };
     }
-    this.notes.push(note);
+    this.notes.push(this.withDisposition(note));
     this.notifyListeners();
+  }
+
+  getDispositions(): NoteDispositions {
+    return { ...this.dispositions };
+  }
+
+  getEdits(): NoteEdits {
+    return { ...this.edits };
+  }
+
+  applyDispositions(map: NoteDispositions, edits: NoteEdits = {}): void {
+    this.dispositions = { ...map };
+    this.edits = { ...edits };
+    this.notes = this.notes.map((note) => this.withDisposition(note));
+    this.notifyListeners();
+  }
+
+  private withDisposition(note: ReviewNote): ReviewNote {
+    return {
+      ...note,
+      disposition: (note.id && this.dispositions[note.id]) || 'open',
+      accepted_body: note.id ? this.edits[note.id] : undefined,
+    };
   }
 
   getNotes(): ReviewNote[] {
@@ -97,7 +132,23 @@ export class ReviewNoteManager {
     if (idx < 0) {
       return;
     }
-    this.notes[idx] = { ...this.notes[idx]!, ...patch };
+    if (target.id && patch.disposition) {
+      this.dispositions[target.id] = patch.disposition;
+    }
+    const note = this.notes[idx]!;
+    if (note.id) {
+      if ('accepted_body' in patch) {
+        if (patch.accepted_body === undefined || patch.accepted_body === note.body) {
+          delete this.edits[note.id];
+        } else {
+          this.edits[note.id] = patch.accepted_body;
+        }
+      }
+      if (patch.disposition === 'open' || patch.disposition === 'ignored') {
+        delete this.edits[note.id];
+      }
+    }
+    this.notes[idx] = this.withDisposition({ ...note, ...patch });
     this.notifyListeners();
   }
 
