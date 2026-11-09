@@ -1,4 +1,6 @@
-use crate::types::{Comment, CommentLine, NoteOrigin, ReviewAction, ReviewNote, Side};
+use crate::types::{
+    Comment, CommentLine, DiffResponse, NoteOrigin, ReviewAction, ReviewNote, Side,
+};
 use anyhow::{Context, Result};
 use reqwest::Client;
 use serde::Deserialize;
@@ -443,27 +445,21 @@ pub struct ActiveDiff {
     pub status: Option<String>,
     pub status_name: Option<String>,
     pub diff_id: u64,
-    /// The diff's top commit as the submitting tool recorded it, if it did.
-    pub commit: Option<CommitIdentity>,
+    /// The Git blobs of the files the diff changes.
+    pub blobs: DiffBlobs,
 }
 
-/// A commit's Git tree and first parent: enough to tell whether two commits have the same content,
-/// and if they don't, whether the difference could lie in an earlier commit.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CommitIdentity {
-    pub tree: String,
-    pub parent: Option<String>,
+/// A file's Git blob ids before and after a change, `None` where the file doesn't exist. Local ids
+/// come from the diff's `index` line and may be abbreviated.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FileBlobs {
+    pub old: Option<String>,
+    pub new: Option<String>,
 }
 
-/// How a local commit compares with a revision's latest diff.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DiffCheck {
-    Matches,
-    /// Same parent, different content.
-    Mismatch(String),
-    /// Nothing to compare, or a different parent, so the difference may come from earlier commits.
-    Unverified(String),
-}
+/// Per path, the blobs of each file whose content changes. Binary files, pure renames and mode
+/// changes are left out, as no inline comment can anchor to them.
+pub type DiffBlobs = HashMap<String, FileBlobs>;
 
 /// A draft inline comment: `length` is the number of lines it covers.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -532,73 +528,129 @@ pub fn build_revision_publish(
     revision
 }
 
-/// The top commit recorded in a diff's `local:commits` property (moz-phab and arc record each
-/// submitted commit with its tree and parents). The top commit is the one no other commit lists as
-/// a parent.
-fn diff_commit(diff: &serde_json::Value) -> Option<CommitIdentity> {
-    let commits = diff.get("properties")?.get("local:commits")?.as_object()?;
-    let parents_of = |commit: &serde_json::Value| -> Vec<String> {
-        commit
-            .get("parents")
-            .and_then(|p| p.as_array())
-            .into_iter()
-            .flatten()
-            .filter_map(|parent| parent.as_str().map(str::to_string))
-            .collect()
-    };
-    let parents: HashSet<String> = commits.values().flat_map(parents_of).collect();
-    let mut tops = commits.iter().filter(|(sha, commit)| {
-        !parents.contains(sha.as_str())
-            && !commit
-                .get("commit")
-                .and_then(|c| c.as_str())
-                .is_some_and(|c| parents.contains(c))
-    });
-    let (_, top) = tops.next()?;
-    if tops.next().is_some() {
-        return None;
-    }
-    let tree = top.get("tree")?.as_str().filter(|t| !t.is_empty())?;
-    Some(CommitIdentity {
-        tree: tree.to_string(),
-        parent: parents_of(top).into_iter().next(),
-    })
+/// The blobs of a local diff's text files, from its `index` lines. A file without one gets no
+/// blobs and so never matches.
+pub fn diff_blobs(diff: &DiffResponse) -> DiffBlobs {
+    // Git writes a missing side as zeros.
+    let blob = |id: &Option<String>| id.clone().filter(|id| id.chars().any(|c| c != '0'));
+    diff.files
+        .iter()
+        .filter(|file| !file.is_binary && !file.hunks.is_empty())
+        .map(|file| {
+            let blobs = FileBlobs {
+                old: blob(&file.old_blob),
+                new: blob(&file.new_blob),
+            };
+            (file.path.clone(), blobs)
+        })
+        .collect()
 }
 
-fn short(sha: &str) -> &str {
-    &sha[..sha.len().min(12)]
+/// The Git blob id of `content`.
+fn blob_id(content: &str) -> String {
+    let mut hash = sha1_smol::Sha1::new();
+    hash.update(format!("blob {}\0", content.len()).as_bytes());
+    hash.update(content.as_bytes());
+    hash.digest().to_string()
+}
+
+/// The blobs of a `differential.querydiffs` diff's files. moz-phab and arc upload diffs with full
+/// context, so each file's hunks hold its whole old and new content.
+fn remote_blobs(diff: &serde_json::Value) -> DiffBlobs {
+    let field = |value: &serde_json::Value, key: &str| match value.get(key) {
+        Some(serde_json::Value::String(s)) => s.clone(),
+        Some(serde_json::Value::Number(n)) => n.to_string(),
+        _ => String::new(),
+    };
+    let changes = diff.get("changes").and_then(|c| c.as_array());
+    changes
+        .into_iter()
+        .flatten()
+        .filter_map(|change| {
+            let hunks = change.get("hunks").and_then(|h| h.as_array())?;
+            if hunks.is_empty() {
+                return None;
+            }
+            // Deleted files have no current path; lrv names them by their old one.
+            let path = [field(change, "currentPath"), field(change, "oldPath")]
+                .into_iter()
+                .find(|p| !p.is_empty())?;
+            let (mut old, mut new) = (String::new(), String::new());
+            for hunk in hunks {
+                for line in field(hunk, "corpus").split_inclusive('\n') {
+                    let (sign, text) = line.split_at(line.len().min(1));
+                    match sign {
+                        " " => {
+                            old += text;
+                            new += text;
+                        }
+                        "-" => old += text,
+                        "+" => new += text,
+                        // `\\ No newline at end of file`, covered by the flags below.
+                        _ => {}
+                    }
+                }
+                let missing_newline =
+                    |key| !matches!(field(hunk, key).as_str(), "" | "0" | "false");
+                for (key, content) in [
+                    ("isMissingOldNewline", &mut old),
+                    ("isMissingNewNewline", &mut new),
+                ] {
+                    if missing_newline(key) && content.ends_with('\n') {
+                        content.pop();
+                    }
+                }
+            }
+            // Phabricator change types: 1 adds the file, 3 deletes it.
+            let kind = field(change, "type");
+            let blobs = FileBlobs {
+                old: (kind != "1").then(|| blob_id(&old)),
+                new: (kind != "3").then(|| blob_id(&new)),
+            };
+            Some((path, blobs))
+        })
+        .collect()
 }
 
 /// Inline comments are anchored to lines of the revision's diff, so publishing from a commit that
-/// differs from it would put them on the wrong lines. Git trees cover the whole repository, so
-/// identical trees prove the content matches. Different trees on the same parent prove it doesn't;
-/// on different parents the difference may lie in earlier commits (a rebase, or a stack applied on
-/// another base), so the commit can't be verified.
-pub fn check_diff_matches(
-    revision: &str,
-    local: Option<&CommitIdentity>,
-    active: &ActiveDiff,
-) -> DiffCheck {
-    let diff = format!("the latest diff (id {}) of {revision}", active.diff_id);
-    let Some(local) = local else {
-        return DiffCheck::Unverified(format!("there is no local commit to compare with {diff}"));
+/// differs from it would put them on the wrong lines. Comparing the blobs of the files the commit
+/// changes, rather than whole commits or hunks, accepts a patch applied to another base (as
+/// `moz-phab patch` does when the author's parent isn't public) as long as those files are the
+/// same, and doesn't depend on which diff algorithm produced either side.
+pub fn check_diff_matches(revision: &str, local: &DiffBlobs, active: &ActiveDiff) -> Result<()> {
+    // Local ids may be abbreviated.
+    let same = |ours: &Option<String>, theirs: &Option<String>| match (ours, theirs) {
+        (Some(ours), Some(theirs)) => theirs.starts_with(ours.as_str()),
+        (ours, theirs) => ours.is_none() && theirs.is_none(),
     };
-    let Some(remote) = &active.commit else {
-        return DiffCheck::Unverified(format!("{diff} records no Git tree to compare with"));
-    };
-    if local.tree == remote.tree {
-        return DiffCheck::Matches;
+    let mut mismatched: Vec<&str> = local
+        .iter()
+        .filter(|(path, ours)| {
+            !active
+                .blobs
+                .get(*path)
+                .is_some_and(|theirs| same(&ours.old, &theirs.old) && same(&ours.new, &theirs.new))
+        })
+        .map(|(path, _)| path.as_str())
+        .chain(
+            active
+                .blobs
+                .keys()
+                .filter(|path| !local.contains_key(*path))
+                .map(String::as_str),
+        )
+        .collect();
+    if mismatched.is_empty() {
+        return Ok(());
     }
-    match (&local.parent, &remote.parent) {
-        (Some(ours), Some(theirs)) if ours == theirs => DiffCheck::Mismatch(format!(
-            "the local commit doesn't match {diff}"
-        )),
-        (ours, theirs) => DiffCheck::Unverified(format!(
-            "the local commit doesn't match {diff}, but it is on a different parent ({} instead of {}), so earlier commits may differ instead",
-            ours.as_deref().map_or("none", short),
-            theirs.as_deref().map_or("unknown", short),
-        )),
-    }
+    mismatched.sort_unstable();
+    mismatched.dedup();
+    anyhow::bail!(
+        "the local commit doesn't match the latest diff (id {}) of {}; these files differ: {}",
+        active.diff_id,
+        revision,
+        mismatched.join(", ")
+    )
 }
 
 impl PhabricatorClient {
@@ -733,7 +785,7 @@ impl PhabricatorClient {
             status: status.and_then(|s| s.value.clone()),
             status_name: status.and_then(|s| s.name.clone()),
             diff_id,
-            commit: diff_commit(diff),
+            blobs: remote_blobs(diff),
         })
     }
 
@@ -892,8 +944,8 @@ pub fn foreign_outdated(validation: &Validation) -> Vec<&RevisionStatusInfo> {
 
 pub struct Publisher {
     targets: Vec<Option<PhabTarget>>,
-    /// Each commit's tree and parent, when known.
-    commits: Vec<Option<CommitIdentity>>,
+    /// The blobs of each commit's files.
+    blobs: Vec<DiffBlobs>,
     validation: tokio::sync::OnceCell<Validation>,
     attempts: tokio::sync::Mutex<HashMap<String, (RevisionPublish, PublishProgress)>>,
 }
@@ -901,7 +953,7 @@ pub struct Publisher {
 impl Publisher {
     #[cfg(test)]
     pub(crate) fn published_for_test() -> Self {
-        let publisher = Self::new(Vec::new(), Vec::new());
+        let publisher = Self::new(Vec::new(), &[]);
         publisher
             .validation
             .set(Validation {
@@ -940,10 +992,10 @@ impl Publisher {
         publisher
     }
 
-    pub fn new(targets: Vec<Option<PhabTarget>>, commits: Vec<Option<CommitIdentity>>) -> Self {
+    pub fn new(targets: Vec<Option<PhabTarget>>, diffs: &[DiffResponse]) -> Self {
         Self {
             targets,
-            commits,
+            blobs: diffs.iter().map(diff_blobs).collect(),
             validation: Default::default(),
             attempts: Default::default(),
         }
@@ -1052,19 +1104,14 @@ impl Publisher {
                     };
                     match active {
                         Ok(active) => {
-                            let local = self.commits.get(revision.commit_idxs[0]);
-                            match check_diff_matches(
+                            revision.reason = check_diff_matches(
                                 &revision.id,
-                                local.and_then(Option::as_ref),
+                                &self.blobs[revision.commit_idxs[0]],
                                 &active,
-                            ) {
-                                DiffCheck::Matches => {}
-                                DiffCheck::Mismatch(reason) => {
-                                    revision.reason = Some(reason);
-                                    revision.outdated = true;
-                                }
-                                DiffCheck::Unverified(reason) => revision.reason = Some(reason),
-                            }
+                            )
+                            .err()
+                            .map(|e| e.to_string());
+                            revision.outdated = revision.reason.is_some();
                             revision.title = active.title;
                             revision.url = active.uri;
                             revision.ownership_known = active.author_phid.is_some();
@@ -1255,11 +1302,13 @@ fn note_line_start(line: &CommentLine) -> usize {
 
 #[cfg(test)]
 mod tests {
+    use super::diff_blobs;
     use super::{
         build_revision_publish, check_diff_matches, detect_revision, foreign_outdated,
-        parse_revision_id, resolve_phab_targets, ActiveDiff, CommitIdentity, DiffCheck, PhabTarget,
+        parse_revision_id, remote_blobs, resolve_phab_targets, ActiveDiff, PhabTarget,
         RevisionStatusInfo, Validation,
     };
+    use crate::diff::parse_diff;
     use crate::types::{Comment, CommentLine, ReplyTarget, ReviewAction, Side};
     use std::collections::HashMap;
 
@@ -1461,12 +1510,7 @@ mod tests {
                     {"id": 11, "phid": "PHID-DIFF-1"}
                 ]}),
                 "differential.querydiffs" => serde_json::json!({
-                    "11": {"properties": {"local:commits": {
-                        "c1": {"commit": "c1", "tree": "tree-1", "parents": ["base"]}
-                    }}},
-                    "12": {"properties": {"local:commits": {
-                        "c2": {"commit": "c2", "tree": "tree-2", "parents": ["c1"]}
-                    }}}
+                    "11": {"changes": []}, "12": {"changes": []}
                 }),
                 _ => panic!("unexpected method {method}"),
             };
@@ -1491,14 +1535,7 @@ mod tests {
                         })
                     })
                     .collect(),
-                ["tree-1", "tree-2"]
-                    .map(|tree| {
-                        Some(CommitIdentity {
-                            tree: tree.into(),
-                            parent: None,
-                        })
-                    })
-                    .to_vec(),
+                &[parse_diff("").unwrap(), parse_diff("").unwrap()],
             );
             assert_eq!(publisher.own_revisions(), vec![None, None]);
             let validation = publisher.validate().await;
@@ -1680,12 +1717,19 @@ mod tests {
     }
 
     #[test]
-    fn diff_match_compares_trees_and_parents() {
-        let identity = |tree: &str, parent: Option<&str>| CommitIdentity {
-            tree: tree.into(),
-            parent: parent.map(str::to_string),
-        };
-        let active = ActiveDiff {
+    fn diff_match_compares_file_blobs() {
+        // Ids from `git hash-object`.
+        let local = diff_blobs(
+            &parse_diff(
+                "diff --git a/a.rs b/a.rs\nindex 7d97293bac..a18c3e8473 100644\n\
+                 --- a/a.rs\n+++ b/a.rs\n@@ -2,3 +2,3 @@\n two\n-old\n+new\n four\n\
+                 diff --git a/gone.rs b/gone.rs\ndeleted file mode 100644\n\
+                 index b023018cab..0000000000\n--- a/gone.rs\n+++ /dev/null\n@@ -1 +0,0 @@\n-bye\n",
+            )
+            .unwrap(),
+        );
+        // Phabricator hunks hold whole files; numbers may be strings.
+        let active = |corpus: &str, missing_newline: serde_json::Value| ActiveDiff {
             title: String::new(),
             uri: String::new(),
             author_phid: None,
@@ -1693,85 +1737,38 @@ mod tests {
             status: None,
             status_name: None,
             diff_id: 9,
-            commit: Some(identity("tree-1", Some("base"))),
+            blobs: remote_blobs(&serde_json::json!({"changes": [
+                {"currentPath": "a.rs", "oldPath": "a.rs", "type": "2",
+                 "hunks": [{"corpus": corpus, "isMissingNewNewline": missing_newline}]},
+                {"currentPath": "", "oldPath": "gone.rs", "type": 3,
+                 "hunks": [{"corpus": "-bye\n"}]},
+                // Binary files and moves have no hunks to compare.
+                {"currentPath": "image.png", "type": "2", "hunks": []}
+            ]})),
         };
-        let check = |local: Option<&CommitIdentity>, active: &ActiveDiff| {
-            check_diff_matches("D1", local, active)
-        };
+        let check = |active: &ActiveDiff| check_diff_matches("D1", &local, active);
 
-        // The same tree matches whatever the parent: a stack re-committed by someone else.
+        // Any alignment of the same change matches.
+        let corpus = " one\n two\n-old\n+new\n four\n";
+        assert!(check(&active(corpus, serde_json::Value::Null)).is_ok());
+        assert!(check(&active(" one\n two\n+new\n-old\n four\n", "0".into())).is_ok());
+
+        let err = check(&active(
+            " one\n two\n-old\n+newer\n four\n",
+            serde_json::Value::Null,
+        ))
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("id 9") && err.contains("D1"), "{err}");
+        assert!(err.ends_with("these files differ: a.rs"), "{err}");
+
+        // A new file without a final newline differs from one with it.
+        assert!(check(&active(corpus, "1".into())).is_err());
+        let blobs = remote_blobs(&serde_json::json!({"changes": [{"currentPath": "a.rs",
+            "type": "2", "hunks": [{"corpus": corpus, "isMissingNewNewline": "1"}]}]}));
         assert_eq!(
-            check(Some(&identity("tree-1", Some("base"))), &active),
-            DiffCheck::Matches
-        );
-        assert_eq!(
-            check(Some(&identity("tree-1", Some("other"))), &active),
-            DiffCheck::Matches
-        );
-
-        // A different tree on the same parent is a real mismatch.
-        let DiffCheck::Mismatch(reason) = check(Some(&identity("tree-2", Some("base"))), &active)
-        else {
-            panic!("expected a mismatch");
-        };
-        assert!(reason.contains("id 9") && reason.contains("D1"), "{reason}");
-
-        // On another parent the difference may lie in earlier commits.
-        let DiffCheck::Unverified(reason) =
-            check(Some(&identity("tree-2", Some("0123456789abcdef"))), &active)
-        else {
-            panic!("expected unverified");
-        };
-        assert!(reason.contains("0123456789ab instead of base"), "{reason}");
-
-        // Nothing to compare on either side.
-        assert!(matches!(check(None, &active), DiffCheck::Unverified(_)));
-        let untracked = ActiveDiff {
-            commit: None,
-            ..active
-        };
-        assert!(matches!(
-            check(Some(&identity("tree-1", Some("base"))), &untracked),
-            DiffCheck::Unverified(_)
-        ));
-    }
-
-    #[test]
-    fn diff_commit_takes_the_top_commit() {
-        use super::diff_commit;
-        let top = |diff: serde_json::Value| diff_commit(&diff).map(|c| (c.tree, c.parent));
-        let pair = |tree: &str, parent: &str| Some((tree.to_string(), Some(parent.to_string())));
-
-        assert_eq!(
-            top(serde_json::json!({"properties": {"local:commits": {
-                "bbb": {"commit": "bbb", "tree": "tree-b", "parents": ["aaa"]},
-                "aaa": {"commit": "aaa", "tree": "tree-a", "parents": ["base"]}
-            }}})),
-            pair("tree-b", "aaa")
-        );
-        assert_eq!(
-            top(serde_json::json!({"properties": {"local:commits": {
-                "aaa": {"commit": "aaa", "tree": "tree-a", "parents": ["base"]}
-            }}})),
-            pair("tree-a", "base")
-        );
-
-        // Commits without a tree, or no properties (which Phabricator sends as a list).
-        assert_eq!(
-            top(serde_json::json!({"properties": {"local:commits": {
-                "aaa": {"commit": "aaa", "parents": ["base"]}
-            }}})),
-            None
-        );
-        assert_eq!(top(serde_json::json!({"properties": []})), None);
-
-        // Unrelated commits leave no single top.
-        assert_eq!(
-            top(serde_json::json!({"properties": {"local:commits": {
-                "aaa": {"tree": "tree-a", "parents": ["base"]},
-                "ccc": {"tree": "tree-c", "parents": ["base"]}
-            }}})),
-            None
+            blobs["a.rs"].new.as_deref(),
+            Some("e31cbd97246d0c9b8abe52fd5ef9ed42533cf0e9")
         );
     }
 }
