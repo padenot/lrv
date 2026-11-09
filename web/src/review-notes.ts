@@ -3,6 +3,7 @@ import type { CommentLine } from './comments';
 
 export type NoteDisposition = 'open' | 'accepted' | 'ignored';
 export type NoteDispositions = Record<string, NoteDisposition>;
+export type NoteEdits = Record<string, string>;
 
 export type ReviewNote = {
   origin?: 'agent' | 'host';
@@ -19,11 +20,17 @@ export type ReviewNote = {
   commit_idx?: number;
   read_only?: boolean;
   disposition?: NoteDisposition;
+  accepted_body?: string | undefined;
 };
+
+export function acceptedBody(note: ReviewNote): string {
+  return note.accepted_body ?? note.body;
+}
 
 export class ReviewNoteManager {
   private notes: ReviewNote[];
   private dispositions: NoteDispositions = {};
+  private edits: NoteEdits = {};
   private listeners: Array<() => void>;
   private summaryWaiters: Array<() => boolean> = [];
   currentCommitIdx: number | null;
@@ -64,14 +71,23 @@ export class ReviewNoteManager {
     return { ...this.dispositions };
   }
 
-  applyDispositions(map: NoteDispositions): void {
+  getEdits(): NoteEdits {
+    return { ...this.edits };
+  }
+
+  applyDispositions(map: NoteDispositions, edits: NoteEdits = {}): void {
     this.dispositions = { ...map };
+    this.edits = { ...edits };
     this.notes = this.notes.map((note) => this.withDisposition(note));
     this.notifyListeners();
   }
 
   private withDisposition(note: ReviewNote): ReviewNote {
-    return { ...note, disposition: (note.id && this.dispositions[note.id]) || 'open' };
+    return {
+      ...note,
+      disposition: (note.id && this.dispositions[note.id]) || 'open',
+      accepted_body: note.id ? this.edits[note.id] : undefined,
+    };
   }
 
   getNotes(): ReviewNote[] {
@@ -119,7 +135,20 @@ export class ReviewNoteManager {
     if (target.id && patch.disposition) {
       this.dispositions[target.id] = patch.disposition;
     }
-    this.notes[idx] = { ...this.notes[idx]!, ...patch };
+    const note = this.notes[idx]!;
+    if (note.id) {
+      if ('accepted_body' in patch) {
+        if (patch.accepted_body === undefined || patch.accepted_body === note.body) {
+          delete this.edits[note.id];
+        } else {
+          this.edits[note.id] = patch.accepted_body;
+        }
+      }
+      if (patch.disposition === 'open' || patch.disposition === 'ignored') {
+        delete this.edits[note.id];
+      }
+    }
+    this.notes[idx] = this.withDisposition({ ...note, ...patch });
     this.notifyListeners();
   }
 

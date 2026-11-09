@@ -1,4 +1,4 @@
-import type { ReviewNote } from './review-notes';
+import { acceptedBody, type ReviewNote } from './review-notes';
 
 export type CommentLine = number | [number, number];
 
@@ -168,6 +168,6 @@ export function acceptedNoteEntries(
       side: note.side,
       body: '',
       ...(note.commit_idx === undefined ? {} : { commit_idx: note.commit_idx }),
-      in_reply_to: replyTarget(note),
+      in_reply_to: { ...replyTarget(note), body: acceptedBody(note) },
     }));
 }

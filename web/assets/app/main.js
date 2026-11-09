@@ -457,6 +457,118 @@ const clearEl = (node) => {
 	return node;
 };
 //#endregion
+//#region web/src/review-notes.ts
+function acceptedBody(note) {
+	return note.accepted_body ?? note.body;
+}
+var ReviewNoteManager = class {
+	notes;
+	dispositions = {};
+	edits = {};
+	listeners;
+	summaryWaiters = [];
+	currentCommitIdx;
+	constructor() {
+		this.notes = [];
+		this.listeners = [];
+		this.currentCommitIdx = null;
+	}
+	setNotes(notes) {
+		this.notes = notes.map((note) => this.withDisposition(note));
+		this.notifyListeners();
+	}
+	mergeNotes(notes) {
+		let added = false;
+		for (const note of notes) if (!this.notes.some((existing) => this.isSameNote(existing, note))) {
+			this.notes.push(this.withDisposition(note));
+			added = true;
+		}
+		if (added) this.notifyListeners();
+	}
+	addNote(note) {
+		if (this.currentCommitIdx !== null && note.commit_idx === void 0) note = {
+			...note,
+			commit_idx: this.currentCommitIdx
+		};
+		this.notes.push(this.withDisposition(note));
+		this.notifyListeners();
+	}
+	getDispositions() {
+		return { ...this.dispositions };
+	}
+	getEdits() {
+		return { ...this.edits };
+	}
+	applyDispositions(map, edits = {}) {
+		this.dispositions = { ...map };
+		this.edits = { ...edits };
+		this.notes = this.notes.map((note) => this.withDisposition(note));
+		this.notifyListeners();
+	}
+	withDisposition(note) {
+		return {
+			...note,
+			disposition: note.id && this.dispositions[note.id] || "open",
+			accepted_body: note.id ? this.edits[note.id] : void 0
+		};
+	}
+	getNotes() {
+		return this.notes.filter((n) => !n.discussion_id);
+	}
+	getNotesForFile(file) {
+		return this.notes.filter((n) => !n.discussion_id && n.file === file && (this.currentCommitIdx === null || n.commit_idx === this.currentCommitIdx));
+	}
+	getDiscussionReplies(discussionId) {
+		return this.notes.filter((n) => n.discussion_id === discussionId && !n.summary);
+	}
+	nextSummary(rootId) {
+		const isSummary = (note) => note.discussion_id === rootId && note.summary;
+		const known = new Set(this.notes.filter(isSummary));
+		return new Promise((resolve) => {
+			const check = () => {
+				const summary = this.notes.find((note) => isSummary(note) && !known.has(note));
+				if (summary) resolve(summary);
+				return !!summary;
+			};
+			this.summaryWaiters.push(check);
+		});
+	}
+	removeDiscussionReplies(id) {
+		this.notes = this.notes.filter((note) => note.discussion_id !== id);
+	}
+	updateNote(target, patch) {
+		const idx = this.notes.findIndex((note) => this.isSameNote(note, target));
+		if (idx < 0) return;
+		if (target.id && patch.disposition) this.dispositions[target.id] = patch.disposition;
+		const note = this.notes[idx];
+		if (note.id) {
+			if ("accepted_body" in patch) {
+				if (patch.accepted_body === void 0 || patch.accepted_body === note.body) delete this.edits[note.id];
+				else this.edits[note.id] = patch.accepted_body;
+			}
+			if (patch.disposition === "open" || patch.disposition === "ignored") delete this.edits[note.id];
+		}
+		this.notes[idx] = this.withDisposition({
+			...note,
+			...patch
+		});
+		this.notifyListeners();
+	}
+	findNote(file, line, side) {
+		return this.notes.findIndex((n) => !n.discussion_id && n.file === file && n.side === side && commentContainsLine(n, line) && (this.currentCommitIdx === null || n.commit_idx === this.currentCommitIdx));
+	}
+	onChange(listener) {
+		this.listeners.push(listener);
+	}
+	notifyListeners() {
+		this.summaryWaiters = this.summaryWaiters.filter((check) => !check());
+		this.listeners.forEach((l) => l());
+	}
+	isSameNote(a, b) {
+		return a === b || a.id !== void 0 && a.id === b.id;
+	}
+};
+//#endregion
 //#region web/src/comments.ts
 /** A reply with no body only asks the agent to address the note, so it is never published. */
 function isAcceptRequest(comment) {
@@ -556,7 +668,10 @@ function acceptedNoteEntries(notes, ownRevisions) {
 		side: note.side,
 		body: "",
 		...note.commit_idx === void 0 ? {} : { commit_idx: note.commit_idx },
-		in_reply_to: replyTarget(note)
+		in_reply_to: {
+			...replyTarget(note),
+			body: acceptedBody(note)
+		}
 	}));
 }
 //#endregion
@@ -1033,101 +1148,6 @@ var DiscussionMethods = class {
 	}
 };
 //#endregion
-//#region web/src/review-notes.ts
-var ReviewNoteManager = class {
-	notes;
-	dispositions = {};
-	listeners;
-	summaryWaiters = [];
-	currentCommitIdx;
-	constructor() {
-		this.notes = [];
-		this.listeners = [];
-		this.currentCommitIdx = null;
-	}
-	setNotes(notes) {
-		this.notes = notes.map((note) => this.withDisposition(note));
-		this.notifyListeners();
-	}
-	mergeNotes(notes) {
-		let added = false;
-		for (const note of notes) if (!this.notes.some((existing) => this.isSameNote(existing, note))) {
-			this.notes.push(this.withDisposition(note));
-			added = true;
-		}
-		if (added) this.notifyListeners();
-	}
-	addNote(note) {
-		if (this.currentCommitIdx !== null && note.commit_idx === void 0) note = {
-			...note,
-			commit_idx: this.currentCommitIdx
-		};
-		this.notes.push(this.withDisposition(note));
-		this.notifyListeners();
-	}
-	getDispositions() {
-		return { ...this.dispositions };
-	}
-	applyDispositions(map) {
-		this.dispositions = { ...map };
-		this.notes = this.notes.map((note) => this.withDisposition(note));
-		this.notifyListeners();
-	}
-	withDisposition(note) {
-		return {
-			...note,
-			disposition: note.id && this.dispositions[note.id] || "open"
-		};
-	}
-	getNotes() {
-		return this.notes.filter((n) => !n.discussion_id);
-	}
-	getNotesForFile(file) {
-		return this.notes.filter((n) => !n.discussion_id && n.file === file && (this.currentCommitIdx === null || n.commit_idx === this.currentCommitIdx));
-	}
-	getDiscussionReplies(discussionId) {
-		return this.notes.filter((n) => n.discussion_id === discussionId && !n.summary);
-	}
-	nextSummary(rootId) {
-		const isSummary = (note) => note.discussion_id === rootId && note.summary;
-		const known = new Set(this.notes.filter(isSummary));
-		return new Promise((resolve) => {
-			const check = () => {
-				const summary = this.notes.find((note) => isSummary(note) && !known.has(note));
-				if (summary) resolve(summary);
-				return !!summary;
-			};
-			this.summaryWaiters.push(check);
-		});
-	}
-	removeDiscussionReplies(id) {
-		this.notes = this.notes.filter((note) => note.discussion_id !== id);
-	}
-	updateNote(target, patch) {
-		const idx = this.notes.findIndex((note) => this.isSameNote(note, target));
-		if (idx < 0) return;
-		if (target.id && patch.disposition) this.dispositions[target.id] = patch.disposition;
-		this.notes[idx] = {
-			...this.notes[idx],
-			...patch
-		};
-		this.notifyListeners();
-	}
-	findNote(file, line, side) {
-		return this.notes.findIndex((n) => !n.discussion_id && n.file === file && n.side === side && commentContainsLine(n, line) && (this.currentCommitIdx === null || n.commit_idx === this.currentCommitIdx));
-	}
-	onChange(listener) {
-		this.listeners.push(listener);
-	}
-	notifyListeners() {
-		this.summaryWaiters = this.summaryWaiters.filter((check) => !check());
-		this.listeners.forEach((l) => l());
-	}
-	isSameNote(a, b) {
-		return a === b || a.id !== void 0 && a.id === b.id;
-	}
-};
-//#endregion
 //#region web/src/live-events.ts
 function startLiveEvents(app) {
 	const source = new EventSource("/api/events");
@@ -1218,29 +1238,34 @@ async function loadCommentDraft(key) {
 	const db = await openDraftDb();
 	if (!db) return {
 		comments: [],
-		dispositions: {}
+		dispositions: {},
+		note_edits: {}
 	};
 	try {
 		const record = await runTransaction(db, "readonly", (store) => store.get(key));
 		if (!record || record.schemaVersion !== 1 || !Array.isArray(record.comments)) return {
 			comments: [],
-			dispositions: {}
+			dispositions: {},
+			note_edits: {}
 		};
 		return {
 			comments: sanitizeComments(record.comments),
-			dispositions: sanitizeDispositions(record.dispositions)
+			dispositions: sanitizeDispositions(record.dispositions),
+			note_edits: sanitizeEdits(record.note_edits)
 		};
 	} catch (error) {
 		console.warn("Failed to load persisted review comments:", error);
 		return {
 			comments: [],
-			dispositions: {}
+			dispositions: {},
+			note_edits: {}
 		};
 	}
 }
-async function saveCommentDraft(key, comments, dispositions = {}) {
+async function saveCommentDraft(key, comments, dispositions = {}, noteEdits = {}) {
 	const sanitized = sanitizeComments(comments);
-	if (sanitized.length === 0 && !Object.values(dispositions).some((value) => value !== "open")) {
+	const edits = sanitizeEdits(noteEdits);
+	if (sanitized.length === 0 && !Object.values(dispositions).some((value) => value !== "open") && Object.keys(edits).length === 0) {
 		await clearCommentDraft(key);
 		return;
 	}
@@ -1251,7 +1276,8 @@ async function saveCommentDraft(key, comments, dispositions = {}) {
 		schemaVersion: 1,
 		savedAt: Date.now(),
 		comments: sanitized,
-		dispositions
+		dispositions,
+		note_edits: edits
 	};
 	try {
 		await runTransaction(db, "readwrite", (store) => store.put(record));
@@ -1267,7 +1293,10 @@ async function syncCommentDraftToServer(comments, notes = []) {
 			body: JSON.stringify({
 				comments,
 				notes: notes.filter((note) => note.id && note.disposition && note.disposition !== "open").map((note) => ({
-					note,
+					note: {
+						...note,
+						body: acceptedBody(note)
+					},
 					disposition: note.disposition
 				}))
 			})
@@ -1382,6 +1411,10 @@ function hashString(value) {
 function sanitizeDispositions(value) {
 	if (!value || typeof value !== "object") return {};
 	return Object.fromEntries(Object.entries(value).filter(([, disposition]) => disposition === "open" || disposition === "accepted" || disposition === "ignored"));
+}
+function sanitizeEdits(value) {
+	if (!value || typeof value !== "object") return {};
+	return Object.fromEntries(Object.entries(value).filter(([, body]) => typeof body === "string"));
 }
 //#endregion
 //#region web/src/ui-signals.ts
@@ -12613,14 +12646,17 @@ var ReviewNoteMethods = class {
 		if (!this.editor) return;
 		const file = this.files[this.currentFileIndex];
 		if (!file) return;
-		const notes = [...this.reviewNoteManager.getNotesForFile(file.path).map((note) => ({
-			file: note.file,
-			line: note.line,
-			side: note.side,
-			height: () => this.reviewNoteHeightPx(note.body),
-			hover: note.body,
-			node: this.buildReviewNoteNode(note)
-		})), ...this.discussionManager.getForFile(file.path).map((discussion) => {
+		const notes = [...this.reviewNoteManager.getNotesForFile(file.path).map((note) => {
+			const node = this.buildReviewNoteNode(note);
+			return {
+				file: note.file,
+				line: note.line,
+				side: note.side,
+				height: () => this.reviewNoteHeightPx(acceptedBody(note)) + (node.querySelector(".review-note-reply") ? 200 : 0) + (node.querySelector(".review-note-original:not([hidden])") ? this.reviewNoteHeightPx(note.body) : 0),
+				hover: acceptedBody(note),
+				node
+			};
+		}), ...this.discussionManager.getForFile(file.path).map((discussion) => {
 			const node = this.buildDiscussionNode(discussion);
 			return {
 				file: discussion.file,
@@ -12661,7 +12697,7 @@ var ReviewNoteMethods = class {
 					heightInPx: note.height()
 				};
 				const id = accessor.addZone(zone);
-				if (note.discussion) note.node.addEventListener("discussion-layout", () => {
+				note.node.addEventListener(note.discussion ? "discussion-layout" : "note-layout", () => {
 					zone.heightInPx = note.height();
 					targetEditor.changeViewZones((zones) => zones.layoutZone(id));
 				});
@@ -12758,8 +12794,24 @@ var ReviewNoteMethods = class {
 			meta.appendChild(link);
 		}
 		const body = el("div", { className: "review-note-body" });
-		appendLinkifiedText(body, note.body);
+		appendLinkifiedText(body, acceptedBody(note));
 		box.append(meta, body);
+		if (note.accepted_body !== void 0) {
+			const original = el("div", { className: "review-note-body review-note-original" });
+			original.hidden = true;
+			appendLinkifiedText(original, note.body);
+			const toggle = el("button", {
+				className: "btn-secondary review-note-btn",
+				text: "Show original"
+			});
+			toggle.addEventListener("click", () => {
+				original.hidden = !original.hidden;
+				toggle.textContent = original.hidden ? "Show original" : "Hide original";
+				box.dispatchEvent(new Event("note-layout"));
+			});
+			meta.appendChild(toggle);
+			box.appendChild(original);
+		}
 		if (!note.read_only) box.appendChild(this.buildReviewNoteActions(note));
 		return box;
 	}
@@ -12790,7 +12842,7 @@ var ReviewNoteMethods = class {
 		if (disposition === "accepted" || disposition === "ignored") {
 			actions.appendChild(el("span", {
 				className: `review-note-status review-note-status-${disposition}`,
-				text: disposition === "accepted" ? "Accepted" : "Ignored"
+				text: disposition === "accepted" ? note.accepted_body === void 0 ? "Accepted" : "Accepted (edited)" : "Ignored"
 			}));
 			const undo = el("button", {
 				className: "btn-secondary review-note-btn",
@@ -12802,6 +12854,7 @@ var ReviewNoteMethods = class {
 				this.reviewNoteManager.updateNote(note, { disposition: "open" });
 			});
 			actions.appendChild(undo);
+			if (disposition === "accepted" && note.accepted_body !== void 0 && (note.origin ?? "agent") === "agent") actions.appendChild(this.buildReviewNoteEditButton(actions, note));
 			return actions;
 		}
 		const accept = el("button", {
@@ -12831,8 +12884,69 @@ var ReviewNoteMethods = class {
 			event.stopPropagation();
 			this.reviewNoteManager.updateNote(note, { disposition: "ignored" });
 		});
-		actions.append(accept, ignore, reply, discuss);
+		actions.appendChild(accept);
+		if ((note.origin ?? "agent") === "agent") actions.appendChild(this.buildReviewNoteEditButton(actions, note));
+		actions.append(ignore, reply, discuss);
 		return actions;
+	}
+	buildReviewNoteEditButton(actions, note) {
+		const edit = el("button", {
+			className: "btn-secondary review-note-btn",
+			text: "Edit"
+		});
+		edit.addEventListener("click", (event) => {
+			event.preventDefault();
+			event.stopPropagation();
+			if (actions.querySelector(".review-note-reply")) return;
+			const targetEditor = this.isStacked ? null : note.side === "old" ? this.editor?.getOriginalEditor() : this.editor?.getModifiedEditor();
+			const scrollTop = targetEditor?.getScrollTop();
+			const restoreScroll = () => {
+				if (targetEditor && scrollTop !== void 0) targetEditor.setScrollTop(scrollTop);
+			};
+			const form = el("div", { className: "review-note-reply" });
+			const textarea = el("textarea", { className: "review-note-reply-text" });
+			textarea.value = acceptedBody(note);
+			const controls = el("div", { className: "review-note-reply-actions" });
+			const accept = el("button", {
+				className: "btn-primary review-note-btn",
+				text: "Accept"
+			});
+			const cancel = el("button", {
+				className: "btn-secondary review-note-btn",
+				text: "Cancel"
+			});
+			const save = () => {
+				const text = textarea.value.trim();
+				if (!text) {
+					textarea.focus();
+					return;
+				}
+				this.reviewNoteManager.updateNote(note, {
+					disposition: "accepted",
+					accepted_body: text
+				});
+				restoreScroll();
+			};
+			accept.addEventListener("click", save);
+			textarea.addEventListener("keydown", (event) => {
+				if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+					event.preventDefault();
+					event.stopPropagation();
+					save();
+				}
+			});
+			cancel.addEventListener("click", () => {
+				form.remove();
+				actions.closest(".review-note")?.dispatchEvent(new Event("note-layout"));
+				restoreScroll();
+			});
+			controls.append(accept, cancel);
+			form.append(textarea, controls);
+			actions.appendChild(form);
+			actions.closest(".review-note")?.dispatchEvent(new Event("note-layout"));
+			textarea.focus();
+		});
+		return edit;
 	}
 	showReviewNoteReplyForm(actions, note, discuss = false) {
 		if (actions.querySelector(".review-note-reply")) return;
@@ -13501,7 +13615,7 @@ var PublishDialogMethods = class {
 				file: note.file,
 				line: note.line,
 				side: note.side,
-				body: note.body,
+				body: acceptedBody(note),
 				...note.commit_idx === void 0 ? {} : { commit_idx: note.commit_idx }
 			}))];
 		};
@@ -14797,9 +14911,10 @@ var MonacoApp = class {
 		const key = this.commentDraftKey;
 		const comments = this.commentManager.getComments();
 		const dispositions = this.reviewNoteManager.getDispositions();
+		const edits = this.reviewNoteManager.getEdits();
 		const notes = this.reviewNoteManager.getNotes();
 		const restorePending = this.commentDraftRestorePending;
-		this.commentDraftWrite = this.commentDraftWrite.catch(() => void 0).then(() => restorePending ? void 0 : saveCommentDraft(key, comments, dispositions)).then(() => this.reviewSubmitted ? void 0 : syncCommentDraftToServer(comments, notes));
+		this.commentDraftWrite = this.commentDraftWrite.catch(() => void 0).then(() => restorePending ? void 0 : saveCommentDraft(key, comments, dispositions, edits)).then(() => this.reviewSubmitted ? void 0 : syncCommentDraftToServer(comments, notes));
 	}
 	async restorePersistedComments() {
 		if (!this.commentDraftKey) return;
@@ -14823,7 +14938,7 @@ var MonacoApp = class {
 		const noBtn = document.getElementById("restore-no-btn");
 		if (!banner || !msg || !yesBtn || !noBtn) {
 			this.commentDraftRestorePending = false;
-			this.reviewNoteManager.applyDispositions(dispositions);
+			this.reviewNoteManager.applyDispositions(dispositions, draft.note_edits);
 			this.commentManager.setComments(comments);
 			return;
 		}
@@ -14834,7 +14949,7 @@ var MonacoApp = class {
 		};
 		yesBtn.onclick = () => {
 			this.commentDraftRestorePending = false;
-			this.reviewNoteManager.applyDispositions(dispositions);
+			this.reviewNoteManager.applyDispositions(dispositions, draft.note_edits);
 			this.commentManager.setComments(comments);
 			close();
 		};

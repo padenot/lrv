@@ -24,6 +24,7 @@ test('Finish prints remaining comments and published URLs to stdout and exits', 
   git('commit', '-q', '-am', 'Change a.txt');
   const [tree, parent] = git('log', '-1', '--format=%T %P').split(' ');
   const calls: string[] = [];
+  const inlineBodies: string[] = [];
   let base = '';
   const conduit = createServer((request, response) => {
     const method = request.url?.split('/').pop() ?? '';
@@ -56,11 +57,19 @@ test('Finish prints remaining comments and published URLs to stdout and exits', 
       'differential.createinline': {},
       'differential.createcomment': {},
     };
-    request.resume();
-    response.setHeader('Content-Type', 'application/json');
-    response.end(
-      JSON.stringify({ error_code: null, error_info: null, result: results[method] ?? {} }),
-    );
+    let body = '';
+    request.on('data', (data: Buffer) => {
+      body += data.toString();
+    });
+    request.on('end', () => {
+      if (method === 'differential.createinline') {
+        inlineBodies.push(new URLSearchParams(body).get('content') ?? '');
+      }
+      response.setHeader('Content-Type', 'application/json');
+      response.end(
+        JSON.stringify({ error_code: null, error_info: null, result: results[method] ?? {} }),
+      );
+    });
   });
   let child: ChildProcess | undefined;
   try {
@@ -148,13 +157,20 @@ test('Finish prints remaining comments and published URLs to stdout and exits', 
         body: 'Publish this',
       });
       const manager = window.__APP!.reviewNoteManager;
-      manager.getNotes().forEach((note) => manager.updateNote(note, { disposition: 'accepted' }));
+      manager.getNotes().forEach((note) =>
+        manager.updateNote(note, {
+          disposition: 'accepted',
+          ...(note.id === 'agent' ? { accepted_body: 'Edited agent finding' } : {}),
+        }),
+      );
     });
     await page.locator('#publish-commit').click();
     await page.locator('.publish-revision').click();
     await expect(page.locator('#publish-commit')).toHaveText('Published ✓');
     expect(calls.filter((method) => method === 'differential.createinline')).toHaveLength(2);
     expect(calls).toContain('differential.createcomment');
+    expect(inlineBodies).toEqual(expect.arrayContaining(['Publish this', 'Edited agent finding']));
+    expect(inlineBodies).not.toContain('Agent finding');
     await page.locator('#submit-review').click();
     await page.locator('.confirm-submit-btn').click();
     await expect.poll(() => server.exitCode).toBe(0);

@@ -11,7 +11,7 @@ import {
   type ReviewComment,
 } from './comments';
 import type { AppContext } from './types/app';
-import type { ReviewNote } from './review-notes';
+import { acceptedBody, type ReviewNote } from './review-notes';
 import type { editor } from 'monaco-editor';
 
 type InlineThread = {
@@ -57,14 +57,22 @@ export class ReviewNoteMethods {
     }
 
     const notes: InlineThread[] = [
-      ...this.reviewNoteManager.getNotesForFile(file.path).map((note) => ({
-        file: note.file,
-        line: note.line,
-        side: note.side,
-        height: () => this.reviewNoteHeightPx(note.body),
-        hover: note.body,
-        node: this.buildReviewNoteNode(note),
-      })),
+      ...this.reviewNoteManager.getNotesForFile(file.path).map((note) => {
+        const node = this.buildReviewNoteNode(note);
+        return {
+          file: note.file,
+          line: note.line,
+          side: note.side,
+          height: () =>
+            this.reviewNoteHeightPx(acceptedBody(note)) +
+            (node.querySelector('.review-note-reply') ? 200 : 0) +
+            (node.querySelector('.review-note-original:not([hidden])')
+              ? this.reviewNoteHeightPx(note.body)
+              : 0),
+          hover: acceptedBody(note),
+          node,
+        };
+      }),
       ...this.discussionManager.getForFile(file.path).map((discussion) => {
         const node = this.buildDiscussionNode(discussion);
         return {
@@ -143,12 +151,10 @@ export class ReviewNoteMethods {
           heightInPx: note.height(),
         };
         const id = accessor.addZone(zone);
-        if (note.discussion) {
-          note.node.addEventListener('discussion-layout', () => {
-            zone.heightInPx = note.height();
-            targetEditor.changeViewZones((zones) => zones.layoutZone(id));
-          });
-        }
+        note.node.addEventListener(note.discussion ? 'discussion-layout' : 'note-layout', () => {
+          zone.heightInPx = note.height();
+          targetEditor.changeViewZones((zones) => zones.layoutZone(id));
+        });
         newIds.push(id);
       });
     });
@@ -276,9 +282,25 @@ export class ReviewNoteMethods {
     }
 
     const body = el('div', { className: 'review-note-body' });
-    appendLinkifiedText(body, note.body);
+    appendLinkifiedText(body, acceptedBody(note));
 
     box.append(meta, body);
+    if (note.accepted_body !== undefined) {
+      const original = el('div', { className: 'review-note-body review-note-original' });
+      original.hidden = true;
+      appendLinkifiedText(original, note.body);
+      const toggle = el('button', {
+        className: 'btn-secondary review-note-btn',
+        text: 'Show original',
+      });
+      toggle.addEventListener('click', () => {
+        original.hidden = !original.hidden;
+        toggle.textContent = original.hidden ? 'Show original' : 'Hide original';
+        box.dispatchEvent(new Event('note-layout'));
+      });
+      meta.appendChild(toggle);
+      box.appendChild(original);
+    }
     if (!note.read_only) {
       box.appendChild(this.buildReviewNoteActions(note));
     }
@@ -318,7 +340,12 @@ export class ReviewNoteMethods {
       actions.appendChild(
         el('span', {
           className: `review-note-status review-note-status-${disposition}`,
-          text: disposition === 'accepted' ? 'Accepted' : 'Ignored',
+          text:
+            disposition === 'accepted'
+              ? note.accepted_body === undefined
+                ? 'Accepted'
+                : 'Accepted (edited)'
+              : 'Ignored',
         }),
       );
       const undo = el('button', { className: 'btn-secondary review-note-btn', text: 'Undo' });
@@ -328,6 +355,13 @@ export class ReviewNoteMethods {
         this.reviewNoteManager.updateNote(note, { disposition: 'open' });
       });
       actions.appendChild(undo);
+      if (
+        disposition === 'accepted' &&
+        note.accepted_body !== undefined &&
+        (note.origin ?? 'agent') === 'agent'
+      ) {
+        actions.appendChild(this.buildReviewNoteEditButton(actions, note));
+      }
       return actions;
     }
 
@@ -355,8 +389,68 @@ export class ReviewNoteMethods {
       this.reviewNoteManager.updateNote(note, { disposition: 'ignored' });
     });
 
-    actions.append(accept, ignore, reply, discuss);
+    actions.appendChild(accept);
+    if ((note.origin ?? 'agent') === 'agent') {
+      actions.appendChild(this.buildReviewNoteEditButton(actions, note));
+    }
+    actions.append(ignore, reply, discuss);
     return actions;
+  }
+
+  private buildReviewNoteEditButton(actions: HTMLElement, note: ReviewNote) {
+    const edit = el('button', { className: 'btn-secondary review-note-btn', text: 'Edit' });
+    edit.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (actions.querySelector('.review-note-reply')) {
+        return;
+      }
+      const targetEditor = this.isStacked
+        ? null
+        : note.side === 'old'
+          ? this.editor?.getOriginalEditor()
+          : this.editor?.getModifiedEditor();
+      const scrollTop = targetEditor?.getScrollTop();
+      const restoreScroll = () => {
+        if (targetEditor && scrollTop !== undefined) {
+          targetEditor.setScrollTop(scrollTop);
+        }
+      };
+      const form = el('div', { className: 'review-note-reply' });
+      const textarea = el('textarea', { className: 'review-note-reply-text' });
+      textarea.value = acceptedBody(note);
+      const controls = el('div', { className: 'review-note-reply-actions' });
+      const accept = el('button', { className: 'btn-primary review-note-btn', text: 'Accept' });
+      const cancel = el('button', { className: 'btn-secondary review-note-btn', text: 'Cancel' });
+      const save = () => {
+        const text = textarea.value.trim();
+        if (!text) {
+          textarea.focus();
+          return;
+        }
+        this.reviewNoteManager.updateNote(note, { disposition: 'accepted', accepted_body: text });
+        restoreScroll();
+      };
+      accept.addEventListener('click', save);
+      textarea.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+          event.preventDefault();
+          event.stopPropagation();
+          save();
+        }
+      });
+      cancel.addEventListener('click', () => {
+        form.remove();
+        actions.closest('.review-note')?.dispatchEvent(new Event('note-layout'));
+        restoreScroll();
+      });
+      controls.append(accept, cancel);
+      form.append(textarea, controls);
+      actions.appendChild(form);
+      actions.closest('.review-note')?.dispatchEvent(new Event('note-layout'));
+      textarea.focus();
+    });
+    return edit;
   }
 
   private showReviewNoteReplyForm(actions: HTMLElement, note: ReviewNote, discuss = false) {

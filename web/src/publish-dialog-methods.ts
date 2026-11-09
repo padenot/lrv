@@ -1,3 +1,4 @@
+import { acceptedBody } from './review-notes';
 import { el } from './dom';
 import { openModal } from './modal';
 import { fetchJSON } from './api';
@@ -181,7 +182,7 @@ export class PublishDialogMethods {
           file: note.file,
           line: note.line,
           side: note.side,
-          body: note.body,
+          body: acceptedBody(note),
           ...(note.commit_idx === undefined ? {} : { commit_idx: note.commit_idx }),
         })),
       ];

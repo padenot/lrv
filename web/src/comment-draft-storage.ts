@@ -1,5 +1,10 @@
 import type { ReviewComment, CommentLine } from './comments';
-import type { ReviewNote, NoteDispositions } from './review-notes';
+import {
+  acceptedBody,
+  type ReviewNote,
+  type NoteDispositions,
+  type NoteEdits,
+} from './review-notes';
 import type { AppContextData, DiffFile, DiffStats, SeriesInfo } from './types/app';
 
 type DiffSnapshot = {
@@ -16,6 +21,7 @@ type CommentDraftRecord = {
   savedAt: number;
   comments: ReviewComment[];
   dispositions?: NoteDispositions;
+  note_edits?: NoteEdits;
 };
 
 const DB_NAME = 'lrv-comment-drafts';
@@ -46,10 +52,10 @@ export function buildCommentDraftKey(
 
 export async function loadCommentDraft(
   key: string,
-): Promise<{ comments: ReviewComment[]; dispositions: NoteDispositions }> {
+): Promise<{ comments: ReviewComment[]; dispositions: NoteDispositions; note_edits: NoteEdits }> {
   const db = await openDraftDb();
   if (!db) {
-    return { comments: [], dispositions: {} };
+    return { comments: [], dispositions: {}, note_edits: {} };
   }
 
   try {
@@ -57,15 +63,16 @@ export async function loadCommentDraft(
       store.get(key),
     );
     if (!record || record.schemaVersion !== 1 || !Array.isArray(record.comments)) {
-      return { comments: [], dispositions: {} };
+      return { comments: [], dispositions: {}, note_edits: {} };
     }
     return {
       comments: sanitizeComments(record.comments),
       dispositions: sanitizeDispositions(record.dispositions),
+      note_edits: sanitizeEdits(record.note_edits),
     };
   } catch (error) {
     console.warn('Failed to load persisted review comments:', error);
-    return { comments: [], dispositions: {} };
+    return { comments: [], dispositions: {}, note_edits: {} };
   }
 }
 
@@ -73,9 +80,15 @@ export async function saveCommentDraft(
   key: string,
   comments: ReviewComment[],
   dispositions: NoteDispositions = {},
+  noteEdits: NoteEdits = {},
 ): Promise<void> {
   const sanitized = sanitizeComments(comments);
-  if (sanitized.length === 0 && !Object.values(dispositions).some((value) => value !== 'open')) {
+  const edits = sanitizeEdits(noteEdits);
+  if (
+    sanitized.length === 0 &&
+    !Object.values(dispositions).some((value) => value !== 'open') &&
+    Object.keys(edits).length === 0
+  ) {
     await clearCommentDraft(key);
     return;
   }
@@ -91,6 +104,7 @@ export async function saveCommentDraft(
     savedAt: Date.now(),
     comments: sanitized,
     dispositions,
+    note_edits: edits,
   };
 
   try {
@@ -114,7 +128,10 @@ export async function syncCommentDraftToServer(
         comments,
         notes: notes
           .filter((note) => note.id && note.disposition && note.disposition !== 'open')
-          .map((note) => ({ note, disposition: note.disposition })),
+          .map((note) => ({
+            note: { ...note, body: acceptedBody(note) },
+            disposition: note.disposition,
+          })),
       }),
     });
     if (!res.ok) {
@@ -323,4 +340,11 @@ function sanitizeDispositions(value: unknown): NoteDispositions {
         disposition === 'open' || disposition === 'accepted' || disposition === 'ignored',
     ),
   );
+}
+
+function sanitizeEdits(value: unknown): NoteEdits {
+  if (!value || typeof value !== 'object') {
+    return {};
+  }
+  return Object.fromEntries(Object.entries(value).filter(([, body]) => typeof body === 'string'));
 }

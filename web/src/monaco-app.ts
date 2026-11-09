@@ -404,13 +404,16 @@ export class MonacoApp {
     const key = this.commentDraftKey;
     const comments = this.commentManager.getComments();
     const dispositions = this.reviewNoteManager.getDispositions();
+    const edits = this.reviewNoteManager.getEdits();
     const notes = this.reviewNoteManager.getNotes();
     // Until the restore banner is answered, the IndexedDB draft is the previous session's work,
     // so leave it alone. The SQLite session belongs to this run and is always safe to update.
     const restorePending = this.commentDraftRestorePending;
     this.commentDraftWrite = this.commentDraftWrite
       .catch(() => undefined)
-      .then(() => (restorePending ? undefined : saveCommentDraft(key, comments, dispositions)))
+      .then(() =>
+        restorePending ? undefined : saveCommentDraft(key, comments, dispositions, edits),
+      )
       .then(() => (this.reviewSubmitted ? undefined : syncCommentDraftToServer(comments, notes)));
   }
 
@@ -444,7 +447,7 @@ export class MonacoApp {
     const noBtn = document.getElementById('restore-no-btn');
     if (!banner || !msg || !yesBtn || !noBtn) {
       this.commentDraftRestorePending = false;
-      this.reviewNoteManager.applyDispositions(dispositions);
+      this.reviewNoteManager.applyDispositions(dispositions, draft.note_edits);
       this.commentManager.setComments(comments);
       return;
     }
@@ -458,7 +461,7 @@ export class MonacoApp {
 
     yesBtn.onclick = () => {
       this.commentDraftRestorePending = false;
-      this.reviewNoteManager.applyDispositions(dispositions);
+      this.reviewNoteManager.applyDispositions(dispositions, draft.note_edits);
       this.commentManager.setComments(comments);
       close();
     };
