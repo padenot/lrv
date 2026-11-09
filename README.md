@@ -185,8 +185,10 @@ Your choices are remembered in this browser.
 The button is replaced by a **Connected** badge whose dot is green while the
 agent listens and pulses amber while it reviews or answers a discussion; the
 text stays the same. Failed launches show an error when you reopen the
-popover, including the agent log path if the process exited. Only one agent can
-be launched at a time. The button is unavailable in public mode.
+popover, including the agent log path if the process exited. While it runs, the
+agent's progress (messages and tool calls) is echoed to lrv's stderr with an
+`[agent]` prefix. Only one agent can be launched at a time. The button is
+unavailable in public mode.
 
 lrv supplies private temporary diff files for every commit and removes them on
 shutdown, after allowing the agent to exit and killing it if necessary. A launched
