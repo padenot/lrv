@@ -1348,6 +1348,57 @@ test.describe('Review Workflow E2E', () => {
     await expect(page.locator('.stacked-comment-box')).toHaveCount(0);
   });
 
+  test('stacked mode toggles between side-by-side and inline diffs', async ({ page }) => {
+    await openStackedView(page);
+    const toggle = page.locator('#toggle-view');
+    const diffs = page.locator('.stacked-code-view diffs-container pre[data-diff-type]');
+    await expect(toggle).toBeVisible();
+    await expect(toggle).toHaveText('View: Side-by-Side');
+    await expect(diffs.first()).toHaveAttribute('data-diff-type', 'split');
+
+    await addStackedComment(page, 'Comment before toggling');
+
+    await toggle.click();
+    await expect(toggle).toHaveText('View: Inline');
+    await expect(page.locator('.stacked-code-view pre[data-diff-type="split"]')).toHaveCount(0);
+    await expect(diffs.first()).toHaveAttribute('data-diff-type', 'single');
+    await expect(page.locator('.stacked-comment-box')).toContainText('Comment before toggling');
+
+    const testFile = page.locator('.stacked-code-view diffs-container', { hasText: 'test.txt' });
+    await testFile
+      .locator('[data-line-type="change-deletion"][data-column-number]')
+      .first()
+      .click({ position: { x: 8, y: 8 } });
+    await expect(page.locator('.stacked-comment-form')).toBeVisible({ timeout: 3000 });
+    await page.locator('.stacked-comment-form .stacked-comment-ta').fill('Inline deletion comment');
+    await page.locator('.stacked-comment-form .stacked-comment-save').click();
+    await expect(page.locator('#comment-count')).toHaveText('2');
+    await expect(
+      testFile.locator('.stacked-comment-box', { hasText: 'Inline deletion comment' }),
+    ).toBeVisible();
+    const deletionComment = await page.evaluate(() =>
+      (window as any).__APP.commentManager
+        .getComments()
+        .find((comment: { body: string }) => comment.body === 'Inline deletion comment'),
+    );
+    expect(deletionComment).toMatchObject({ file: 'test.txt', line: 2, side: 'old' });
+
+    await page.locator('body').click({ position: { x: 1, y: 1 } });
+    await page.keyboard.press('s');
+    await expect(toggle).toHaveText('View: Side-by-Side');
+    await expect(diffs.first()).toHaveAttribute('data-diff-type', 'split');
+    await expect(page.locator('.stacked-comment-box')).toHaveCount(2);
+
+    await page.keyboard.press('s');
+    await expect(toggle).toHaveText('View: Inline');
+    await page.locator('#toggle-stacked').click();
+    await expect(page.locator('#toggle-stacked')).toHaveText('Mode: File by file');
+    await expect(toggle).toBeVisible();
+    await expect(toggle).toHaveText('View: Inline');
+    await page.locator('#toggle-stacked').click();
+    await expect(diffs.first()).toHaveAttribute('data-diff-type', 'single');
+  });
+
   test('stacked comment input stays within the code area', async ({ page }) => {
     await page.setViewportSize({ width: 2560, height: 1440 });
     await openStackedView(page);
