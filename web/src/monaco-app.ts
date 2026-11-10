@@ -141,7 +141,7 @@ export class MonacoApp {
   declare showStackedView: () => void;
   declare hideStackedView: () => void;
   declare toggleStackedView: () => void;
-  declare scrollToFileInStacked: (index: number) => void;
+  declare scrollToFileInStacked: (index: number) => Promise<void>;
   declare renderStackedComments: () => void;
   declare setupSidebarResizer: () => void;
   declare setupCommitStripResizer: () => void;
@@ -630,7 +630,7 @@ export class MonacoApp {
           const index = Number(li.dataset.index ?? -1);
           if (index >= 0) {
             if (this.isStacked) {
-              this.scrollToFileInStacked(index);
+              void this.scrollToFileInStacked(index);
             } else {
               this.loadFile(index);
             }

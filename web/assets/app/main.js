@@ -13779,7 +13779,7 @@ var StackedViewMethods = class {
 		if (file.is_binary) return document.getElementById(this.stackedSectionId(file.path))?.offsetTop ?? null;
 		return this.stackedCodeView?.getTopForItem(this.stackedItemId(file.path)) ?? null;
 	}
-	scrollToFileInStacked(index) {
+	async scrollToFileInStacked(index) {
 		if (!this.isStacked) return;
 		const file = this.files[index];
 		if (!file) return;
@@ -13789,6 +13789,11 @@ var StackedViewMethods = class {
 		const stackedContainer = document.getElementById("stacked-container");
 		if (stackedContainer) stackedContainer.style.display = "";
 		this.renderFileList();
+		if (!this.stackedCodeView && stackedContainer && !stackedContainer.hasChildNodes()) {
+			const generation = this.commitLoadGeneration;
+			await this.renderStackedView();
+			if (!this.isStacked || this.currentFileIsCommit || this.currentFileIndex !== index || generation !== this.commitLoadGeneration) return;
+		}
 		const anchor = document.getElementById(this.stackedSectionId(file.path));
 		if (file.is_binary) {
 			anchor?.scrollIntoView({
