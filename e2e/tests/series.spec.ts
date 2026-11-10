@@ -695,6 +695,23 @@ test.describe('Series: stacked-mode comments stay scoped to their own commit', (
     await expect(page.locator('#commit-strip .series-commit').first()).toHaveClass(/active/);
   });
 
+  test('clicking a file after switching commits from the commit-message view shows its diff', async ({
+    page,
+  }) => {
+    await openSharedSeries(page);
+    await page.locator('li[data-commit="1"] .summary-row-button').click();
+    await expect(page.locator('.commit-message-card')).toContainText('First patch touches line2');
+
+    await page.locator('#commit-strip .series-commit').nth(1).click();
+    await expect(page.locator('.commit-message-card')).toContainText(
+      'Second patch touches line2 again',
+    );
+
+    await fileTreeRow(page, 'shared.txt').click();
+    await expect(page.locator('.commit-view')).toBeHidden();
+    await expect(page.locator('.stacked-code-view')).toContainText('line2 modified twice');
+  });
+
   test('old stacked hydration cannot overwrite a rebuilt view of the same path', async ({
     page,
   }) => {

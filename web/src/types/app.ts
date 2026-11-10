@@ -210,7 +210,7 @@ export interface AppContext {
   showStackedView(): void;
   hideStackedView(): void;
   toggleStackedView(): void;
-  scrollToFileInStacked(index: number): void;
+  scrollToFileInStacked(index: number): Promise<void>;
   renderStackedComments(): void;
   renderFileList(): void;
   renderSeriesNav(): void;

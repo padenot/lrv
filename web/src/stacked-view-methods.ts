@@ -195,7 +195,7 @@ export class StackedViewMethods {
     return this.stackedCodeView?.getTopForItem(this.stackedItemId(file.path)) ?? null;
   }
 
-  scrollToFileInStacked(index: number) {
+  async scrollToFileInStacked(index: number) {
     if (!this.isStacked) {
       return;
     }
@@ -213,6 +213,20 @@ export class StackedViewMethods {
       stackedContainer.style.display = '';
     }
     this.renderFileList();
+    // Switching commits from the commit-message view skips rendering the
+    // stacked view, so build it on first use.
+    if (!this.stackedCodeView && stackedContainer && !stackedContainer.hasChildNodes()) {
+      const generation = this.commitLoadGeneration;
+      await this.renderStackedView();
+      if (
+        !this.isStacked ||
+        this.currentFileIsCommit ||
+        this.currentFileIndex !== index ||
+        generation !== this.commitLoadGeneration
+      ) {
+        return;
+      }
+    }
     const anchor = document.getElementById(this.stackedSectionId(file.path));
     if (file.is_binary) {
       anchor?.scrollIntoView({ behavior: 'smooth', block: 'start' });
