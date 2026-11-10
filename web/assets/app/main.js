@@ -11996,11 +11996,19 @@ var CommitBarMethods = class {
 	}
 	updateRequestReviewButton() {
 		const button = document.getElementById("request-review");
-		button.hidden = !this.agentState.attached || !!this.context?.is_public;
-		button.disabled = this.agentState.busy || this.pendingReviewState === this.agentState;
+		const state = this.agentState;
+		const starting = !state.attached && state.launch === "running";
+		if (this.pendingReviewState && this.pendingReviewState !== state && !starting) this.pendingReviewState = null;
+		const pending = this.pendingReviewState !== null;
+		button.hidden = !state.attached && !starting || !!this.context?.is_public;
+		button.disabled = pending || state.attached && state.busy;
 		button.textContent = this.reviewError ? "Request failed" : "Request Review";
-		button.title = this.reviewError ?? (button.disabled ? "The agent is working" : "");
+		button.title = this.reviewError ?? (pending && starting ? "The agent will review this commit once it has started" : button.disabled ? "The agent is working" : "");
 		button.setAttribute("aria-label", this.reviewError ?? `Request review of commit ${this.currentCommitIdx + 1}`);
+	}
+	/** Attached, or launched by lrv and still starting. */
+	agentActive() {
+		return this.agentAttached || this.agentState.launch === "running";
 	}
 	/** The current commit's identity; while a commit loads, this.diff still holds the previous one. */
 	currentCommitInfo() {
@@ -12016,7 +12024,7 @@ var CommitBarMethods = class {
 		const bar = document.getElementById("commit-bar");
 		if (bar) {
 			const { hash, message, id } = this.currentCommitInfo();
-			bar.hidden = !hash && !message && !id && !this.agentAttached;
+			bar.hidden = !hash && !message && !id && !this.agentActive();
 		}
 		this.updateRequestReviewButton();
 	}
@@ -12025,7 +12033,7 @@ var CommitBarMethods = class {
 		const context = document.getElementById("commit-bar-context");
 		if (!bar || !context) return;
 		const { hash, message, id } = this.currentCommitInfo();
-		bar.hidden = !hash && !message && !id && !this.agentAttached;
+		bar.hidden = !hash && !message && !id && !this.agentActive();
 		context.replaceChildren();
 		if (this.seriesInfo?.is_series) {
 			const nav = el("div", { className: "commit-bar-nav" });

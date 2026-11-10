@@ -1577,7 +1577,8 @@ async fn request_review(State(state): State<AppState>, Json(req): Json<ReviewReq
     let Some(diff) = state.diffs.get(req.commit_idx) else {
         return StatusCode::BAD_REQUEST.into_response();
     };
-    if !state.agent.attached() {
+    // A launched agent that hasn't listened yet picks the request up on its first poll.
+    if !state.agent.attached() && !state.launcher.running() {
         return StatusCode::CONFLICT.into_response();
     }
     let seq = state.agent.request_review(
