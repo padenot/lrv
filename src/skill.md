@@ -32,8 +32,8 @@ git diff | lrv --title="description"
 ```
 
 Piping a diff *into* `lrv` is required and correct. It is `lrv`'s own output
-that must never be piped, redirected, backgrounded, or captured into a variable
-or file. If you redirect it, the user's review is thrown away and their work is
+that must never be piped, redirected, backgrounded with `&`, or captured into a
+variable or file. If you redirect it, the user's review is thrown away and their work is
 wasted.
 
 ## Usage
@@ -82,10 +82,22 @@ lrv --phab-mcp-comments /tmp/phab.md ...
 
 ## Behavior
 
-- Run `lrv` synchronously. Never use a sub-agent or background task.
-- Never pipe, redirect, background, or capture `lrv`'s output. Read the comments
-  from its stdout in the tool result.
-- Always print the URL(s) so the user can open them.
+- Never run `lrv` in a sub-agent.
+- If your harness can run a command as a background task that keeps its output
+  and notifies you when it exits (e.g. Claude Code's `run_in_background`), run
+  `lrv` that way. A foreground call blocks you until the user finishes, so you
+  can't listen for discussions, and the tool's timeout can end the review
+  early. Some harnesses also keep a CPU core busy while a foreground command
+  waits, which can make the review page sluggish on a slower machine.
+  Only if background is not an option, run it in the
+  foreground with the longest timeout allowed. If the timeout kills it, tell
+  the user the review was cut short. Comments from `lrv --recover` are then
+  unfinished drafts, so ask before applying them.
+- Never pipe, redirect, `&`-background, or capture `lrv`'s output. Read the
+  comments from the tool result, or from the background task's output once it
+  exits. Don't poll for them before then.
+- Always print the URL(s) so the user can open them. From a background task,
+  read them from its output once lrv has started.
 - Wait for the user to finish the review.
 - Plan one fix per comment before touching any code. Never skip a comment.
 - Apply all fixes directly. No explanations or commentary.
@@ -127,8 +139,9 @@ notes in an existing review.
 ## Listening for discussions
 
 Use this when the user already has lrv open and asks you to listen or discuss.
-If you started lrv yourself, you are blocked on it and can't listen. Never
-start a second lrv, and never background the one you started to listen.
+If you started lrv in the foreground, you are blocked on it and can't listen.
+If you started it as a background task, listen alongside it. Never start a
+second lrv to listen.
 
 Run `lrv --listen` from the repository in the foreground. Set the tool timeout
 above `--listen-timeout` (default 90 seconds), allowing for request overhead.
@@ -151,7 +164,8 @@ The output defaults to JSON (`--format json`), with a `status` field:
     skipped.
 - `timeout`: run `lrv --listen` again straight away.
 - `ended`: stop and tell the user the review is over. Final comments went
-  to whoever started lrv, not the listener. To apply them, ask the user to
+  to whoever started lrv, not the listener. If that was your own background
+  task, read them from its output. Otherwise, to apply them, ask the user to
   paste them or name a session from `lrv --list-reviews`.
 
 All three statuses exit 0. On a non-zero exit, stop and tell the user about
