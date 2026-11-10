@@ -121,6 +121,18 @@ test('agent presence follows the listen poll and lease expiry', async ({ page })
     await expect(popover).toBeHidden();
     await expect(badge).toHaveText('Connected');
     await expect(badge).toHaveClass(/busy/);
+    // Request Review is usable while the agent starts; the server queues it.
+    await expect(review).toBeVisible();
+    await expect(review).toBeEnabled();
+    let reviewRequested = false;
+    await page.route('**/api/agent/review', async (route) => {
+      reviewRequested = true;
+      await route.fulfill({ status: 202, json: { seq: 1 } });
+    });
+    await review.click();
+    await expect.poll(() => reviewRequested).toBe(true);
+    await expect(review).toBeDisabled();
+    await expect(review).toHaveAttribute('title', /once it has started/);
     child.kill('SIGINT');
     await expect.poll(() => child?.exitCode).toBe(130);
   } finally {
