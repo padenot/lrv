@@ -11972,19 +11972,27 @@ var NavigationMethods = class {
 //#endregion
 //#region web/src/commit-bar-methods.ts
 var CommitBarMethods = class {
-	pendingReviewState = null;
 	reviewError = null;
 	reviewErrorTimer;
+	get pendingReviews() {
+		return this.pendingReviewsMap ??= /* @__PURE__ */ new Map();
+	}
 	setupRequestReview() {
-		this.pendingReviewState = null;
+		this.pendingReviews.clear();
 		document.getElementById("request-review").addEventListener("click", () => {
-			this.pendingReviewState = this.agentState;
+			const commitIdx = this.currentCommitIdx;
+			this.pendingReviews.set(commitIdx, null);
 			this.reviewError = null;
 			window.clearTimeout(this.reviewErrorTimer);
 			this.updateRequestReviewButton();
-			requestReview(this.currentCommitIdx).catch((error) => {
+			requestReview(commitIdx).then(({ seq }) => {
+				if (this.pendingReviews.has(commitIdx)) {
+					this.pendingReviews.set(commitIdx, seq);
+					this.updateRequestReviewButton();
+				}
+			}).catch((error) => {
 				const message = error instanceof Error ? error.message : String(error);
-				this.pendingReviewState = null;
+				this.pendingReviews.delete(commitIdx);
 				this.reviewError = /\b409\b/.test(message) ? "The agent is no longer connected." : /\b403\b/.test(message) ? "Review requests are disabled in public mode." : "Could not send the review request. Try again.";
 				this.updateRequestReviewButton();
 				this.reviewErrorTimer = window.setTimeout(() => {
@@ -11998,12 +12006,14 @@ var CommitBarMethods = class {
 		const button = document.getElementById("request-review");
 		const state = this.agentState;
 		const starting = !state.attached && state.launch === "running";
-		if (this.pendingReviewState && this.pendingReviewState !== state && !starting) this.pendingReviewState = null;
-		const pending = this.pendingReviewState !== null;
+		if (!state.attached && !starting) this.pendingReviews.clear();
+		const acked = state.acked ?? 0;
+		for (const [idx, seq] of this.pendingReviews) if (seq !== null && seq <= acked) this.pendingReviews.delete(idx);
+		const pending = this.pendingReviews.has(this.currentCommitIdx);
 		button.hidden = !state.attached && !starting || !!this.context?.is_public;
-		button.disabled = pending || state.attached && state.busy;
+		button.disabled = pending;
 		button.textContent = this.reviewError ? "Request failed" : "Request Review";
-		button.title = this.reviewError ?? (pending && starting ? "The agent will review this commit once it has started" : button.disabled ? "The agent is working" : "");
+		button.title = this.reviewError ?? (pending ? starting ? "The agent will review this commit once it has started" : "The agent has been asked to review this commit" : state.busy || starting ? "The agent is working; this request will be queued" : "");
 		button.setAttribute("aria-label", this.reviewError ?? `Request review of commit ${this.currentCommitIdx + 1}`);
 	}
 	/** Attached, or launched by lrv and still starting. */

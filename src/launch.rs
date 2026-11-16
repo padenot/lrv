@@ -85,6 +85,7 @@ impl AgentLauncher {
         serde_json::json!({
             "attached": presence.attached,
             "busy": presence.busy || starting,
+            "acked": presence.acked,
             "launch": state.launch,
             "error": state.error,
         })
