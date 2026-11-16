@@ -56,16 +56,19 @@ test('agent presence follows the listen poll and lease expiry', async ({ page })
     await expect(badge).toBeHidden();
     await expect(page.locator('#request-review')).toBeHidden();
     const connect = page.locator('#connect-agent');
+    const options = page.locator('#connect-agent-options');
     const popover = page.locator('#connect-agent-popover');
     await expect(connect).toBeVisible();
-    await connect.click();
+    await expect(options).toBeVisible();
+    await options.click();
     await expect(popover).toBeVisible();
+    await expect(options).toHaveAttribute('aria-expanded', 'true');
     await expect(page.locator('#agent-initial-review')).toHaveCount(0);
     await expect(page.locator('#agent-provider')).toBeFocused();
     await page.keyboard.press('Escape');
     await expect(popover).toBeHidden();
-    await expect(connect).toBeFocused();
-    await connect.click();
+    await expect(options).toBeFocused();
+    await options.click();
     await page.locator('#agent-provider').selectOption('codex');
     await page.locator('#agent-model').fill('test-model');
     await page.locator('#agent-effort').fill('high');
@@ -86,10 +89,22 @@ test('agent presence follows the listen poll and lease expiry', async ({ page })
     await page.keyboard.press('Escape');
     await page.reload();
     await expect(connect).toBeVisible();
-    await connect.click();
+    await options.click();
     await expect(page.locator('#agent-provider')).toHaveValue('codex');
     await expect(page.locator('#agent-model')).toHaveValue('test-model');
     await expect(page.locator('#agent-effort')).toHaveValue('high');
+    await page.keyboard.press('Escape');
+    // The main button launches directly with the saved options; a failure
+    // opens the popover with the error.
+    payload = undefined;
+    await connect.click();
+    await expect(popover).toBeVisible();
+    await expect(page.locator('#agent-launch-error')).toContainText('Test CLI missing');
+    expect(payload).toEqual({
+      provider: 'codex',
+      model: 'test-model',
+      effort: 'high',
+    });
     await page.keyboard.press('Escape');
     const listening = execFileAsync(binary, ['--listen', '--listen-timeout', '10'], {
       cwd: root,
@@ -116,7 +131,6 @@ test('agent presence follows the listen poll and lease expiry', async ({ page })
       await route.fulfill({ status: 202, json: { launch: 'running' } });
     });
     await connect.click();
-    await page.locator('#agent-launch-submit').click();
     await expect(connect).toBeHidden();
     await expect(popover).toBeHidden();
     await expect(badge).toHaveText('Connected');

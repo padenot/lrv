@@ -11,22 +11,23 @@ export class ConnectAgentMethods {
     document.body.classList.toggle('agent-attached', state.attached);
     const available = this.context?.launch_available === true;
     const active = state.attached || state.launch === 'running';
-    const button = $<HTMLButtonElement>('#connect-agent')!;
+    const split = $<HTMLElement>('#connect-agent-split')!;
     const badge = $<HTMLElement>('#agent-status')!;
-    button.hidden = !available || active;
+    split.hidden = !available || active;
     badge.hidden = !available || !active;
     const busy = state.busy || (!state.attached && state.launch === 'running');
     badge.classList.toggle('busy', busy);
     badge.title = busy ? 'The agent is working' : 'The agent is waiting for discussion comments';
     if (active) {
       $<HTMLElement>('#connect-agent-popover')!.hidden = true;
-      button.setAttribute('aria-expanded', 'false');
+      $<HTMLButtonElement>('#connect-agent-options')!.setAttribute('aria-expanded', 'false');
     }
     this.updateCommitBarVisibility();
   }
 
   setupConnectAgent(this: AppContext): void {
     const button = $<HTMLButtonElement>('#connect-agent')!;
+    const options = $<HTMLButtonElement>('#connect-agent-options')!;
     const popover = $<HTMLElement>('#connect-agent-popover')!;
     const form = $<HTMLFormElement>('#connect-agent-form')!;
     const provider = $<HTMLSelectElement>('#agent-provider')!;
@@ -58,38 +59,23 @@ export class ConnectAgentMethods {
     };
     form.addEventListener('input', save);
     form.addEventListener('change', save);
+    const open = (message: string) => {
+      popover.hidden = false;
+      options.setAttribute('aria-expanded', 'true');
+      error.textContent = message;
+      provider.focus();
+    };
     const close = () => {
       popover.hidden = true;
-      button.setAttribute('aria-expanded', 'false');
+      options.setAttribute('aria-expanded', 'false');
     };
-    button.addEventListener('click', () => {
-      popover.hidden = !popover.hidden;
-      button.setAttribute('aria-expanded', String(!popover.hidden));
-      if (!popover.hidden) {
-        error.textContent = this.agentState.error || '';
-        provider.focus();
-      }
-    });
-    document.addEventListener('click', (event) => {
-      if (!(event.target instanceof Node) || !button.parentElement?.contains(event.target)) {
-        close();
-      }
-    });
-    document.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape' && !popover.hidden) {
-        event.stopPropagation();
-        close();
-        button.focus();
-      }
-    });
-    form.addEventListener('submit', (event) => {
-      event.preventDefault();
+    const launch = () => {
       save();
+      button.disabled = true;
       submit.disabled = true;
       error.textContent = '';
-      const req = values();
       const previousState = this.agentState;
-      void launchAgent(req)
+      void launchAgent(values())
         .then(() => {
           // SSE can report a fast failure before the HTTP response arrives.
           if (this.agentState === previousState) {
@@ -102,11 +88,40 @@ export class ConnectAgentMethods {
           close();
         })
         .catch((reason: unknown) => {
-          error.textContent = reason instanceof Error ? reason.message : String(reason);
+          // Surface the failure in the options popover so it can be corrected.
+          open(reason instanceof Error ? reason.message : String(reason));
         })
         .finally(() => {
+          button.disabled = false;
           submit.disabled = false;
         });
+    };
+    button.addEventListener('click', () => {
+      close();
+      launch();
+    });
+    options.addEventListener('click', () => {
+      if (popover.hidden) {
+        open(this.agentState.error || '');
+      } else {
+        close();
+      }
+    });
+    document.addEventListener('click', (event) => {
+      if (!(event.target instanceof Node) || !button.parentElement?.contains(event.target)) {
+        close();
+      }
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && !popover.hidden) {
+        event.stopPropagation();
+        close();
+        options.focus();
+      }
+    });
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      launch();
     });
     this.setAgentState(this.agentState);
   }

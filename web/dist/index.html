@@ -235,15 +235,21 @@
         <button id="settings-btn" class="settings-btn">Settings</button>
         <button id="toggle-view" aria-pressed="false">View: Side-by-Side</button>
         <button id="toggle-stacked" aria-pressed="false">Mode: File by file</button>
-        <div class="connect-agent-split">
+        <div class="connect-agent-split" id="connect-agent-split" hidden>
+          <button id="connect-agent" title="Connect an agent using the saved options">
+            Connect Agent
+          </button>
           <button
-            id="connect-agent"
+            id="connect-agent-options"
+            aria-label="Agent options"
+            title="Choose provider, model and effort"
             aria-haspopup="dialog"
             aria-expanded="false"
             aria-controls="connect-agent-popover"
-            hidden
           >
-            Connect Agent
+            <svg viewBox="0 0 10 6" width="10" height="6" aria-hidden="true">
+              <path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5" />
+            </svg>
           </button>
           <div id="connect-agent-popover" role="dialog" aria-label="Connect Agent" hidden>
             <form id="connect-agent-form">
