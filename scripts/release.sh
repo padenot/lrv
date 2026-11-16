@@ -79,11 +79,11 @@ if [[ -z "$changes" ]]; then
   echo "No changes since the previous release." >&2
   exit 1
 fi
-if ! command -v codex >/dev/null; then
-  echo "Codex CLI is required to generate release notes." >&2
+if ! command -v claude >/dev/null; then
+  echo "Claude CLI is required to generate release notes." >&2
   exit 1
 fi
-printf '%s\n\n%s\n' "Write concise Markdown release notes for v$VERSION based on these commits. Describe user-facing changes, group related changes, omit routine maintenance and do not invent details. Output only the release notes." "$changes" | codex exec --ignore-user-config --skip-git-repo-check -o "$notes_file" -
+printf '%s\n\n%s\n' "Write concise Markdown release notes for v$VERSION based on these commits. Describe user-facing changes, group related changes, omit routine maintenance and do not invent details. Output only the release notes." "$changes" | claude -p --tools '' > "$notes_file"
 if [[ ! -s "$notes_file" ]]; then
   echo "Release note generation returned no output." >&2
   exit 1
