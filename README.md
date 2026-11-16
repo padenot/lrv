@@ -259,3 +259,16 @@ Licensed under either of:
 - MIT license
 
 See [LICENSE-APACHE](LICENSE-APACHE) and [LICENSE-MIT](LICENSE-MIT).
+
+## Releasing
+
+Pushing a `vVERSION` tag publishes the crate to crates.io and builds GitHub
+release binaries. The tag must match the version in `Cargo.toml`. Maintainers
+can use `just release VERSION` (or `major`, `minor`, or `patch`) to bump the
+version and push the tag. Crates.io trusted publishing requires a trusted
+publisher for `padenot/lrv`, workflow `publish-crates.yml`, and the GitHub
+Actions environment `crates-io`. No local crates.io token is needed.
+
+The **Publish crates** workflow can also be run manually with `dry_run` enabled
+to verify authentication and packaging. To retry an upload, select the release
+tag and disable `dry_run`; an already published version is skipped.

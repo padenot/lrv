@@ -50,4 +50,4 @@ git tag -a "v$VERSION" -m "Release v$VERSION"
 git push origin main
 git push origin "v$VERSION"
 
-cargo publish
+echo "GitHub Actions will publish the crate and release binaries."
