@@ -84,6 +84,8 @@ pub struct Poll {
 pub struct AgentPresence {
     pub attached: bool,
     pub busy: bool,
+    /// Highest cursor the agent has polled from: every event up to it has been handled.
+    pub acked: u64,
 }
 
 struct Inner {
@@ -95,6 +97,7 @@ struct Inner {
     last_activity: Option<Instant>,
     closed: bool,
     busy: bool,
+    acked: u64,
     polls_started: u64,
 }
 
@@ -129,6 +132,7 @@ impl AgentChannel {
                 last_activity: None,
                 closed: false,
                 busy: false,
+                acked: 0,
                 polls_started: 0,
             }),
             latest: watch::channel(0).0,
@@ -282,12 +286,14 @@ impl AgentChannel {
             inner.active_polls += 1;
             inner.polls_started += 1;
             inner.busy = false;
+            inner.acked = inner.acked.max(after);
             inner.last_activity = Some(Instant::now());
             // Also notify when a note write already attached the agent: the launcher
             // needs to distinguish startup from its first listen poll.
             self.presence.send_replace(AgentPresence {
                 attached: !inner.closed,
                 busy: false,
+                acked: inner.acked,
             });
             self.activity.notify_one();
         }
@@ -316,7 +322,7 @@ impl AgentChannel {
             .collect();
         if !events.is_empty() && !inner.closed {
             inner.busy = true;
-            self.set_presence(true, true);
+            self.set_presence(&inner, true, true);
         }
         Poll {
             cursor: events.last().map_or(after, |event| event.seq),
@@ -328,14 +334,15 @@ impl AgentChannel {
     pub fn touch(&self) {
         let mut inner = self.inner.lock().unwrap();
         inner.last_activity = Some(Instant::now());
-        self.set_presence(!inner.closed, inner.busy);
+        self.set_presence(&inner, !inner.closed, inner.busy);
         self.activity.notify_one();
     }
 
-    fn set_presence(&self, attached: bool, busy: bool) {
+    fn set_presence(&self, inner: &Inner, attached: bool, busy: bool) {
         let presence = AgentPresence {
             attached,
             busy: attached && busy,
+            acked: inner.acked,
         };
         self.presence.send_if_modified(|value| {
             if *value == presence {
@@ -367,7 +374,7 @@ impl AgentChannel {
                 if !attached {
                     inner.busy = false;
                 }
-                self.set_presence(attached, inner.busy);
+                self.set_presence(&inner, attached, inner.busy);
                 expiry.filter(|time| *time > now)
             };
             tokio::select! {
@@ -398,7 +405,7 @@ impl AgentChannel {
         let mut inner = self.inner.lock().unwrap();
         inner.closed = true;
         inner.busy = false;
-        self.set_presence(false, false);
+        self.set_presence(&inner, false, false);
         self.activity.notify_one();
         self.latest.send_modify(|version| *version += 1);
     }
