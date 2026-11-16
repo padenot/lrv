@@ -801,6 +801,7 @@ pub fn create_router(state: AppState, enable_trace: bool) -> Router {
         .route("/api/config", get(get_config).put(update_config))
         .route("/api/themes", get(get_user_themes))
         .route("/api/install-skill", post(install_skill))
+        .route("/api/update-check", get(update_check))
         .route("/api/file", get(get_file_content))
         .route("/api/file/preview", get(get_file_preview))
         .route("/api/file/raw", get(get_file_raw))
@@ -978,6 +979,28 @@ async fn get_series(State(state): State<AppState>) -> Json<SeriesInfo> {
         commits,
         prs: state.pull_requests.prs.clone(),
     })
+}
+
+async fn update_check() -> Json<Option<String>> {
+    static RESULT: tokio::sync::OnceCell<Option<String>> = tokio::sync::OnceCell::const_new();
+    Json(
+        RESULT
+            .get_or_init(|| async {
+                tokio::task::spawn_blocking(|| {
+                    let checker = moz_cli_version_check::VersionChecker::new(
+                        "lrv",
+                        env!("CARGO_PKG_VERSION"),
+                    );
+                    checker.check_async();
+                    checker.recv_update(std::time::Duration::from_secs(6))
+                })
+                .await
+                .ok()
+                .flatten()
+            })
+            .await
+            .clone(),
+    )
 }
 
 async fn get_context(State(state): State<AppState>) -> Json<ProjectContext> {

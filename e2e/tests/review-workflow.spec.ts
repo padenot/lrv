@@ -1527,6 +1527,17 @@ test.describe('Review Workflow E2E', () => {
     await expect(fileListItem).toHaveAttribute('data-item-git-status', 'added');
   });
 
+  test('shows and dismisses an available update', async ({ page }) => {
+    await page.route('**/api/update-check', (route) => route.fulfill({ json: '9.8.7' }));
+    await openApp(page);
+    const banner = page.locator('#update-banner');
+    await expect(banner).toBeVisible();
+    await expect(banner).toContainText('9.8.7');
+    await expect(banner).toContainText('cargo binstall lrv');
+    await page.locator('#update-dismiss-btn').click();
+    await expect(banner).toBeHidden();
+  });
+
   test('sidebar and editor fit the viewport while a banner is shown', async ({ page }) => {
     await page.route('**/api/context', async (route) => {
       const response = await route.fetch();

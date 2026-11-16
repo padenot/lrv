@@ -15121,6 +15121,18 @@ var MonacoApp = class {
 			if (b) b.style.display = "";
 		}
 		if (this.context.comment_store_error) showCommentStoreError(this.context.comment_store_error);
+		fetch("/api/update-check").then((response) => response.ok ? response.json() : null).then((version) => {
+			if (typeof version !== "string") return;
+			const banner = $$1("#update-banner");
+			const message = $$1("#update-banner-msg");
+			if (banner && message) {
+				message.textContent = `lrv ${version} is available — update with cargo binstall lrv`;
+				banner.style.display = "";
+				$$1("#update-dismiss-btn")?.addEventListener("click", () => {
+					banner.style.display = "none";
+				});
+			}
+		}).catch(() => {});
 		if (this.context.claude_skill_installed === false) {
 			const banner = $$1("#skill-banner");
 			const installBtn = $$1("#skill-install-btn");

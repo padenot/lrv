@@ -66,11 +66,34 @@ if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then
   exit 1
 fi
 
+# Generate release notes before changing the tree, so failure leaves it untouched.
+previous_tag=$(git describe --tags --abbrev=0 --match 'v[0-9]*' HEAD 2>/dev/null || true)
+notes_file=$(mktemp)
+trap 'rm -f "$notes_file" "${tmp_cargo_toml:-}"' EXIT
+if [[ -n "$previous_tag" ]]; then
+  changes=$(git log --format='%h %s%n%b' "$previous_tag"..HEAD)
+else
+  changes=$(git log --format='%h %s%n%b' HEAD)
+fi
+if [[ -z "$changes" ]]; then
+  echo "No changes since the previous release." >&2
+  exit 1
+fi
+if ! command -v codex >/dev/null; then
+  echo "Codex CLI is required to generate release notes." >&2
+  exit 1
+fi
+printf '%s\n\n%s\n' "Write concise Markdown release notes for v$VERSION based on these commits. Describe user-facing changes, group related changes, omit routine maintenance and do not invent details. Output only the release notes." "$changes" | codex exec --skip-git-repo-check -o "$notes_file" -
+if [[ ! -s "$notes_file" ]]; then
+  echo "Release note generation returned no output." >&2
+  exit 1
+fi
+
 echo "Releasing v$VERSION"
 
 # Bump version
 tmp_cargo_toml=$(mktemp)
-trap 'rm -f "$tmp_cargo_toml"' EXIT
+
 sed "s/^version = \".*\"/version = \"$VERSION\"/" Cargo.toml > "$tmp_cargo_toml"
 mv "$tmp_cargo_toml" Cargo.toml
 cargo generate-lockfile
@@ -80,7 +103,7 @@ just ci-e2e
 cargo build --locked --release
 
 git commit -am "Bump version to $VERSION"
-git tag -a "v$VERSION" -m "Release v$VERSION"
+git tag -a "v$VERSION" -F "$notes_file"
 git push origin main
 git push origin "v$VERSION"
 

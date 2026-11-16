@@ -697,6 +697,22 @@ export class MonacoApp {
       showCommentStoreError(this.context.comment_store_error);
     }
 
+    void fetch('/api/update-check')
+      .then((response) => (response.ok ? response.json() : null))
+      .then((version: unknown) => {
+        if (typeof version !== 'string') return;
+        const banner = $<HTMLElement>('#update-banner');
+        const message = $<HTMLElement>('#update-banner-msg');
+        if (banner && message) {
+          message.textContent = `lrv ${version} is available — update with cargo binstall lrv`;
+          banner.style.display = '';
+          $('#update-dismiss-btn')?.addEventListener('click', () => {
+            banner.style.display = 'none';
+          });
+        }
+      })
+      .catch(() => {});
+
     // Show skill install banner if the agent skill is not installed everywhere lrv supports.
     if (this.context.claude_skill_installed === false) {
       const banner = $<HTMLElement>('#skill-banner');
