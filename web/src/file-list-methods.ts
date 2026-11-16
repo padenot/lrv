@@ -278,7 +278,7 @@ export class FileListMethods {
           return;
         }
         if (this.isStacked) {
-          this.scrollToFileInStacked(index);
+          void this.scrollToFileInStacked(index);
         } else {
           void this.loadFile(index);
         }
