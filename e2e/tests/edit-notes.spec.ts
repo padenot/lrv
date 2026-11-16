@@ -90,11 +90,11 @@ for (const stacked of [false, true]) {
       const accepted = page.locator('.review-note-accepted');
       await expect(accepted.locator('.review-note-status')).toHaveText('Accepted (edited)');
       await expect(accepted.locator('.review-note-body').first()).toHaveText('First edit');
-      // Monaco's view zone can be partly hidden beneath the page header after
-      // editing changes its height. Center the control before clicking it.
-      const showOriginal = accepted.locator('button', { hasText: /^Show original$/ });
-      await showOriginal.evaluate((button) => button.scrollIntoView({ block: 'center' }));
-      await showOriginal.click();
+      if (!stacked) {
+        // Monaco owns its scroll position; DOM scrollIntoView cannot reposition its view zones.
+        await page.evaluate(() => window.__APP!.editor!.getModifiedEditor().setScrollTop(0));
+      }
+      await accepted.locator('button', { hasText: /^Show original$/ }).click();
       await expect(accepted.locator('.review-note-original')).toHaveText('Original finding');
       await expect(accepted.locator('.review-note-original')).toBeVisible();
       await accepted.locator('button', { hasText: /^Edit$/ }).click();
