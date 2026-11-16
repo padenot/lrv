@@ -6,6 +6,8 @@ description = "Local code review tool for unified diffs"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/padenot/lrv"
 readme = "README.md"
+# Explicit include overrides .gitignore for generated code-split bundles.
+include = ["/src/**", "/web/**", "/build.rs", "/Cargo.lock", "/README.md", "/LICENSE*", "/package.json", "/package-lock.json", "/rolldown.config.mjs", "/tsconfig.web.json"]
 
 [package.metadata.binstall]
 pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ version }-{ target }.{ archive-format }"

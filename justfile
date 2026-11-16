@@ -26,6 +26,7 @@ test: test-unit test-e2e
 test-unit:
     cargo test
     node scripts/test-web.mjs
+    node scripts/check-package-assets.mjs
 
 test-e2e:
     just build
