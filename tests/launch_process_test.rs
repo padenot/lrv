@@ -193,7 +193,9 @@ while [ ! -f "$LRV_TEST_ROOT/exit" ]; do /bin/sleep 0.05; done
         .next()
         .unwrap();
     let diff = PathBuf::from(diff);
-    assert!(fs::read_to_string(&diff).unwrap().contains("+new"));
+    assert!(fs::read_to_string(&diff)
+        .unwrap()
+        .contains("Modified file a:\n   1     : old\n        1: new\n"));
     assert_eq!(
         fs::metadata(diff.parent().unwrap())
             .unwrap()

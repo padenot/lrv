@@ -390,10 +390,7 @@ impl Drop for Spinner {
 
 // Fetch all diffs for a jj series in one subprocess call and parse them.
 // Returns diffs in revset order (oldest first, matching --reversed).
-fn get_series_diffs_jj(
-    revset: &str,
-    working_dir: &str,
-) -> Result<Vec<(crate::types::DiffResponse, String)>> {
+fn get_series_diffs_jj(revset: &str, working_dir: &str) -> Result<Vec<crate::types::DiffResponse>> {
     let template = concat!(
         r#"concat("Commit ID: ", commit_id, "\nAuthor: ", author.name(), "#,
         r#"" <", author.email(), "> (", author.timestamp().format("%Y-%m-%d %H:%M:%S"), ")\n\n", indent("    ", description), "\n\n")"#
@@ -429,10 +426,7 @@ fn get_series_diffs_jj(
             } else {
                 format!("Commit ID: {}", part)
             };
-            Ok((
-                diff::parse_diff(&chunk).context("Failed to parse commit diff")?,
-                chunk,
-            ))
+            diff::parse_diff(&chunk).context("Failed to parse commit diff")
         })
         .collect()
 }
@@ -1168,7 +1162,7 @@ async fn main() -> Result<()> {
     let working_dir = project_context.working_directory.clone();
 
     // Parse diffs: series mode or single commit
-    let (diffs, raw_diffs, pre_old, pre_new, is_series) = if let Some(ref revset) = args.series {
+    let (diffs, pre_old, pre_new, is_series) = if let Some(ref revset) = args.series {
         if args.cmd.is_some() || args.file.is_some() {
             anyhow::bail!("--series cannot be combined with --cmd or --file");
         }
@@ -1193,8 +1187,7 @@ async fn main() -> Result<()> {
                 let wd = working_dir.clone();
                 handles.push(tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
                     let text = get_commit_diff_text(&id, &wd)?;
-                    let d = diff::parse_diff(&text)?;
-                    Ok((i, (d, text)))
+                    Ok((i, diff::parse_diff(&text)?))
                 }));
             }
             let mut parsed_indexed = Vec::with_capacity(commits.len());
@@ -1202,13 +1195,15 @@ async fn main() -> Result<()> {
                 parsed_indexed.push(h.await.context("task join")??);
             }
             parsed_indexed.sort_by_key(|(i, _)| *i);
-            parsed_indexed.into_iter().map(|(_, d)| d).collect()
+            parsed_indexed
+                .into_iter()
+                .map(|(_, d)| d)
+                .collect::<Vec<_>>()
         };
-        let (parsed, raw): (Vec<_>, Vec<_>) = parsed.into_iter().unzip();
         let spinner = Spinner::start("Precomputing file content");
         let (pre_old, pre_new) = server::precompute_series_content(&parsed, &working_dir).await;
         spinner.finish("Ready");
-        (parsed, raw, pre_old, pre_new, true)
+        (parsed, pre_old, pre_new, true)
     } else {
         // Get diff text from stdin, file, or command
         let cmd_for_revision = args.cmd.clone();
@@ -1259,7 +1254,7 @@ async fn main() -> Result<()> {
             return Ok(());
         }
 
-        (vec![diff], vec![diff_text], vec![], vec![], false)
+        (vec![diff], vec![], vec![], false)
     };
 
     project_context.own_revisions = vec![None; diffs.len()];
@@ -1480,7 +1475,6 @@ async fn main() -> Result<()> {
         agent_token: Arc::from(agent_token.clone()),
         agent: agent::AgentChannel::new(agent::lease_from_env()),
         launcher: lrv::launch::AgentLauncher::new(),
-        raw_diffs: Arc::new(raw_diffs),
         diffs: Arc::new(diffs),
         comments: Arc::new(Mutex::new(Vec::new())),
         overall_comment: Arc::new(Mutex::new(None)),

@@ -55,7 +55,6 @@ struct CommitQuery {
 #[derive(Clone)]
 pub struct AppState {
     pub diffs: Arc<Vec<DiffResponse>>,
-    pub raw_diffs: Arc<Vec<String>>,
     pub launcher: Arc<crate::launch::AgentLauncher>,
     pub comments: Arc<Mutex<Vec<Comment>>>,
     pub overall_comment: Arc<Mutex<Option<String>>>,
@@ -1663,13 +1662,10 @@ async fn launch_agent(
     }) {
         return (StatusCode::FORBIDDEN, "Untrusted Host header").into_response();
     }
-    match state.launcher.launch(
-        &req,
-        &state.context,
-        &state.raw_diffs,
-        &state.diffs,
-        state.agent.clone(),
-    ) {
+    match state
+        .launcher
+        .launch(&req, &state.context, &state.diffs, state.agent.clone())
+    {
         Ok(()) => (
             StatusCode::ACCEPTED,
             Json(serde_json::json!({"launch": "running"})),

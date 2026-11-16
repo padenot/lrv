@@ -159,8 +159,12 @@ The output defaults to JSON (`--format json`), with a `status` field:
   Handle every event in the batch, then listen again.
   - `type: "review_request"` has `commit_idx`, optional `commit_hash` and
     `subject`. Review **only** commit `commit_idx` for actionable bugs. Use its
-    diff file when the session lists one; otherwise run `jj show --git <hash>`
-    (or `git show <hash>` in a Git repository). Read other commits and source
+    diff file when the session lists one: each line there starts with its old
+    and new line numbers before a colon, which are the `line` values to use.
+    Otherwise run `jj diff --color-words -r <hash>`, which numbers lines the
+    same way, or in a Git repository `git show <hash>` and count from each
+    `@@ -a,b +c,d @@` header (c for new, a for old). `line` is never a
+    position in the diff text. Read other commits and source
     only for context. Write findings as a JSON array with no `discussion_id`,
     the requested `commit_idx` on every note, and exact `file`, `line`, `side`,
     `body` and `author`. Post with `lrv --add-notes <file>`; post `[]` when there

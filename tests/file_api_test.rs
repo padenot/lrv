@@ -57,7 +57,6 @@ fn make_state_with_root(root: &str) -> lrv::server::AppState {
         agent_token: Arc::from("test-token"),
         agent: lrv::agent::AgentChannel::new(lrv::agent::lease_from_env()),
         launcher: lrv::launch::AgentLauncher::new(),
-        raw_diffs: std::sync::Arc::new(Vec::new()),
         review_notes: Arc::new(Mutex::new(vec![])),
         shutdown_tx: Arc::new(Mutex::new(Some(shutdown_tx))),
         config: Arc::new(Mutex::new(config)),
