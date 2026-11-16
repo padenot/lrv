@@ -126,6 +126,16 @@ vendor-fonts inter_url="" geist_url="" jetbrains_url="":
 check-offline:
     bash scripts/check-offline.sh
 
+# Release the next patch, minor, or major version.
+patch:
+    just release patch
+
+minor:
+    just release minor
+
+major:
+    just release major
+
 # Bump major/minor/patch, or release an explicit version.
 release version:
     bash scripts/release.sh "{{version}}"
