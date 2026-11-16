@@ -270,5 +270,5 @@ publisher for `padenot/lrv`, workflow `publish-crates.yml`, and the GitHub
 Actions environment `crates-io`. No local crates.io token is needed.
 
 The **Publish crates** workflow can also be run manually with `dry_run` enabled
-to verify authentication and packaging. To retry an upload, select the release
-tag and disable `dry_run`; an already published version is skipped.
+to verify authentication and packaging. To retry an upload, enter the release
+tag in `release_tag` and disable `dry_run`; an already published version is skipped.
