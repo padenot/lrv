@@ -21,7 +21,7 @@ fn request_validation_and_provider_arguments() {
             };
             req.validate().unwrap();
             let ctx = context();
-            let command = build_command(&req, &ctx, "the prompt");
+            let command = build_command(&req, &ctx, "the prompt", std::path::Path::new("/tmp/lrv"));
             let command = command.as_std();
             assert_eq!(command.get_program(), provider);
             assert_eq!(
@@ -51,12 +51,13 @@ fn request_validation_and_provider_arguments() {
                 expected.extend([
                     "--strict-mcp-config",
                     "--tools",
-                    "Bash,Read,Grep,Glob",
+                    "Bash,Read,Grep,Glob,Write",
                     "--allowedTools",
                     "Bash(lrv:*)",
                     "Read",
                     "Grep",
                     "Glob",
+                    "Write(/tmp/lrv/**)",
                 ]);
             } else {
                 expected.extend([
@@ -76,6 +77,7 @@ fn request_validation_and_provider_arguments() {
                     PathBuf::from("/tmp/commit-1.diff"),
                 ],
                 &[],
+                std::path::Path::new("/tmp/lrv"),
             );
             assert!(prompt.contains("commit_idx 1: file /tmp/commit-1.diff"));
             assert!(prompt.contains("Immediately run lrv --listen"));
