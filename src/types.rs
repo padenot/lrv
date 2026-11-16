@@ -36,6 +36,28 @@ pub enum FileStatus {
     Copied,
 }
 
+impl FileDiff {
+    /// Whether every line of `line` is shown by this file's hunks on `side`.
+    pub fn shows_line(&self, line: &CommentLine, side: Side) -> bool {
+        let (start, end) = match line {
+            CommentLine::Single(line) => (*line, *line),
+            CommentLine::Range((start, end)) => (*start, *end),
+        };
+        (start..=end).all(|target| {
+            self.hunks.iter().any(|hunk| {
+                hunk.lines.iter().any(|line| match side {
+                    Side::New => {
+                        !matches!(line.line_type, LineType::Delete) && line.new_line == Some(target)
+                    }
+                    Side::Old => {
+                        !matches!(line.line_type, LineType::Add) && line.old_line == Some(target)
+                    }
+                })
+            })
+        })
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Hunk {
     pub header: String,
@@ -329,6 +351,34 @@ pub fn tag_single_commit_notes(notes: &mut [ReviewNote], is_series: bool, commit
     }
 }
 
+/// Explain why `note` can't be placed in the review, if it can't. Call after
+/// `tag_single_commit_notes`. A note must name a file of its commit's diff; any line of that file
+/// is fine, since both views can expand unchanged context.
+pub fn note_location_error(
+    note: &ReviewNote,
+    diffs: &[DiffResponse],
+    is_series: bool,
+) -> Option<String> {
+    if note.file == "(commit)" {
+        return None;
+    }
+    let location = format!("{}:{}", note.file, note.line);
+    if is_series && diffs.len() > 1 && note.commit_idx.is_none() {
+        return Some(format!(
+            "{location}: commit_idx is required when reviewing a series of {} commits",
+            diffs.len()
+        ));
+    }
+    let idx = note.commit_idx.unwrap_or(0);
+    let diff = diffs.get(idx)?;
+    if diff.files.iter().any(|file| file.path == note.file) {
+        return None;
+    }
+    Some(format!(
+        "{location}: file is not in the diff of commit {idx}; use the path from its `+++ b/` line"
+    ))
+}
+
 /// Give every note without an `id` one derived from its content, so the server and the browser
 /// identify notes the same way and resending an id-less note is still recognised as a duplicate.
 /// Call after `tag_single_commit_notes`, since `commit_idx` is part of the identity.
@@ -442,5 +492,83 @@ mod tests {
         assert_eq!(ids[0], ids[1]);
         assert_ne!(ids[0], ids[2]);
         assert_eq!(ids[3], "given");
+    }
+
+    /// `a.rs` changes old line 5 into new lines 5-6 between context lines 4 and 7 (new 4 and 7).
+    fn modified_diff() -> DiffResponse {
+        let line = |line_type, old_line, new_line| DiffLine {
+            line_type,
+            content: String::new(),
+            old_line,
+            new_line,
+        };
+        DiffResponse {
+            files: vec![FileDiff {
+                path: "a.rs".to_string(),
+                old_path: None,
+                status: FileStatus::Modified,
+                hunks: vec![Hunk {
+                    header: "@@ -4,3 +4,4 @@".to_string(),
+                    old_start: 4,
+                    new_start: 4,
+                    lines: vec![
+                        line(LineType::Context, Some(4), Some(4)),
+                        line(LineType::Delete, Some(5), None),
+                        line(LineType::Add, None, Some(5)),
+                        line(LineType::Add, None, Some(6)),
+                        line(LineType::Context, Some(6), Some(7)),
+                    ],
+                }],
+                old_blob: None,
+                new_blob: None,
+                is_binary: false,
+            }],
+            stats: DiffStats {
+                additions: 2,
+                deletions: 1,
+                files_changed: 1,
+            },
+            commit_hash: None,
+            commit_author: None,
+            commit_date: None,
+            commit_message: None,
+            jj_change_id: None,
+        }
+    }
+
+    #[test]
+    fn note_location_accepts_any_line_of_a_file_in_the_diff() {
+        let diffs = [modified_diff()];
+        let at = |line, side| ReviewNote {
+            line,
+            side,
+            ..note("a.rs", None)
+        };
+        for (line, side) in [
+            (CommentLine::Single(4), Side::New),
+            (CommentLine::Single(40), Side::New),
+            (CommentLine::Range((6, 8)), Side::New),
+            (CommentLine::Single(7), Side::Old),
+        ] {
+            assert_eq!(note_location_error(&at(line, side), &diffs, false), None);
+        }
+        let error = note_location_error(&note("missing.rs", None), &diffs, false).unwrap();
+        assert!(error.contains("file is not in the diff of commit 0"));
+    }
+
+    #[test]
+    fn note_location_requires_commit_idx_in_multi_commit_series() {
+        let diffs = [modified_diff(), modified_diff()];
+        let error = note_location_error(&note("a.rs", None), &diffs, true).unwrap();
+        assert!(error.contains("commit_idx is required"));
+        let on_hunk = ReviewNote {
+            line: CommentLine::Single(5),
+            ..note("a.rs", Some(1))
+        };
+        assert_eq!(note_location_error(&on_hunk, &diffs, true), None);
+        assert_eq!(
+            note_location_error(&note("(commit)", None), &diffs, true),
+            None
+        );
     }
 }

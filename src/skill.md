@@ -133,7 +133,10 @@ as `--review-notes-file`, then run this from the repository:
 lrv --add-notes /tmp/notes.json
 ```
 
-Notes appear in the open page without a reload. Re-running the same batch
+Notes appear in the open page without a reload. A note on a file outside
+the commit's diff, or without `commit_idx` in a multi-commit series, can't
+be placed, so the whole batch is rejected with the reason for each bad
+note; fix them and post again. Re-running the same batch
 is a no-op; the command reports added and skipped counts. Use `-` instead
 of a file to read JSON from stdin. Never start a second lrv just to show
 notes in an existing review.

@@ -26,8 +26,8 @@ use crate::output::OutputFormat;
 use crate::phabricator::{PhabricatorClient, Publisher, RevisionStatusInfo};
 use crate::server::{create_router, AppState};
 use crate::types::{
-    assign_note_ids, tag_single_commit_notes, CommentLine, DiffResponse, LineType, PrInfo,
-    ProjectContext, ReviewNote, Side,
+    assign_note_ids, tag_single_commit_notes, DiffResponse, PrInfo, ProjectContext, ReviewNote,
+    Side,
 };
 use lrv::repository;
 
@@ -691,11 +691,19 @@ async fn add_notes_to_review(path: &str) -> Result<()> {
         .await
         .with_context(|| format!("No running lrv found for {}", root.display()))?;
     check_review_auth(&response, &root, "--add-notes")?;
-    let result: serde_json::Value = response
-        .error_for_status()
-        .context("Running lrv rejected review notes")?
-        .json()
-        .await?;
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        anyhow::bail!(
+            "Running lrv rejected review notes ({status}){}",
+            if body.trim().is_empty() {
+                String::new()
+            } else {
+                format!(":\n{}", body.trim())
+            }
+        );
+    }
+    let result: serde_json::Value = response.json().await?;
     println!("{}", serde_json::to_string(&result)?);
     Ok(())
 }
@@ -953,32 +961,13 @@ fn infer_review_note_side(
         return note.side;
     };
 
-    if line_exists_in_file(file, &note.line, Side::New) {
+    if file.shows_line(&note.line, Side::New) {
         return Side::New;
     }
-    if line_exists_in_file(file, &note.line, Side::Old) {
+    if file.shows_line(&note.line, Side::Old) {
         return Side::Old;
     }
     note.side
-}
-
-fn line_exists_in_file(file: &crate::types::FileDiff, line: &CommentLine, side: Side) -> bool {
-    let (start, end) = match line {
-        CommentLine::Single(line) => (*line, *line),
-        CommentLine::Range((start, end)) => (*start, *end),
-    };
-    (start..=end).all(|target| {
-        file.hunks.iter().any(|hunk| {
-            hunk.lines.iter().any(|line| match side {
-                Side::New => {
-                    !matches!(line.line_type, LineType::Delete) && line.new_line == Some(target)
-                }
-                Side::Old => {
-                    !matches!(line.line_type, LineType::Add) && line.old_line == Some(target)
-                }
-            })
-        })
-    })
 }
 
 fn failure_lines(failures: &[store::OpenFailure]) -> Vec<String> {
