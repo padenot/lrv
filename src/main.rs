@@ -269,12 +269,14 @@ struct Args {
     validate_review_notes: Option<String>,
 
     /// Add review notes to the running review for this repository (- reads stdin)
-    #[arg(long, value_name = "PATH|-")]
+    // Conflicts keep a launched agent, allowed only `lrv --add-notes` and `lrv --listen`
+    // prefixes, from also passing a diff source such as --cmd, which runs a shell.
+    #[arg(long, value_name = "PATH|-", conflicts_with_all = ["cmd", "file", "series"])]
     add_notes: Option<String>,
 
     /// Wait for discussion comments from the running review for this repository and
     /// print them (one listener per review: the read position is shared)
-    #[arg(long, conflicts_with = "add_notes")]
+    #[arg(long, conflicts_with_all = ["add_notes", "cmd", "file", "series"])]
     listen: bool,
 
     /// Seconds --listen waits before reporting that nothing happened

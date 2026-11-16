@@ -79,7 +79,8 @@ fn request_validation_and_provider_arguments() {
                     "--tools",
                     "Bash,Read,Grep,Glob,Write",
                     "--allowedTools",
-                    "Bash(lrv:*)",
+                    "Bash(lrv --listen:*)",
+                    "Bash(lrv --add-notes:*)",
                     "Read",
                     "Grep",
                     "Glob",
@@ -107,6 +108,7 @@ fn request_validation_and_provider_arguments() {
             );
             assert!(prompt.contains("commit_idx 1: file /tmp/commit-1.diff"));
             assert!(prompt.contains("Immediately run lrv --listen"));
+            assert!(prompt.contains("If your permissions allow it, read other files"));
             assert!(prompt.contains("--listen-timeout 540"));
             assert!(prompt
                 .contains("inside /tmp/lrv-agent-x (for example /tmp/lrv-agent-x/notes-1.json"));
