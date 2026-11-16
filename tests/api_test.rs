@@ -15,6 +15,7 @@ fn test_appstate_has_context_for_file_reading() {
         comment_store_error: None,
         phabricator_available: false,
         phabricator_revisions: Vec::new(),
+        own_revisions: Vec::new(),
     };
 
     // This test ensures context is available in AppState
@@ -52,6 +53,7 @@ fn test_appstate_required_fields() {
         comment_store_error: None,
         phabricator_available: false,
         phabricator_revisions: Vec::new(),
+        own_revisions: Vec::new(),
     };
 
     let (shutdown_tx, _rx) = tokio::sync::mpsc::channel(1);

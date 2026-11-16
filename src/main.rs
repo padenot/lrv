@@ -71,6 +71,7 @@ fn get_project_context() -> ProjectContext {
         comment_store_error: None,
         phabricator_available: false,
         phabricator_revisions: Vec::new(),
+        own_revisions: Vec::new(),
     }
 }
 
@@ -550,42 +551,6 @@ fn resolve_jj_commit_id(revision: &str, working_dir: &str) -> Option<String> {
     }
     let id = String::from_utf8(output.stdout).ok()?.trim().to_string();
     (!id.is_empty() && id.chars().all(|c| c.is_ascii_hexdigit())).then_some(id)
-}
-
-/// A commit's Git tree and first parent, to compare with the commit recorded
-/// on a Phabricator diff. jj repositories need not be colocated, so ask jj for
-/// the Git store it uses.
-fn commit_identity(commit: &str, working_dir: &str) -> Option<phabricator::CommitIdentity> {
-    let mut git = Command::new("git");
-    git.current_dir(working_dir);
-    if repository::is_jj_repo(working_dir) {
-        let output = Command::new("jj")
-            .current_dir(working_dir)
-            .args(["git", "root"])
-            .output()
-            .ok()?;
-        if output.status.success() {
-            git.arg("--git-dir")
-                .arg(String::from_utf8(output.stdout).ok()?.trim());
-        }
-    }
-    // `%T %P`: the tree, then the parents separated by spaces.
-    let output = git
-        .args(["log", "-1", "--format=%T %P", commit, "--"])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let output = String::from_utf8(output.stdout).ok()?;
-    let mut shas = output.split_whitespace();
-    let tree = shas.next()?;
-    tree.chars()
-        .all(|c| c.is_ascii_hexdigit())
-        .then(|| phabricator::CommitIdentity {
-            tree: tree.to_string(),
-            parent: shas.next().map(str::to_string),
-        })
 }
 
 /// Ensure the diff text carries `Commit ID:` metadata for the revision it
@@ -1306,6 +1271,7 @@ async fn main() -> Result<()> {
         (vec![diff], vec![diff_text], vec![], vec![], false)
     };
 
+    project_context.own_revisions = vec![None; diffs.len()];
     let mut review_notes = Vec::new();
     for path in &args.review_notes_file {
         review_notes.extend(load_startup_review_notes_file(path)?);
@@ -1330,15 +1296,7 @@ async fn main() -> Result<()> {
     let targets = phabricator::resolve_phab_targets(&named_revisions, &phab_base_url, &messages);
     let publisher = if targets.iter().any(Option::is_some) {
         project_context.phabricator_available = true;
-        let commits = diffs
-            .iter()
-            .zip(&targets)
-            .map(|(diff, target)| {
-                target.as_ref()?;
-                commit_identity(diff.commit_hash.as_deref()?, &working_dir)
-            })
-            .collect();
-        let publisher = phabricator::Publisher::new(targets, commits);
+        let publisher = phabricator::Publisher::new(targets, &diffs);
         project_context.phabricator_revisions = publisher.local_revisions();
         Some(Arc::new(publisher))
     } else {
@@ -1375,6 +1333,11 @@ async fn main() -> Result<()> {
         tokio::join!(named, trailers)
     };
     let (outdated, (named_notes, trailer_notes)) = tokio::join!(validation, fetch_notes);
+    if let Some(publisher) = &publisher {
+        if !args.phab_revisions.is_empty() || config_fetch {
+            project_context.own_revisions = publisher.own_revisions();
+        }
+    }
     // An explicit --phab-revision aborts; comments fetched because of the config are skipped.
     if !args.phab_revisions.is_empty() && !outdated.is_empty() {
         let reasons = outdated
@@ -1448,6 +1411,17 @@ async fn main() -> Result<()> {
                 if let Some((notes, prs)) = auto_fetch_github(&diffs).await {
                     review_notes.extend(notes);
                     pull_requests = prs;
+                }
+            }
+        }
+    }
+    if !pull_requests.prs.is_empty() {
+        let login = github::viewer_login().await;
+        for (idx, pr) in pull_requests.commit_prs.iter().enumerate() {
+            if project_context.own_revisions[idx].is_none() {
+                if let Some(pr) = pr {
+                    project_context.own_revisions[idx] =
+                        github::is_own_pr(&pull_requests.prs[*pr], login.as_deref());
                 }
             }
         }

@@ -1,12 +1,27 @@
+import { acceptedBody } from './review-notes';
 import { el } from './dom';
 import { openModal } from './modal';
 import { fetchJSON } from './api';
 import { commentKey } from './dialog-methods';
-import { isAddressRequest, type ReviewComment } from './comments';
+import { type ReviewComment } from './comments';
 import type { AppContext, PhabStatus, PublishState, ReviewAction } from './types/app';
 
 // Phabricator status values: green when accepted, blue when it needs review, grey while
 // waiting on the author.
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+/** A small "opens elsewhere" arrow, drawn in the link's current colour. */
+function externalLinkIcon(): SVGSVGElement {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('class', 'external-link-icon');
+  svg.setAttribute('viewBox', '0 0 12 12');
+  svg.setAttribute('aria-hidden', 'true');
+  const path = document.createElementNS(SVG_NS, 'path');
+  path.setAttribute('d', 'M7 1h4v4M11 1 5.5 6.5M9.5 7.5V11h-8.5V2.5H4.5');
+  svg.appendChild(path);
+  return svg;
+}
+
 const REVISION_STATE_CLASSES: Record<string, string> = {
   accepted: 'revision-accepted',
   'needs-review': 'revision-needs-review',
@@ -16,9 +31,12 @@ const REVISION_STATE_CLASSES: Record<string, string> = {
 };
 
 export class PublishDialogMethods {
+  declare reviewNoteManager: AppContext['reviewNoteManager'];
   declare commentManager: AppContext['commentManager'];
   declare seriesInfo: AppContext['seriesInfo'];
   declare publishedCommentKeys: Set<string>;
+  declare publishedNoteIds: Set<string>;
+  declare renderReviewNotes: () => void;
   declare publishedRevisionIds: Set<string>;
   declare publishStates: Map<string, PublishState>;
   declare currentCommitIdx: number;
@@ -59,7 +77,11 @@ export class PublishDialogMethods {
     if (!button) {
       return;
     }
+    const chip = document.getElementById('commit-revision');
     const id = this.revisionIdFor(this.currentCommitIdx);
+    if (chip) {
+      chip.hidden = !id;
+    }
     button.hidden = !id;
     if (!id) {
       return;
@@ -72,14 +94,32 @@ export class PublishDialogMethods {
     const verifying = !status && !error;
     button.classList.toggle('verifying', verifying);
     for (const state of Object.values(REVISION_STATE_CLASSES)) {
-      button.classList.remove(state);
+      chip?.classList.remove(state);
     }
     const stateClass = REVISION_STATE_CLASSES[revision?.status ?? ''];
     if (stateClass) {
-      button.classList.add(stateClass);
+      chip?.classList.add(stateClass);
     }
-    const stateName = revision?.status_name ? ` · ${revision.status_name}` : '';
-    button.textContent = published ? `Published ${id} ✓` : `Publish ${id}${stateName}`;
+    if (chip) {
+      // The link appears once validation has returned the revision's URL.
+      const label = revision?.url
+        ? el('a', {
+            className: 'commit-revision-link',
+            text: id,
+            attrs: { href: revision.url, target: '_blank', rel: 'noopener noreferrer' },
+          })
+        : document.createTextNode(id);
+      if (revision?.url) {
+        label.appendChild(externalLinkIcon());
+      }
+      chip.replaceChildren(label);
+      if (revision?.status_name) {
+        chip.append(` · ${revision.status_name}`);
+      }
+    }
+    // The revision id is shown by the chip beside the button; screen readers still get it.
+    button.textContent = published ? 'Published ✓' : 'Publish';
+    button.setAttribute('aria-label', published ? `Published ${id}` : `Publish ${id}`);
     button.disabled = verifying || published || !!error || !revision || !revision.publishable;
     button.title = verifying ? `Verifying ${id}…` : (error ?? revision?.reason ?? '');
   }
@@ -120,11 +160,32 @@ export class PublishDialogMethods {
     const originals = this.commentManager
       .getComments()
       .filter((c) => !this.publishedCommentKeys.has(commentKey(c)));
-    const forRevision = (id: string) => {
-      const revision = status.revisions.find((r) => r.id === id)!;
-      return originals.filter(
-        (c) => revision.commit_idxs.includes(c.commit_idx ?? 0) && !isAddressRequest(c),
+    const accepted = this.reviewNoteManager
+      .getNotes()
+      .filter(
+        (note) => note.disposition === 'accepted' && note.id && !this.publishedNoteIds.has(note.id),
       );
+    const publishableNotes = (id: string) => {
+      const revision = status.revisions.find((r) => r.id === id)!;
+      return accepted.filter(
+        (note) =>
+          !revision.own &&
+          (note.origin ?? 'agent') === 'agent' &&
+          revision.commit_idxs.includes(note.commit_idx ?? 0),
+      );
+    };
+    const forRevision = (id: string): ReviewComment[] => {
+      const revision = status.revisions.find((r) => r.id === id)!;
+      return [
+        ...originals.filter((c) => revision.commit_idxs.includes(c.commit_idx ?? 0)),
+        ...publishableNotes(id).map((note) => ({
+          file: note.file,
+          line: note.line,
+          side: note.side,
+          body: acceptedBody(note),
+          ...(note.commit_idx === undefined ? {} : { commit_idx: note.commit_idx }),
+        })),
+      ];
     };
     const panel = el('div', { className: 'publish-panel' });
     body.appendChild(panel);
@@ -133,8 +194,8 @@ export class PublishDialogMethods {
       panel.appendChild(el('p', { text: 'Revision unavailable.' }));
       return;
     }
-    const unassigned = originals.filter(
-      (c) => revision.commit_idxs.includes(c.commit_idx ?? 0) && isAddressRequest(c),
+    const unassigned = accepted.filter(
+      (note) => revision.commit_idxs.includes(note.commit_idx ?? 0) && revision.own,
     );
     let rendering = 0;
     const render = () => {
@@ -284,7 +345,9 @@ export class PublishDialogMethods {
           }
           revision.published = true;
           comments.forEach((c) => this.publishedCommentKeys.add(commentKey(c)));
+          publishableNotes(revision.id).forEach((note) => this.publishedNoteIds.add(note.id!));
           this.publishedRevisionIds.add(revision.id);
+          this.renderReviewNotes();
           this.renderSeriesNav();
           close();
         } catch (error) {

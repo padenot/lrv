@@ -1,4 +1,10 @@
 import type { ReviewComment, CommentLine } from './comments';
+import {
+  acceptedBody,
+  type ReviewNote,
+  type NoteDispositions,
+  type NoteEdits,
+} from './review-notes';
 import type { AppContextData, DiffFile, DiffStats, SeriesInfo } from './types/app';
 
 type DiffSnapshot = {
@@ -14,6 +20,8 @@ type CommentDraftRecord = {
   schemaVersion: 1;
   savedAt: number;
   comments: ReviewComment[];
+  dispositions?: NoteDispositions;
+  note_edits?: NoteEdits;
 };
 
 const DB_NAME = 'lrv-comment-drafts';
@@ -42,10 +50,12 @@ export function buildCommentDraftKey(
   return `review-comments:v2:${hashString(fingerprint)}:${fingerprint.length.toString(36)}`;
 }
 
-export async function loadCommentDraft(key: string): Promise<ReviewComment[]> {
+export async function loadCommentDraft(
+  key: string,
+): Promise<{ comments: ReviewComment[]; dispositions: NoteDispositions; note_edits: NoteEdits }> {
   const db = await openDraftDb();
   if (!db) {
-    return [];
+    return { comments: [], dispositions: {}, note_edits: {} };
   }
 
   try {
@@ -53,18 +63,32 @@ export async function loadCommentDraft(key: string): Promise<ReviewComment[]> {
       store.get(key),
     );
     if (!record || record.schemaVersion !== 1 || !Array.isArray(record.comments)) {
-      return [];
+      return { comments: [], dispositions: {}, note_edits: {} };
     }
-    return sanitizeComments(record.comments);
+    return {
+      comments: sanitizeComments(record.comments),
+      dispositions: sanitizeDispositions(record.dispositions),
+      note_edits: sanitizeEdits(record.note_edits),
+    };
   } catch (error) {
     console.warn('Failed to load persisted review comments:', error);
-    return [];
+    return { comments: [], dispositions: {}, note_edits: {} };
   }
 }
 
-export async function saveCommentDraft(key: string, comments: ReviewComment[]): Promise<void> {
+export async function saveCommentDraft(
+  key: string,
+  comments: ReviewComment[],
+  dispositions: NoteDispositions = {},
+  noteEdits: NoteEdits = {},
+): Promise<void> {
   const sanitized = sanitizeComments(comments);
-  if (sanitized.length === 0) {
+  const edits = sanitizeEdits(noteEdits);
+  if (
+    sanitized.length === 0 &&
+    !Object.values(dispositions).some((value) => value !== 'open') &&
+    Object.keys(edits).length === 0
+  ) {
     await clearCommentDraft(key);
     return;
   }
@@ -79,6 +103,8 @@ export async function saveCommentDraft(key: string, comments: ReviewComment[]): 
     schemaVersion: 1,
     savedAt: Date.now(),
     comments: sanitized,
+    dispositions,
+    note_edits: edits,
   };
 
   try {
@@ -90,12 +116,23 @@ export async function saveCommentDraft(key: string, comments: ReviewComment[]): 
 
 // Mirror the draft to the lrv process, which stores it in SQLite so comments
 // survive losing the browser profile, the tab, or the terminal output.
-export async function syncCommentDraftToServer(comments: ReviewComment[]): Promise<void> {
+export async function syncCommentDraftToServer(
+  comments: ReviewComment[],
+  notes: ReviewNote[] = [],
+): Promise<void> {
   try {
     const res = await fetch('/api/comments/sync', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ comments }),
+      body: JSON.stringify({
+        comments,
+        notes: notes
+          .filter((note) => note.id && note.disposition && note.disposition !== 'open')
+          .map((note) => ({
+            note: { ...note, body: acceptedBody(note) },
+            disposition: note.disposition,
+          })),
+      }),
     });
     if (!res.ok) {
       showCommentStoreError((await res.text()) || `lrv answered with HTTP ${res.status}.`);
@@ -242,6 +279,22 @@ function sanitizeComment(value: unknown): ReviewComment | null {
     comment.commit_idx = raw.commit_idx;
   }
 
+  if (raw.in_reply_to && typeof raw.in_reply_to.body === 'string') {
+    const { body, id, author, source_url, origin } = raw.in_reply_to;
+    comment.in_reply_to = { body };
+    if (origin === 'agent' || origin === 'host') {
+      comment.in_reply_to.origin = origin;
+    }
+    if (typeof id === 'string') {
+      comment.in_reply_to.id = id;
+    }
+    if (typeof author === 'string') {
+      comment.in_reply_to.author = author;
+    }
+    if (typeof source_url === 'string') {
+      comment.in_reply_to.source_url = source_url;
+    }
+  }
   return comment;
 }
 
@@ -275,4 +328,23 @@ function hashString(value: string): string {
     hash = Math.imul(hash, 0x01000193) >>> 0;
   }
   return hash.toString(16).padStart(8, '0');
+}
+
+function sanitizeDispositions(value: unknown): NoteDispositions {
+  if (!value || typeof value !== 'object') {
+    return {};
+  }
+  return Object.fromEntries(
+    Object.entries(value).filter(
+      ([, disposition]) =>
+        disposition === 'open' || disposition === 'accepted' || disposition === 'ignored',
+    ),
+  );
+}
+
+function sanitizeEdits(value: unknown): NoteEdits {
+  if (!value || typeof value !== 'object') {
+    return {};
+  }
+  return Object.fromEntries(Object.entries(value).filter(([, body]) => typeof body === 'string'));
 }

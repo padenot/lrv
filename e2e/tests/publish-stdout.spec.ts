@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { execFileSync, spawn, type ChildProcess } from 'child_process';
+import { spawn, type ChildProcess } from 'child_process';
 import { createServer } from 'http';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -10,20 +10,8 @@ test('Finish prints remaining comments and published URLs to stdout and exits', 
   page,
 }) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lrv-publish-stdout-'));
-  // Publishing needs a local commit whose Git tree matches the one recorded on the diff.
-  const git = (...args: string[]) =>
-    execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', ...args], {
-      cwd: root,
-      encoding: 'utf8',
-    }).trim();
-  git('init', '-q');
-  fs.writeFileSync(path.join(root, 'a.txt'), 'old\n');
-  git('add', 'a.txt');
-  git('commit', '-q', '-m', 'Base');
-  fs.writeFileSync(path.join(root, 'a.txt'), 'new\n');
-  git('commit', '-q', '-am', 'Change a.txt');
-  const [tree, parent] = git('log', '-1', '--format=%T %P').split(' ');
   const calls: string[] = [];
+  const inlineBodies: string[] = [];
   let base = '';
   const conduit = createServer((request, response) => {
     const method = request.url?.split('/').pop() ?? '';
@@ -47,20 +35,32 @@ test('Finish prints remaining comments and published URLs to stdout and exits', 
       'differential.diff.search': { data: [{ id: 1, phid: 'PHID-DIFF-1' }] },
       'differential.querydiffs': {
         '1': {
-          properties: {
-            'local:commits': { c1: { commit: 'c1', tree, parents: [parent] } },
-          },
+          changes: [
+            {
+              currentPath: 'a.txt',
+              type: '2',
+              hunks: [{ corpus: '-old\n+new\n' }],
+            },
+          ],
         },
       },
       'transaction.search': { data: [] },
       'differential.createinline': {},
       'differential.createcomment': {},
     };
-    request.resume();
-    response.setHeader('Content-Type', 'application/json');
-    response.end(
-      JSON.stringify({ error_code: null, error_info: null, result: results[method] ?? {} }),
-    );
+    let body = '';
+    request.on('data', (data: Buffer) => {
+      body += data.toString();
+    });
+    request.on('end', () => {
+      if (method === 'differential.createinline') {
+        inlineBodies.push(new URLSearchParams(body).get('content') ?? '');
+      }
+      response.setHeader('Content-Type', 'application/json');
+      response.end(
+        JSON.stringify({ error_code: null, error_info: null, result: results[method] ?? {} }),
+      );
+    });
   });
   let child: ChildProcess | undefined;
   try {
@@ -70,11 +70,40 @@ test('Finish prints remaining comments and published URLs to stdout and exits', 
       throw new Error('No mock server address');
     }
     base = `http://127.0.0.1:${address.port}`;
-    fs.writeFileSync(path.join(root, 'review.diff'), git('show', 'HEAD') + '\n');
+    fs.writeFileSync(
+      path.join(root, 'review.diff'),
+      'diff --git a/a.txt b/a.txt\nindex 3367afdbbf..3e757656cf 100644\n--- a/a.txt\n+++ b/a.txt\n' +
+        '@@ -1 +1 @@\n-old\n+new\n',
+    );
+    fs.writeFileSync(
+      path.join(root, 'notes.json'),
+      JSON.stringify([
+        {
+          id: 'address',
+          origin: 'host',
+          file: 'a.txt',
+          line: 1,
+          side: 'new',
+          body: 'Fix this',
+          author: 'Reviewer',
+        },
+        { id: 'agent', file: 'a.txt', line: 1, side: 'new', body: 'Agent finding' },
+      ]),
+    );
     const binary = process.env.LRV_BIN || path.resolve(__dirname, '../../target/debug/lrv');
     child = spawn(
       binary,
-      ['--file', 'review.diff', '--no-open', '--port', '0', '--phab-revision', 'D123'],
+      [
+        '--file',
+        'review.diff',
+        '--no-open',
+        '--port',
+        '0',
+        '--phab-revision',
+        'D123',
+        '--review-notes-file',
+        'notes.json',
+      ],
       {
         cwd: root,
         env: {
@@ -114,7 +143,7 @@ test('Finish prints remaining comments and published URLs to stdout and exits', 
     });
     await isolateConfig(page);
     await page.goto(url);
-    await expect(page.locator('#publish-commit')).toHaveText('Publish D123');
+    await expect(page.locator('#publish-commit')).toHaveText('Publish');
     await page.evaluate(() => {
       window.__APP!.commentManager.addComment({
         file: 'a.txt',
@@ -122,27 +151,28 @@ test('Finish prints remaining comments and published URLs to stdout and exits', 
         side: 'new',
         body: 'Publish this',
       });
-      window.__APP!.commentManager.addComment({
-        file: 'a.txt',
-        line: 1,
-        side: 'new',
-        body: '',
-        in_reply_to: { id: 'address', body: 'Fix this', author: 'Reviewer' },
-      });
+      const manager = window.__APP!.reviewNoteManager;
+      manager.getNotes().forEach((note) =>
+        manager.updateNote(note, {
+          disposition: 'accepted',
+          ...(note.id === 'agent' ? { accepted_body: 'Edited agent finding' } : {}),
+        }),
+      );
     });
     await page.locator('#publish-commit').click();
     await page.locator('.publish-revision').click();
-    await expect(page.locator('#publish-commit')).toHaveText('Published D123 ✓');
-    expect(calls).toContain('differential.createinline');
+    await expect(page.locator('#publish-commit')).toHaveText('Published ✓');
+    expect(calls.filter((method) => method === 'differential.createinline')).toHaveLength(2);
     expect(calls).toContain('differential.createcomment');
+    expect(inlineBodies).toEqual(expect.arrayContaining(['Publish this', 'Edited agent finding']));
+    expect(inlineBodies).not.toContain('Agent finding');
     await page.locator('#submit-review').click();
     await page.locator('.confirm-submit-btn').click();
     await expect.poll(() => server.exitCode).toBe(0);
     const result = JSON.parse(stdout);
     expect(result.published).toEqual([`${base}/D123`]);
-    expect(result.comments).toHaveLength(1);
-    expect(result.comments[0].in_reply_to.id).toBe('address');
-    expect(result.comments[0].body).toBe('');
+    // A stale accepted host note on someone else's revision is excluded from Finish.
+    expect(result.comments).toEqual([]);
   } finally {
     if (child && child.exitCode === null) {
       child.kill('SIGKILL');

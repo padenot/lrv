@@ -31,6 +31,7 @@ async fn test_csp_header_present() {
         comment_store_error: None,
         phabricator_available: false,
         phabricator_revisions: Vec::new(),
+        own_revisions: Vec::new(),
     };
     let (shutdown_tx, _rx) = tokio::sync::mpsc::channel::<()>(1);
     let state = lrv::server::AppState {
@@ -100,6 +101,7 @@ async fn test_csp_on_assets_and_api() {
         comment_store_error: None,
         phabricator_available: false,
         phabricator_revisions: Vec::new(),
+        own_revisions: Vec::new(),
     };
     let (shutdown_tx, _rx) = tokio::sync::mpsc::channel::<()>(1);
     let state = lrv::server::AppState {

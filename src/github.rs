@@ -1,5 +1,5 @@
 use crate::diff::{attribute_line, diff_shows_line};
-use crate::types::{CommentLine, DiffResponse, PrInfo, ReviewNote, Side};
+use crate::types::{CommentLine, DiffResponse, NoteOrigin, PrInfo, ReviewNote, Side};
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
@@ -176,6 +176,7 @@ fn notes_from_comments(comments: Vec<GhComment>, diffs: &[DiffResponse]) -> Vec<
         }
 
         notes.push(ReviewNote {
+            origin: NoteOrigin::Host,
             id: Some(comment.id.to_string()),
             file: path.clone(),
             line,
@@ -364,20 +365,20 @@ async fn detect_commit_pr(remotes: &[(String, String)], sha: &str) -> Option<PrI
             "api",
             path.as_str(),
             "--jq",
-            r#"[.[] | select(.state == "open") | [.base.repo.full_name, .number, .title, .html_url]] | @json"#,
+            r#"[.[] | select(.state == "open") | [.base.repo.full_name, .number, .title, .html_url, .user.login]] | @json"#,
         ];
         let Some(out) = run_gh(&args, Duration::from_secs(5)).await else {
             continue;
         };
-        let Ok(prs) =
-            serde_json::from_slice::<Vec<(String, u64, Option<String>, Option<String>)>>(&out)
-        else {
+        let Ok(prs) = serde_json::from_slice::<
+            Vec<(String, u64, Option<String>, Option<String>, Option<String>)>,
+        >(&out) else {
             continue;
         };
         // The PR may live in another repo than the remote asked (a fork's commit also lists the
         // upstream's PRs), so use the PR's base repo.
-        let earliest = prs.into_iter().min_by_key(|(_, number, _, _)| *number);
-        if let Some((full_name, number, title, url)) = earliest {
+        let earliest = prs.into_iter().min_by_key(|(_, number, _, _, _)| *number);
+        if let Some((full_name, number, title, url, author)) = earliest {
             if let Some((owner, repo)) = full_name.split_once('/') {
                 return Some(PrInfo {
                     owner: owner.to_string(),
@@ -385,6 +386,7 @@ async fn detect_commit_pr(remotes: &[(String, String)], sha: &str) -> Option<PrI
                     number,
                     title,
                     url,
+                    author,
                 });
             }
         }
@@ -392,13 +394,32 @@ async fn detect_commit_pr(remotes: &[(String, String)], sha: &str) -> Option<PrI
     None
 }
 
+/// Best effort authenticated GitHub identity.
+pub async fn viewer_login() -> Option<String> {
+    let out = run_gh(&["api", "user", "--jq", ".login"], Duration::from_secs(5)).await?;
+    let login = String::from_utf8(out).ok()?;
+    let login = login.trim();
+    (!login.is_empty()).then(|| login.to_owned())
+}
+
+/// Unknown authors or viewers must preserve the existing review actions.
+pub fn is_own_pr(pr: &PrInfo, login: Option<&str>) -> Option<bool> {
+    Some(pr.author.as_deref()?.eq_ignore_ascii_case(login?))
+}
+
 /// Look up a PR's title and URL. Best effort: they only decorate the UI.
 pub async fn fetch_pr_info(pr: &PrRef) -> PrInfo {
     let path = format!("repos/{}/{}/pulls/{}", pr.owner, pr.repo, pr.number);
-    let args = ["api", path.as_str(), "--jq", "[.title, .html_url] | @json"];
-    let (title, url) = match run_gh(&args, Duration::from_secs(5)).await {
+    let args = [
+        "api",
+        path.as_str(),
+        "--jq",
+        "[.title, .html_url, .user.login] | @json",
+    ];
+    let (title, url, author) = match run_gh(&args, Duration::from_secs(5)).await {
         Some(out) => {
-            serde_json::from_slice::<(Option<String>, Option<String>)>(&out).unwrap_or_default()
+            serde_json::from_slice::<(Option<String>, Option<String>, Option<String>)>(&out)
+                .unwrap_or_default()
         }
         None => Default::default(),
     };
@@ -408,6 +429,7 @@ pub async fn fetch_pr_info(pr: &PrRef) -> PrInfo {
         number: pr.number,
         title,
         url,
+        author,
     }
 }
 

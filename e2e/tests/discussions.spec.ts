@@ -12,7 +12,7 @@ const binary = process.env.LRV_BIN || path.resolve(__dirname, '../../target/debu
 
 for (const stacked of [false, true]) {
   test(`discussions in ${stacked ? 'stacked' : 'Monaco'} view`, async ({ page }) => {
-    test.setTimeout(60000);
+    test.setTimeout(90000);
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lrv-discussions-'));
     const diffPath = path.join(root, 'review.diff');
     const env = {
@@ -367,6 +367,88 @@ for (const stacked of [false, true]) {
       expect(await (await page.request.get(`${url}/api/discussions`)).json()).toEqual([]);
       const notes = await (await page.request.get(`${url}/api/review-notes`)).json();
       expect(notes.every((note: { discussion_id?: string }) => !note.discussion_id)).toBe(true);
+      // Request a review, then challenge the resulting note through a real agent poll.
+      const auth = { Authorization: `Bearer ${serverInfo.token}` };
+      const backlog = await (
+        await page.request.get(`${url}/api/agent/events?timeout=1`, { headers: auth })
+      ).json();
+      const reviewPoll = page.request
+        .get(`${url}/api/agent/events?after=${backlog.cursor}&timeout=30`, { headers: auth })
+        .then((response) => response.json());
+      await expect(page.locator('#request-review')).toBeEnabled();
+      await page.locator('#request-review').click();
+      const requested = await reviewPoll;
+      expect(requested.events[0]).toMatchObject({ type: 'review_request', commit_idx: 0 });
+      await postNote({
+        id: 'challenge',
+        file: 'a.txt',
+        line: 1,
+        side: 'new',
+        body: 'Note to challenge',
+        author: 'Test agent',
+      });
+      const challenged = page.locator('.review-note').filter({ hasText: 'Note to challenge' });
+      await expect(challenged).toBeVisible();
+      await expect(page.locator('body')).not.toHaveClass(/agent-attached/, { timeout: 10000 });
+      await expect(challenged.locator('.review-note-reply-btn')).toBeVisible();
+      await challenged.evaluate((node) => {
+        (node as HTMLElement).dataset.identity = 'same-note';
+      });
+      const notePoll = page.request
+        .get(`${url}/api/agent/events?after=${requested.cursor}&timeout=30`, { headers: auth })
+        .then((response) => response.json());
+      await expect(challenged.locator('.discuss-btn')).toBeVisible();
+      await expect(challenged.locator('.review-note-reply-btn')).toBeHidden();
+      await expect(challenged).toHaveAttribute('data-identity', 'same-note');
+      await challenged.locator('.discuss-btn').click();
+      const noteForm = challenged.locator('.review-note-reply');
+      await noteForm.locator('textarea').fill('Why does this need changing?');
+      await page.route('**/api/discussions', (route) =>
+        route.request().method() === 'POST' ? route.fulfill({ status: 409 }) : route.continue(),
+      );
+      await noteForm.locator('button', { hasText: 'Discuss' }).click();
+      await expect(noteForm.locator('.comment-error')).toHaveText('No agent is listening any more');
+      await expect(noteForm.locator('textarea')).toHaveValue('Why does this need changing?');
+      await page.unroute('**/api/discussions');
+      await noteForm.locator('button', { hasText: 'Discuss' }).click();
+      await expect(noteForm).toHaveCount(0);
+      const challengedEvent = (await notePoll).events[0];
+      const expectedNote = { id: 'challenge', body: 'Note to challenge', author: 'Test agent' };
+      expect(challengedEvent).toMatchObject({
+        type: 'discussion',
+        discussion: {
+          file: 'a.txt',
+          line: 1,
+          side: 'new',
+          body: 'Why does this need changing?',
+          note: expectedNote,
+        },
+      });
+      await expect(page.locator('.discussion')).toContainText('Why does this need changing?');
+      const listedChallenge = await (await page.request.get(`${url}/api/discussions`)).json();
+      expect(listedChallenge[0].note).toEqual(expectedNote);
+      expect(
+        await page.evaluate(
+          () =>
+            window.__APP!.reviewNoteManager.getNotes().find((note) => note.id === 'challenge')
+              ?.disposition ?? 'open',
+        ),
+      ).toBe('open');
+      await expect(page.locator('#comment-count')).toHaveText('2');
+      await page.locator('.discussion-delete-btn').click();
+      await expect(page.locator('.discussion')).toHaveCount(0);
+      await expect(challenged.locator('.review-note-reply-btn')).toBeVisible({ timeout: 10000 });
+      await challenged.locator('.review-note-reply-btn').click();
+      await noteForm.locator('textarea').fill('A real reply');
+      await noteForm.locator('button', { hasText: 'Queue' }).click();
+      await expect(page.locator('#comment-count')).toHaveText('3');
+      const replyComment = await page.evaluate(() =>
+        window.__APP!.commentManager.getComments().at(-1),
+      );
+      expect(replyComment).toMatchObject({ body: 'A real reply', in_reply_to: expectedNote });
+      await page.evaluate(() => window.__APP!.commentManager.removeComment(2));
+      await expect(page.locator('#comment-count')).toHaveText('2');
+
       const finalListener = (async () => {
         for (;;) {
           const result = await listen(30);

@@ -1,4 +1,4 @@
-use crate::types::{CommentLine, Side};
+use crate::types::{CommentLine, ReplyTarget, Side};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
@@ -8,6 +8,8 @@ use tokio::time::Instant;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Discussion {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<ReplyTarget>,
     pub id: String,
     #[serde(default)]
     pub created_at: u64,
@@ -25,6 +27,7 @@ pub struct Discussion {
 
 #[derive(Deserialize)]
 pub struct DiscussionRequest {
+    pub note: Option<ReplyTarget>,
     pub file: Option<String>,
     pub line: Option<CommentLine>,
     pub side: Option<Side>,
@@ -38,6 +41,7 @@ pub struct DiscussionRequest {
 impl DiscussionRequest {
     pub fn is_valid(&self) -> bool {
         !self.body.trim().is_empty()
+            && (self.note.is_none() || self.thread_id.is_none())
             && (!self.summarize || self.thread_id.is_some())
             && (self.thread_id.is_some()
                 || (self.file.as_ref().is_some_and(|file| !file.is_empty())
@@ -49,8 +53,17 @@ impl DiscussionRequest {
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AgentEvent {
-    Discussion { discussion: Discussion },
-    DiscussionDeleted { id: String },
+    Discussion {
+        discussion: Discussion,
+    },
+    DiscussionDeleted {
+        id: String,
+    },
+    ReviewRequest {
+        commit_idx: usize,
+        commit_hash: Option<String>,
+        subject: Option<String>,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -138,6 +151,19 @@ impl AgentChannel {
         seq
     }
 
+    pub fn request_review(
+        &self,
+        commit_idx: usize,
+        commit_hash: Option<String>,
+        subject: Option<String>,
+    ) -> u64 {
+        self.push(AgentEvent::ReviewRequest {
+            commit_idx,
+            commit_hash,
+            subject,
+        })
+    }
+
     pub fn add_discussion(&self, req: DiscussionRequest) -> Option<Discussion> {
         if !req.is_valid() {
             return None;
@@ -162,6 +188,7 @@ impl AgentChannel {
             (req.file?, req.line?, req.side?, req.commit_idx)
         };
         let discussion = Discussion {
+            note: req.note,
             id: format!("lrv-discussion-{}", inner.next_seq),
             created_at: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -215,7 +242,7 @@ impl AgentChannel {
             AgentEvent::Discussion { discussion } => {
                 discussion.id != id && discussion.thread_id.as_deref() != Some(id)
             }
-            AgentEvent::DiscussionDeleted { .. } => true,
+            AgentEvent::DiscussionDeleted { .. } | AgentEvent::ReviewRequest { .. } => true,
         });
         inner.deleted.insert(id.to_string());
         self.push_locked(
@@ -244,7 +271,7 @@ impl AgentChannel {
             .iter()
             .filter_map(|event| match &event.event {
                 AgentEvent::Discussion { discussion } => Some(discussion.clone()),
-                AgentEvent::DiscussionDeleted { .. } => None,
+                AgentEvent::DiscussionDeleted { .. } | AgentEvent::ReviewRequest { .. } => None,
             })
             .collect()
     }
@@ -257,7 +284,7 @@ impl AgentChannel {
             inner.busy = false;
             inner.last_activity = Some(Instant::now());
             // Also notify when a note write already attached the agent: the launcher
-            // needs to distinguish its initial review from its first listen poll.
+            // needs to distinguish startup from its first listen poll.
             self.presence.send_replace(AgentPresence {
                 attached: !inner.closed,
                 busy: false,

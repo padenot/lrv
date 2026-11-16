@@ -110,7 +110,7 @@ while [ ! -f "$LRV_TEST_ROOT/exit" ]; do /bin/sleep 0.05; done
     let launch = || {
         client
             .post(format!("{}/api/agent/launch", info.url))
-            .json(&serde_json::json!({"provider":"claude", "initial_review":true}))
+            .json(&serde_json::json!({"provider":"claude"}))
     };
     let mut sse = client
         .get(format!("{}/api/events", info.url))
@@ -143,7 +143,7 @@ while [ ! -f "$LRV_TEST_ROOT/exit" ]; do /bin/sleep 0.05; done
     fs::remove_file(server.root.join("fail")).unwrap();
     assert_eq!(launch().send().await.unwrap().status(), 202);
     event(&mut sse, &mut pending, |v| {
-        v["launch"] == "running" && v["busy"] == true && v["initial_review"] == true
+        v["launch"] == "running" && v["busy"] == true
     })
     .await;
     assert_eq!(launch().send().await.unwrap().status(), 409);
@@ -157,7 +157,7 @@ while [ ! -f "$LRV_TEST_ROOT/exit" ]; do /bin/sleep 0.05; done
         .error_for_status()
         .unwrap();
     event(&mut sse, &mut pending, |v| {
-        v["attached"] == true && v["busy"] == true && v["initial_review"] == true
+        v["attached"] == true && v["busy"] == true
     })
     .await;
     let argv = fs::read_to_string(server.root.join("argv")).unwrap();

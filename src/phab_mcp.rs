@@ -1,4 +1,4 @@
-use crate::types::{CommentLine, ReviewNote, Side};
+use crate::types::{CommentLine, NoteOrigin, ReviewNote, Side};
 use anyhow::Result;
 
 /// Parse the markdown output of `mcp__moz__get_phabricator_revision` into
@@ -94,6 +94,7 @@ fn parse_header(header: &str, body: String) -> Option<ReviewNote> {
         let line = parse_line_spec(num_str)?;
 
         Some(ReviewNote {
+            origin: NoteOrigin::Host,
             id: None,
             file,
             line,

@@ -30,7 +30,7 @@ export class SeriesMethods {
   declare seriesInfo: AppContext['seriesInfo'];
   declare revisionIdFor: (commitIdx: number) => string | null;
   declare publishedRevisionIds: Set<string>;
-  declare updatePublishButton: () => void;
+  declare renderCommitBar: () => void;
   declare currentCommitIdx: number;
   declare commitLoadGeneration: number;
   declare diff: AppContext['diff'];
@@ -105,7 +105,7 @@ export class SeriesMethods {
   }
 
   renderSeriesNav() {
-    this.updatePublishButton();
+    this.renderCommitBar();
     const container = document.getElementById('commit-strip');
     const resizer = document.getElementById('commit-strip-resizer');
     if (!container) {

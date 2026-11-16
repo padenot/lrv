@@ -457,16 +457,128 @@ const clearEl = (node) => {
 	return node;
 };
 //#endregion
+//#region web/src/review-notes.ts
+function acceptedBody(note) {
+	return note.accepted_body ?? note.body;
+}
+var ReviewNoteManager = class {
+	notes;
+	dispositions = {};
+	edits = {};
+	listeners;
+	summaryWaiters = [];
+	currentCommitIdx;
+	constructor() {
+		this.notes = [];
+		this.listeners = [];
+		this.currentCommitIdx = null;
+	}
+	setNotes(notes) {
+		this.notes = notes.map((note) => this.withDisposition(note));
+		this.notifyListeners();
+	}
+	mergeNotes(notes) {
+		let added = false;
+		for (const note of notes) if (!this.notes.some((existing) => this.isSameNote(existing, note))) {
+			this.notes.push(this.withDisposition(note));
+			added = true;
+		}
+		if (added) this.notifyListeners();
+	}
+	addNote(note) {
+		if (this.currentCommitIdx !== null && note.commit_idx === void 0) note = {
+			...note,
+			commit_idx: this.currentCommitIdx
+		};
+		this.notes.push(this.withDisposition(note));
+		this.notifyListeners();
+	}
+	getDispositions() {
+		return { ...this.dispositions };
+	}
+	getEdits() {
+		return { ...this.edits };
+	}
+	applyDispositions(map, edits = {}) {
+		this.dispositions = { ...map };
+		this.edits = { ...edits };
+		this.notes = this.notes.map((note) => this.withDisposition(note));
+		this.notifyListeners();
+	}
+	withDisposition(note) {
+		return {
+			...note,
+			disposition: note.id && this.dispositions[note.id] || "open",
+			accepted_body: note.id ? this.edits[note.id] : void 0
+		};
+	}
+	getNotes() {
+		return this.notes.filter((n) => !n.discussion_id);
+	}
+	getNotesForFile(file) {
+		return this.notes.filter((n) => !n.discussion_id && n.file === file && (this.currentCommitIdx === null || n.commit_idx === this.currentCommitIdx));
+	}
+	getDiscussionReplies(discussionId) {
+		return this.notes.filter((n) => n.discussion_id === discussionId && !n.summary);
+	}
+	nextSummary(rootId) {
+		const isSummary = (note) => note.discussion_id === rootId && note.summary;
+		const known = new Set(this.notes.filter(isSummary));
+		return new Promise((resolve) => {
+			const check = () => {
+				const summary = this.notes.find((note) => isSummary(note) && !known.has(note));
+				if (summary) resolve(summary);
+				return !!summary;
+			};
+			this.summaryWaiters.push(check);
+		});
+	}
+	removeDiscussionReplies(id) {
+		this.notes = this.notes.filter((note) => note.discussion_id !== id);
+	}
+	updateNote(target, patch) {
+		const idx = this.notes.findIndex((note) => this.isSameNote(note, target));
+		if (idx < 0) return;
+		if (target.id && patch.disposition) this.dispositions[target.id] = patch.disposition;
+		const note = this.notes[idx];
+		if (note.id) {
+			if ("accepted_body" in patch) {
+				if (patch.accepted_body === void 0 || patch.accepted_body === note.body) delete this.edits[note.id];
+				else this.edits[note.id] = patch.accepted_body;
+			}
+			if (patch.disposition === "open" || patch.disposition === "ignored") delete this.edits[note.id];
+		}
+		this.notes[idx] = this.withDisposition({
+			...note,
+			...patch
+		});
+		this.notifyListeners();
+	}
+	findNote(file, line, side) {
+		return this.notes.findIndex((n) => !n.discussion_id && n.file === file && n.side === side && commentContainsLine(n, line) && (this.currentCommitIdx === null || n.commit_idx === this.currentCommitIdx));
+	}
+	onChange(listener) {
+		this.listeners.push(listener);
+	}
+	notifyListeners() {
+		this.summaryWaiters = this.summaryWaiters.filter((check) => !check());
+		this.listeners.forEach((l) => l());
+	}
+	isSameNote(a, b) {
+		return a === b || a.id !== void 0 && a.id === b.id;
+	}
+};
+//#endregion
 //#region web/src/comments.ts
 /** A reply with no body only asks the agent to address the note, so it is never published. */
-function isAddressRequest(comment) {
+function isAcceptRequest(comment) {
 	return comment.in_reply_to !== void 0 && !comment.body.trim();
 }
 /** Text to show for a comment, which for a bare address request is a description of it. */
 function commentDisplayText(comment) {
-	if (!isAddressRequest(comment)) return comment.body;
+	if (!isAcceptRequest(comment)) return comment.body;
 	const author = comment.in_reply_to?.author;
-	return `Address review comment${author ? ` from ${author}` : ""}`;
+	return `Accepted review comment${author ? ` from ${author}` : ""}`;
 }
 function commentStartLine(comment) {
 	return Array.isArray(comment.line) ? comment.line[0] : comment.line;
@@ -537,6 +649,31 @@ var CommentManager = class {
 		this.listeners.forEach((l) => l());
 	}
 };
+function replyTarget(note) {
+	const target = { body: note.body };
+	if (note.origin !== void 0) target.origin = note.origin;
+	if (note.id !== void 0) target.id = note.id;
+	if (note.author !== void 0) target.author = note.author;
+	if (note.source_url !== void 0) target.source_url = note.source_url;
+	return target;
+}
+function isForeignHostNote(note, ownRevisions) {
+	return (note.origin ?? "agent") === "host" && ownRevisions?.[note.commit_idx ?? 0] === false;
+}
+/** Generated only when handing accepted notes to Finish or recovery. */
+function acceptedNoteEntries(notes, ownRevisions) {
+	return notes.filter((note) => note.disposition === "accepted" && !isForeignHostNote(note, ownRevisions)).map((note) => ({
+		file: note.file,
+		line: note.line,
+		side: note.side,
+		body: "",
+		...note.commit_idx === void 0 ? {} : { commit_idx: note.commit_idx },
+		in_reply_to: {
+			...replyTarget(note),
+			body: acceptedBody(note)
+		}
+	}));
+}
 //#endregion
 //#region web/src/discussions.ts
 var DiscussionError = class extends Error {
@@ -651,6 +788,13 @@ async function fetchJSON(url, options) {
 		}
 	}
 }
+function requestReview(commitIdx) {
+	return fetchJSON("/api/agent/review", {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ commit_idx: commitIdx })
+	});
+}
 function launchAgent(request) {
 	return fetchJSON("/api/agent/launch", {
 		method: "POST",
@@ -672,13 +816,14 @@ var ConnectAgentMethods = class {
 		const badge = $$1("#agent-status");
 		button.hidden = !available || active;
 		badge.hidden = !available || !active;
-		const busy = state.busy || state.initial_review || !state.attached && state.launch === "running";
+		const busy = state.busy || !state.attached && state.launch === "running";
 		badge.classList.toggle("busy", busy);
 		badge.title = busy ? "The agent is working" : "The agent is waiting for discussion comments";
 		if (active) {
 			$$1("#connect-agent-popover").hidden = true;
 			button.setAttribute("aria-expanded", "false");
 		}
+		this.updateCommitBarVisibility();
 	}
 	setupConnectAgent() {
 		const button = $$1("#connect-agent");
@@ -687,7 +832,6 @@ var ConnectAgentMethods = class {
 		const provider = $$1("#agent-provider");
 		const model = $$1("#agent-model");
 		const effort = $$1("#agent-effort");
-		const review = $$1("#agent-initial-review");
 		const error = $$1("#agent-launch-error");
 		const submit = $$1("#agent-launch-submit");
 		try {
@@ -696,14 +840,12 @@ var ConnectAgentMethods = class {
 				provider.value = saved.provider === "codex" ? "codex" : "claude";
 				model.value = typeof saved.model === "string" ? saved.model : "";
 				effort.value = typeof saved.effort === "string" ? saved.effort : "";
-				review.checked = saved.initial_review !== false;
 			}
 		} catch {}
 		const values = () => ({
 			provider: provider.value,
 			model: model.value.trim(),
-			effort: effort.value.trim(),
-			initial_review: review.checked
+			effort: effort.value.trim()
 		});
 		const save = () => {
 			try {
@@ -745,8 +887,7 @@ var ConnectAgentMethods = class {
 				if (this.agentState === previousState) this.setAgentState({
 					attached: this.agentAttached,
 					busy: true,
-					launch: "running",
-					initial_review: req.initial_review
+					launch: "running"
 				});
 				close();
 			}).catch((reason) => {
@@ -1007,85 +1148,6 @@ var DiscussionMethods = class {
 	}
 };
 //#endregion
-//#region web/src/review-notes.ts
-var ReviewNoteManager = class {
-	notes;
-	listeners;
-	summaryWaiters = [];
-	currentCommitIdx;
-	constructor() {
-		this.notes = [];
-		this.listeners = [];
-		this.currentCommitIdx = null;
-	}
-	setNotes(notes) {
-		this.notes = [...notes];
-		this.notifyListeners();
-	}
-	mergeNotes(notes) {
-		let added = false;
-		for (const note of notes) if (!this.notes.some((existing) => this.isSameNote(existing, note))) {
-			this.notes.push(note);
-			added = true;
-		}
-		if (added) this.notifyListeners();
-	}
-	addNote(note) {
-		if (this.currentCommitIdx !== null && note.commit_idx === void 0) note = {
-			...note,
-			commit_idx: this.currentCommitIdx
-		};
-		this.notes.push(note);
-		this.notifyListeners();
-	}
-	getNotes() {
-		return this.notes.filter((n) => !n.discussion_id);
-	}
-	getNotesForFile(file) {
-		return this.notes.filter((n) => !n.discussion_id && n.file === file && (this.currentCommitIdx === null || n.commit_idx === this.currentCommitIdx));
-	}
-	getDiscussionReplies(discussionId) {
-		return this.notes.filter((n) => n.discussion_id === discussionId && !n.summary);
-	}
-	nextSummary(rootId) {
-		const isSummary = (note) => note.discussion_id === rootId && note.summary;
-		const known = new Set(this.notes.filter(isSummary));
-		return new Promise((resolve) => {
-			const check = () => {
-				const summary = this.notes.find((note) => isSummary(note) && !known.has(note));
-				if (summary) resolve(summary);
-				return !!summary;
-			};
-			this.summaryWaiters.push(check);
-		});
-	}
-	removeDiscussionReplies(id) {
-		this.notes = this.notes.filter((note) => note.discussion_id !== id);
-	}
-	updateNote(target, patch) {
-		const idx = this.notes.findIndex((note) => this.isSameNote(note, target));
-		if (idx < 0) return;
-		this.notes[idx] = {
-			...this.notes[idx],
-			...patch
-		};
-		this.notifyListeners();
-	}
-	findNote(file, line, side) {
-		return this.notes.findIndex((n) => !n.discussion_id && n.file === file && n.side === side && commentContainsLine(n, line) && (this.currentCommitIdx === null || n.commit_idx === this.currentCommitIdx));
-	}
-	onChange(listener) {
-		this.listeners.push(listener);
-	}
-	notifyListeners() {
-		this.summaryWaiters = this.summaryWaiters.filter((check) => !check());
-		this.listeners.forEach((l) => l());
-	}
-	isSameNote(a, b) {
-		return a === b || a.id !== void 0 && a.id === b.id;
-	}
-};
-//#endregion
 //#region web/src/live-events.ts
 function startLiveEvents(app) {
 	const source = new EventSource("/api/events");
@@ -1174,19 +1236,36 @@ function buildCommentDraftKey(context, diff, seriesInfo) {
 }
 async function loadCommentDraft(key) {
 	const db = await openDraftDb();
-	if (!db) return [];
+	if (!db) return {
+		comments: [],
+		dispositions: {},
+		note_edits: {}
+	};
 	try {
 		const record = await runTransaction(db, "readonly", (store) => store.get(key));
-		if (!record || record.schemaVersion !== 1 || !Array.isArray(record.comments)) return [];
-		return sanitizeComments(record.comments);
+		if (!record || record.schemaVersion !== 1 || !Array.isArray(record.comments)) return {
+			comments: [],
+			dispositions: {},
+			note_edits: {}
+		};
+		return {
+			comments: sanitizeComments(record.comments),
+			dispositions: sanitizeDispositions(record.dispositions),
+			note_edits: sanitizeEdits(record.note_edits)
+		};
 	} catch (error) {
 		console.warn("Failed to load persisted review comments:", error);
-		return [];
+		return {
+			comments: [],
+			dispositions: {},
+			note_edits: {}
+		};
 	}
 }
-async function saveCommentDraft(key, comments) {
+async function saveCommentDraft(key, comments, dispositions = {}, noteEdits = {}) {
 	const sanitized = sanitizeComments(comments);
-	if (sanitized.length === 0) {
+	const edits = sanitizeEdits(noteEdits);
+	if (sanitized.length === 0 && !Object.values(dispositions).some((value) => value !== "open") && Object.keys(edits).length === 0) {
 		await clearCommentDraft(key);
 		return;
 	}
@@ -1196,7 +1275,9 @@ async function saveCommentDraft(key, comments) {
 		key,
 		schemaVersion: 1,
 		savedAt: Date.now(),
-		comments: sanitized
+		comments: sanitized,
+		dispositions,
+		note_edits: edits
 	};
 	try {
 		await runTransaction(db, "readwrite", (store) => store.put(record));
@@ -1204,12 +1285,21 @@ async function saveCommentDraft(key, comments) {
 		console.warn("Failed to persist review comments:", error);
 	}
 }
-async function syncCommentDraftToServer(comments) {
+async function syncCommentDraftToServer(comments, notes = []) {
 	try {
 		const res = await fetch("/api/comments/sync", {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ comments })
+			body: JSON.stringify({
+				comments,
+				notes: notes.filter((note) => note.id && note.disposition && note.disposition !== "open").map((note) => ({
+					note: {
+						...note,
+						body: acceptedBody(note)
+					},
+					disposition: note.disposition
+				}))
+			})
 		});
 		if (!res.ok) showCommentStoreError(await res.text() || `lrv answered with HTTP ${res.status}.`);
 	} catch (error) {
@@ -1290,6 +1380,14 @@ function sanitizeComment(value) {
 		body: raw.body
 	};
 	if (typeof raw.commit_idx === "number" && Number.isInteger(raw.commit_idx)) comment.commit_idx = raw.commit_idx;
+	if (raw.in_reply_to && typeof raw.in_reply_to.body === "string") {
+		const { body, id, author, source_url, origin } = raw.in_reply_to;
+		comment.in_reply_to = { body };
+		if (origin === "agent" || origin === "host") comment.in_reply_to.origin = origin;
+		if (typeof id === "string") comment.in_reply_to.id = id;
+		if (typeof author === "string") comment.in_reply_to.author = author;
+		if (typeof source_url === "string") comment.in_reply_to.source_url = source_url;
+	}
 	return comment;
 }
 function isCommentLine(value) {
@@ -1309,6 +1407,14 @@ function hashString(value) {
 		hash = Math.imul(hash, 16777619) >>> 0;
 	}
 	return hash.toString(16).padStart(8, "0");
+}
+function sanitizeDispositions(value) {
+	if (!value || typeof value !== "object") return {};
+	return Object.fromEntries(Object.entries(value).filter(([, disposition]) => disposition === "open" || disposition === "accepted" || disposition === "ignored"));
+}
+function sanitizeEdits(value) {
+	if (!value || typeof value !== "object") return {};
+	return Object.fromEntries(Object.entries(value).filter(([, body]) => typeof body === "string"));
 }
 //#endregion
 //#region web/src/ui-signals.ts
@@ -11864,6 +11970,102 @@ var NavigationMethods = class {
 	}
 };
 //#endregion
+//#region web/src/commit-bar-methods.ts
+var CommitBarMethods = class {
+	pendingReviewState = null;
+	reviewError = null;
+	reviewErrorTimer;
+	setupRequestReview() {
+		this.pendingReviewState = null;
+		document.getElementById("request-review").addEventListener("click", () => {
+			this.pendingReviewState = this.agentState;
+			this.reviewError = null;
+			window.clearTimeout(this.reviewErrorTimer);
+			this.updateRequestReviewButton();
+			requestReview(this.currentCommitIdx).catch((error) => {
+				const message = error instanceof Error ? error.message : String(error);
+				this.pendingReviewState = null;
+				this.reviewError = /\b409\b/.test(message) ? "The agent is no longer connected." : /\b403\b/.test(message) ? "Review requests are disabled in public mode." : "Could not send the review request. Try again.";
+				this.updateRequestReviewButton();
+				this.reviewErrorTimer = window.setTimeout(() => {
+					this.reviewError = null;
+					this.updateRequestReviewButton();
+				}, 3e3);
+			});
+		});
+	}
+	updateRequestReviewButton() {
+		const button = document.getElementById("request-review");
+		button.hidden = !this.agentState.attached || !!this.context?.is_public;
+		button.disabled = this.agentState.busy || this.pendingReviewState === this.agentState;
+		button.textContent = this.reviewError ? "Request failed" : "Request Review";
+		button.title = this.reviewError ?? (button.disabled ? "The agent is working" : "");
+		button.setAttribute("aria-label", this.reviewError ?? `Request review of commit ${this.currentCommitIdx + 1}`);
+	}
+	/** The current commit's identity; while a commit loads, this.diff still holds the previous one. */
+	currentCommitInfo() {
+		const commit = (this.seriesInfo?.is_series ? this.seriesInfo.commits[this.currentCommitIdx] : void 0) ?? this.diff;
+		return {
+			hash: commit?.commit_hash ?? "",
+			message: commit?.commit_message ?? "",
+			id: this.revisionIdFor(this.currentCommitIdx)
+		};
+	}
+	/** Agent state only affects visibility, so it needn't rebuild the bar's contents. */
+	updateCommitBarVisibility() {
+		const bar = document.getElementById("commit-bar");
+		if (bar) {
+			const { hash, message, id } = this.currentCommitInfo();
+			bar.hidden = !hash && !message && !id && !this.agentAttached;
+		}
+		this.updateRequestReviewButton();
+	}
+	renderCommitBar() {
+		const bar = document.getElementById("commit-bar");
+		const context = document.getElementById("commit-bar-context");
+		if (!bar || !context) return;
+		const { hash, message, id } = this.currentCommitInfo();
+		bar.hidden = !hash && !message && !id && !this.agentAttached;
+		context.replaceChildren();
+		if (this.seriesInfo?.is_series) {
+			const nav = el("div", { className: "commit-bar-nav" });
+			const previous = el("button", {
+				className: "commit-bar-nav-btn",
+				text: "‹",
+				attrs: { "aria-label": "Previous commit" }
+			});
+			previous.disabled = this.currentCommitIdx === 0;
+			previous.onclick = () => this.previousCommit();
+			const next = el("button", {
+				className: "commit-bar-nav-btn",
+				text: "›",
+				attrs: { "aria-label": "Next commit" }
+			});
+			next.disabled = this.currentCommitIdx === this.seriesInfo.commits.length - 1;
+			next.onclick = () => this.nextCommit();
+			nav.append(previous, el("span", {
+				className: "commit-bar-position",
+				text: `${this.currentCommitIdx + 1}/${this.seriesInfo.commits.length}`
+			}), next);
+			context.append(nav);
+		}
+		const title = el("span", { attrs: {
+			id: "commit-bar-title",
+			title: message
+		} });
+		appendLinkifiedText(title, message.split("\n")[0] ?? "");
+		context.append(title, el("span", {
+			attrs: {
+				id: "commit-bar-hash",
+				title: hash
+			},
+			text: hash.slice(0, 8)
+		}), el("span", { attrs: { id: "commit-revision" } }));
+		this.updatePublishButton();
+		this.updateRequestReviewButton();
+	}
+};
+//#endregion
 //#region web/src/modal.ts
 function openModal({ title, titleId, modalClass = "", footerContent = [], onKeydown }) {
 	const overlay = el("div", { className: "submit-modal-overlay" });
@@ -11993,98 +12195,6 @@ var CommitMethods = class {
 			autoResize();
 		}, 0);
 	}
-	showCommitMessagePopover(anchorEl, message, rev) {
-		if (this._commitPopoverEl) {
-			this._commitPopoverEl.remove();
-			this._commitPopoverEl = null;
-			return;
-		}
-		const pop = el("div", { className: "commit-popover" });
-		const first = message.split("\n")[0] || "(no message)";
-		const title = el("div", {
-			className: "commit-popover-title",
-			text: rev ? `${rev}: ${first}` : first
-		});
-		const body = el("div", { className: "commit-popover-body" });
-		appendLinkifiedText(body, message);
-		pop.appendChild(title);
-		pop.appendChild(body);
-		const form = el("div");
-		form.style.marginTop = "10px";
-		const ta = el("textarea");
-		ta.rows = 3;
-		ta.style.width = "100%";
-		ta.placeholder = "Comment on this commit…";
-		const controls = el("div");
-		controls.style.display = "flex";
-		controls.style.gap = "8px";
-		controls.style.marginTop = "6px";
-		const addBtn = el("button", {
-			className: "btn-secondary",
-			text: "Add Comment"
-		});
-		const cancelBtn = el("button", {
-			className: "btn-secondary",
-			text: "Cancel"
-		});
-		controls.appendChild(addBtn);
-		controls.appendChild(cancelBtn);
-		form.appendChild(ta);
-		form.appendChild(controls);
-		pop.appendChild(form);
-		document.body.appendChild(pop);
-		const r = anchorEl.getBoundingClientRect();
-		const pad = 6;
-		let top = r.bottom + pad;
-		let left = r.left;
-		const vw = window.innerWidth;
-		const vh = window.innerHeight;
-		const rect = pop.getBoundingClientRect();
-		if (left + rect.width + pad > vw) left = Math.max(pad, vw - rect.width - pad);
-		if (top + rect.height + pad > vh) top = Math.max(pad, r.top - rect.height - pad);
-		pop.style.left = `${Math.max(pad, left)}px`;
-		pop.style.top = `${Math.max(pad, top)}px`;
-		const onDocClick = (e) => {
-			const target = e.target;
-			if (!target || !pop.contains(target) && target !== anchorEl) cleanup();
-		};
-		const onEsc = (e) => {
-			if (e.key === "Escape") cleanup();
-		};
-		const cleanup = () => {
-			if (this._commitPopoverEl) {
-				this._commitPopoverEl.remove();
-				this._commitPopoverEl = null;
-			}
-			document.removeEventListener("click", onDocClick, true);
-			document.removeEventListener("keydown", onEsc, true);
-		};
-		this._commitPopoverEl = pop;
-		setTimeout(() => {
-			document.addEventListener("click", onDocClick, true);
-			document.addEventListener("keydown", onEsc, true);
-		}, 0);
-		cancelBtn.onclick = (e) => {
-			e.preventDefault();
-			cleanup();
-		};
-		addBtn.onclick = (e) => {
-			e.preventDefault();
-			const body = ta.value.trim();
-			if (!body) {
-				ta.focus();
-				return;
-			}
-			const comment = {
-				file: "(commit)",
-				line: 1,
-				side: "new",
-				body
-			};
-			this.commentManager.addComment(comment);
-			cleanup();
-		};
-	}
 	loadCommitView() {
 		this.resetFileView();
 		this.currentFileIsCommit = true;
@@ -12099,7 +12209,6 @@ var CommitMethods = class {
 			const viewEl = el("div", { className: "commit-view" });
 			viewEl.style.padding = "16px";
 			viewEl.style.overflow = "auto";
-			viewEl.style.height = "calc(100vh - 48px)";
 			host.appendChild(viewEl);
 			this._commitViewEl = viewEl;
 		}
@@ -12537,14 +12646,17 @@ var ReviewNoteMethods = class {
 		if (!this.editor) return;
 		const file = this.files[this.currentFileIndex];
 		if (!file) return;
-		const notes = [...this.reviewNoteManager.getNotesForFile(file.path).map((note) => ({
-			file: note.file,
-			line: note.line,
-			side: note.side,
-			height: () => this.reviewNoteHeightPx(note.body),
-			hover: note.body,
-			node: this.buildReviewNoteNode(note)
-		})), ...this.discussionManager.getForFile(file.path).map((discussion) => {
+		const notes = [...this.reviewNoteManager.getNotesForFile(file.path).map((note) => {
+			const node = this.buildReviewNoteNode(note);
+			return {
+				file: note.file,
+				line: note.line,
+				side: note.side,
+				height: () => this.reviewNoteHeightPx(acceptedBody(note)) + (node.querySelector(".review-note-reply") ? 200 : 0) + (node.querySelector(".review-note-original:not([hidden])") ? this.reviewNoteHeightPx(note.body) : 0),
+				hover: acceptedBody(note),
+				node
+			};
+		}), ...this.discussionManager.getForFile(file.path).map((discussion) => {
 			const node = this.buildDiscussionNode(discussion);
 			return {
 				file: discussion.file,
@@ -12585,7 +12697,7 @@ var ReviewNoteMethods = class {
 					heightInPx: note.height()
 				};
 				const id = accessor.addZone(zone);
-				if (note.discussion) note.node.addEventListener("discussion-layout", () => {
+				note.node.addEventListener(note.discussion ? "discussion-layout" : "note-layout", () => {
 					zone.heightInPx = note.height();
 					targetEditor.changeViewZones((zones) => zones.layoutZone(id));
 				});
@@ -12682,18 +12794,55 @@ var ReviewNoteMethods = class {
 			meta.appendChild(link);
 		}
 		const body = el("div", { className: "review-note-body" });
-		appendLinkifiedText(body, note.body);
+		appendLinkifiedText(body, acceptedBody(note));
 		box.append(meta, body);
+		if (note.accepted_body !== void 0) {
+			const original = el("div", { className: "review-note-body review-note-original" });
+			original.hidden = true;
+			appendLinkifiedText(original, note.body);
+			const toggle = el("button", {
+				className: "btn-secondary review-note-btn",
+				text: "Show original"
+			});
+			toggle.addEventListener("click", () => {
+				original.hidden = !original.hidden;
+				toggle.textContent = original.hidden ? "Show original" : "Hide original";
+				box.dispatchEvent(new Event("note-layout"));
+			});
+			meta.appendChild(toggle);
+			box.appendChild(original);
+		}
 		if (!note.read_only) box.appendChild(this.buildReviewNoteActions(note));
 		return box;
 	}
 	buildReviewNoteActions(note) {
 		const actions = el("div", { className: "review-note-actions" });
 		const disposition = note.disposition ?? "open";
-		if (disposition === "addressed" || disposition === "ignored") {
+		if (note.id && this.publishedNoteIds.has(note.id)) {
+			actions.appendChild(el("span", {
+				className: "review-note-status review-note-status-accepted",
+				text: "Published"
+			}));
+			return actions;
+		}
+		const foreignHost = isForeignHostNote(note, this.context.own_revisions);
+		const reply = el("button", {
+			className: `btn-secondary review-note-btn${foreignHost ? "" : " review-note-reply-btn"}`,
+			text: "Reply"
+		});
+		reply.addEventListener("click", (event) => {
+			event.preventDefault();
+			event.stopPropagation();
+			this.showReviewNoteReplyForm(actions, note);
+		});
+		if (foreignHost) {
+			actions.appendChild(reply);
+			return actions;
+		}
+		if (disposition === "accepted" || disposition === "ignored") {
 			actions.appendChild(el("span", {
 				className: `review-note-status review-note-status-${disposition}`,
-				text: disposition === "addressed" ? "Queued for agent" : "Ignored"
+				text: disposition === "accepted" ? note.accepted_body === void 0 ? "Accepted" : "Accepted (edited)" : "Ignored"
 			}));
 			const undo = el("button", {
 				className: "btn-secondary review-note-btn",
@@ -12702,29 +12851,29 @@ var ReviewNoteMethods = class {
 			undo.addEventListener("click", (event) => {
 				event.preventDefault();
 				event.stopPropagation();
-				this.unqueueReviewNote(note);
 				this.reviewNoteManager.updateNote(note, { disposition: "open" });
 			});
 			actions.appendChild(undo);
+			if (disposition === "accepted" && note.accepted_body !== void 0 && (note.origin ?? "agent") === "agent") actions.appendChild(this.buildReviewNoteEditButton(actions, note));
 			return actions;
 		}
-		const address = el("button", {
+		const accept = el("button", {
 			className: "btn-primary review-note-btn",
-			text: "Address"
+			text: "Accept"
 		});
-		address.addEventListener("click", (event) => {
+		accept.addEventListener("click", (event) => {
 			event.preventDefault();
 			event.stopPropagation();
-			this.queueReviewNoteForAgent(note);
+			this.reviewNoteManager.updateNote(note, { disposition: "accepted" });
 		});
-		const reply = el("button", {
-			className: "btn-secondary review-note-btn",
-			text: "Reply"
+		const discuss = el("button", {
+			className: "btn-secondary review-note-btn discuss-btn",
+			text: "Discuss"
 		});
-		reply.addEventListener("click", (event) => {
+		discuss.addEventListener("click", (event) => {
 			event.preventDefault();
 			event.stopPropagation();
-			this.showReviewNoteReplyForm(actions, note);
+			this.showReviewNoteReplyForm(actions, note, true);
 		});
 		const ignore = el("button", {
 			className: "btn-secondary review-note-btn",
@@ -12735,26 +12884,89 @@ var ReviewNoteMethods = class {
 			event.stopPropagation();
 			this.reviewNoteManager.updateNote(note, { disposition: "ignored" });
 		});
-		actions.append(address, reply, ignore);
+		actions.appendChild(accept);
+		if ((note.origin ?? "agent") === "agent") actions.appendChild(this.buildReviewNoteEditButton(actions, note));
+		actions.append(ignore, reply, discuss);
 		return actions;
 	}
-	showReviewNoteReplyForm(actions, note) {
+	buildReviewNoteEditButton(actions, note) {
+		const edit = el("button", {
+			className: "btn-secondary review-note-btn",
+			text: "Edit"
+		});
+		edit.addEventListener("click", (event) => {
+			event.preventDefault();
+			event.stopPropagation();
+			if (actions.querySelector(".review-note-reply")) return;
+			const targetEditor = this.isStacked ? null : note.side === "old" ? this.editor?.getOriginalEditor() : this.editor?.getModifiedEditor();
+			const scrollTop = targetEditor?.getScrollTop();
+			const restoreScroll = () => {
+				if (targetEditor && scrollTop !== void 0) targetEditor.setScrollTop(scrollTop);
+			};
+			const form = el("div", { className: "review-note-reply" });
+			const textarea = el("textarea", { className: "review-note-reply-text" });
+			textarea.value = acceptedBody(note);
+			const controls = el("div", { className: "review-note-reply-actions" });
+			const accept = el("button", {
+				className: "btn-primary review-note-btn",
+				text: "Accept"
+			});
+			const cancel = el("button", {
+				className: "btn-secondary review-note-btn",
+				text: "Cancel"
+			});
+			const save = () => {
+				const text = textarea.value.trim();
+				if (!text) {
+					textarea.focus();
+					return;
+				}
+				this.reviewNoteManager.updateNote(note, {
+					disposition: "accepted",
+					accepted_body: text
+				});
+				restoreScroll();
+			};
+			accept.addEventListener("click", save);
+			textarea.addEventListener("keydown", (event) => {
+				if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+					event.preventDefault();
+					event.stopPropagation();
+					save();
+				}
+			});
+			cancel.addEventListener("click", () => {
+				form.remove();
+				actions.closest(".review-note")?.dispatchEvent(new Event("note-layout"));
+				restoreScroll();
+			});
+			controls.append(accept, cancel);
+			form.append(textarea, controls);
+			actions.appendChild(form);
+			actions.closest(".review-note")?.dispatchEvent(new Event("note-layout"));
+			textarea.focus();
+		});
+		return edit;
+	}
+	showReviewNoteReplyForm(actions, note, discuss = false) {
 		if (actions.querySelector(".review-note-reply")) return;
 		const form = el("div", { className: "review-note-reply" });
 		const textarea = el("textarea", {
 			className: "review-note-reply-text",
-			attrs: { placeholder: "Instructions for the agent..." }
+			attrs: { placeholder: discuss ? "Question about this note..." : "Reply to this note..." }
 		});
 		const controls = el("div", { className: "review-note-reply-actions" });
 		const save = el("button", {
 			className: "btn-primary review-note-btn",
-			text: "Queue"
+			text: discuss ? "Discuss" : "Queue"
 		});
+		const error = el("div", { className: "comment-error" });
+		error.hidden = true;
 		const cancel = el("button", {
 			className: "btn-secondary review-note-btn",
 			text: "Cancel"
 		});
-		save.addEventListener("click", (event) => {
+		save.addEventListener("click", async (event) => {
 			event.preventDefault();
 			event.stopPropagation();
 			const instruction = textarea.value.trim();
@@ -12762,7 +12974,26 @@ var ReviewNoteMethods = class {
 				textarea.focus();
 				return;
 			}
-			this.queueReviewNoteForAgent(note, instruction);
+			if (save.disabled) return;
+			save.disabled = true;
+			error.hidden = true;
+			try {
+				if (discuss) await this.discussionManager.send({
+					file: note.file,
+					line: note.line,
+					side: note.side,
+					body: instruction,
+					...note.commit_idx === void 0 ? {} : { commit_idx: note.commit_idx },
+					note: replyTarget(note)
+				});
+				else this.queueReviewNoteForAgent(note, instruction);
+				form.remove();
+			} catch (err) {
+				error.textContent = err instanceof DiscussionError && err.status === 409 ? "No agent is listening any more" : "Failed to send discussion. Try again.";
+				error.hidden = false;
+			} finally {
+				save.disabled = false;
+			}
 		});
 		cancel.addEventListener("click", (event) => {
 			event.preventDefault();
@@ -12770,7 +13001,7 @@ var ReviewNoteMethods = class {
 			form.remove();
 		});
 		controls.append(save, cancel);
-		form.append(textarea, controls);
+		form.append(error, textarea, controls);
 		actions.appendChild(form);
 		textarea.focus();
 	}
@@ -12779,31 +13010,19 @@ var ReviewNoteMethods = class {
 			file: note.file,
 			line: note.line,
 			side: note.side,
-			body: instruction ?? "",
+			body: instruction,
 			in_reply_to: replyTarget(note)
 		};
 		this.commentManager.addComment(note.commit_idx === void 0 ? comment : {
 			...comment,
 			commit_idx: note.commit_idx
 		});
-		this.reviewNoteManager.updateNote(note, { disposition: "addressed" });
-	}
-	unqueueReviewNote(note) {
-		const index = this.commentManager.comments.findIndex(({ in_reply_to: target }) => target !== void 0 && target.id === note.id && target.author === note.author && target.body === note.body);
-		if (index >= 0) this.commentManager.removeComment(index);
 	}
 	reviewNoteHeightPx(body) {
 		const visualLines = body.split("\n").reduce((total, line) => total + Math.max(1, Math.ceil(line.length / 86)), 0);
 		return Math.max(124, Math.min(460, 88 + visualLines * 18));
 	}
 };
-function replyTarget(note) {
-	const target = { body: note.body };
-	if (note.id !== void 0) target.id = note.id;
-	if (note.author !== void 0) target.author = note.author;
-	if (note.source_url !== void 0) target.source_url = note.source_url;
-	return target;
-}
 //#endregion
 //#region web/src/dialog-methods.ts
 function commentKey(comment) {
@@ -13045,7 +13264,8 @@ var DialogMethods = class {
 	}
 	async showSubmitConfirmation() {
 		const submissionComments = this.commentManager.getComments().filter((c) => !this.publishedCommentKeys.has(commentKey(c)));
-		const comments = submissionComments;
+		const accepted = acceptedNoteEntries(this.reviewNoteManager.getNotes().filter((note) => !note.id || !this.publishedNoteIds.has(note.id)), this.context.own_revisions);
+		const comments = [...submissionComments, ...accepted];
 		const submitLabel = "Finish";
 		let submit = () => {};
 		const { overlay, modal, body, footer, close } = openModal({
@@ -13066,13 +13286,14 @@ var DialogMethods = class {
 				}
 			}
 		});
-		if (submissionComments.length === 0) {
+		if (comments.length === 0) {
 			const noCommentsMsg = el("p", { text: "No comments. Finish to approve this review." });
 			noCommentsMsg.style.padding = "20px";
 			noCommentsMsg.style.textAlign = "center";
 			noCommentsMsg.style.color = "var(--text-secondary)";
 			body.appendChild(noCommentsMsg);
 		}
+		if (accepted.length) body.appendChild(el("p", { text: `${accepted.length} accepted ${accepted.length === 1 ? "note" : "notes"} will be sent` }));
 		const discussionCount = this.discussionManager.getOpenThreadCount();
 		if (discussionCount) body.appendChild(el("p", {
 			className: "submit-discussion-warning",
@@ -13267,6 +13488,18 @@ var DialogMethods = class {
 };
 //#endregion
 //#region web/src/publish-dialog-methods.ts
+const SVG_NS = "http://www.w3.org/2000/svg";
+/** A small "opens elsewhere" arrow, drawn in the link's current colour. */
+function externalLinkIcon() {
+	const svg = document.createElementNS(SVG_NS, "svg");
+	svg.setAttribute("class", "external-link-icon");
+	svg.setAttribute("viewBox", "0 0 12 12");
+	svg.setAttribute("aria-hidden", "true");
+	const path = document.createElementNS(SVG_NS, "path");
+	path.setAttribute("d", "M7 1h4v4M11 1 5.5 6.5M9.5 7.5V11h-8.5V2.5H4.5");
+	svg.appendChild(path);
+	return svg;
+}
 const REVISION_STATE_CLASSES = {
 	accepted: "revision-accepted",
 	"needs-review": "revision-needs-review",
@@ -13297,7 +13530,9 @@ var PublishDialogMethods = class {
 	updatePublishButton() {
 		const button = document.getElementById("publish-commit");
 		if (!button) return;
+		const chip = document.getElementById("commit-revision");
 		const id = this.revisionIdFor(this.currentCommitIdx);
+		if (chip) chip.hidden = !id;
 		button.hidden = !id;
 		if (!id) return;
 		const status = this.phabRevisionStatus;
@@ -13306,11 +13541,25 @@ var PublishDialogMethods = class {
 		const error = this.phabValidationError ?? status?.error;
 		const verifying = !status && !error;
 		button.classList.toggle("verifying", verifying);
-		for (const state of Object.values(REVISION_STATE_CLASSES)) button.classList.remove(state);
+		for (const state of Object.values(REVISION_STATE_CLASSES)) chip?.classList.remove(state);
 		const stateClass = REVISION_STATE_CLASSES[revision?.status ?? ""];
-		if (stateClass) button.classList.add(stateClass);
-		const stateName = revision?.status_name ? ` · ${revision.status_name}` : "";
-		button.textContent = published ? `Published ${id} ✓` : `Publish ${id}${stateName}`;
+		if (stateClass) chip?.classList.add(stateClass);
+		if (chip) {
+			const label = revision?.url ? el("a", {
+				className: "commit-revision-link",
+				text: id,
+				attrs: {
+					href: revision.url,
+					target: "_blank",
+					rel: "noopener noreferrer"
+				}
+			}) : document.createTextNode(id);
+			if (revision?.url) label.appendChild(externalLinkIcon());
+			chip.replaceChildren(label);
+			if (revision?.status_name) chip.append(` · ${revision.status_name}`);
+		}
+		button.textContent = published ? "Published ✓" : "Publish";
+		button.setAttribute("aria-label", published ? `Published ${id}` : `Publish ${id}`);
 		button.disabled = verifying || published || !!error || !revision || !revision.publishable;
 		button.title = verifying ? `Verifying ${id}…` : error ?? revision?.reason ?? "";
 	}
@@ -13355,9 +13604,20 @@ var PublishDialogMethods = class {
 			text: status.error
 		}));
 		const originals = this.commentManager.getComments().filter((c) => !this.publishedCommentKeys.has(commentKey(c)));
+		const accepted = this.reviewNoteManager.getNotes().filter((note) => note.disposition === "accepted" && note.id && !this.publishedNoteIds.has(note.id));
+		const publishableNotes = (id) => {
+			const revision = status.revisions.find((r) => r.id === id);
+			return accepted.filter((note) => !revision.own && (note.origin ?? "agent") === "agent" && revision.commit_idxs.includes(note.commit_idx ?? 0));
+		};
 		const forRevision = (id) => {
 			const revision = status.revisions.find((r) => r.id === id);
-			return originals.filter((c) => revision.commit_idxs.includes(c.commit_idx ?? 0) && !isAddressRequest(c));
+			return [...originals.filter((c) => revision.commit_idxs.includes(c.commit_idx ?? 0)), ...publishableNotes(id).map((note) => ({
+				file: note.file,
+				line: note.line,
+				side: note.side,
+				body: acceptedBody(note),
+				...note.commit_idx === void 0 ? {} : { commit_idx: note.commit_idx }
+			}))];
 		};
 		const panel = el("div", { className: "publish-panel" });
 		body.appendChild(panel);
@@ -13366,7 +13626,7 @@ var PublishDialogMethods = class {
 			panel.appendChild(el("p", { text: "Revision unavailable." }));
 			return;
 		}
-		const unassigned = originals.filter((c) => revision.commit_idxs.includes(c.commit_idx ?? 0) && isAddressRequest(c));
+		const unassigned = accepted.filter((note) => revision.commit_idxs.includes(note.commit_idx ?? 0) && revision.own);
 		let rendering = 0;
 		const render = () => {
 			const generation = ++rendering;
@@ -13486,7 +13746,9 @@ var PublishDialogMethods = class {
 					if (!response.ok) throw new Error((await response.text()).trim() || `HTTP ${response.status}`);
 					revision.published = true;
 					comments.forEach((c) => this.publishedCommentKeys.add(commentKey(c)));
+					publishableNotes(revision.id).forEach((note) => this.publishedNoteIds.add(note.id));
 					this.publishedRevisionIds.add(revision.id);
+					this.renderReviewNotes();
 					this.renderSeriesNav();
 					close();
 				} catch (error) {
@@ -13561,7 +13823,7 @@ var SeriesMethods = class {
 		return row;
 	}
 	renderSeriesNav() {
-		this.updatePublishButton();
+		this.renderCommitBar();
 		const container = document.getElementById("commit-strip");
 		const resizer = document.getElementById("commit-strip-resizer");
 		if (!container) return;
@@ -14414,6 +14676,7 @@ function applyMixin(TargetClass, MethodsClass) {
 var MonacoApp = class {
 	agentAttached = false;
 	publishedCommentKeys = /* @__PURE__ */ new Set();
+	publishedNoteIds = /* @__PURE__ */ new Set();
 	publishedRevisionIds = /* @__PURE__ */ new Set();
 	publishStates = /* @__PURE__ */ new Map();
 	phabStatus = null;
@@ -14451,7 +14714,6 @@ var MonacoApp = class {
 	originalModel;
 	modifiedModel;
 	_eagerPrefetchStarted;
-	_commitPopoverEl;
 	currentFileIsCommit;
 	_commitViewEl;
 	collapsedDirs;
@@ -14460,6 +14722,7 @@ var MonacoApp = class {
 	currentCommitIdx;
 	commitLoadGeneration;
 	commentDraftKey;
+	commentDraftRestorePending = true;
 	commentDraftWrite;
 	agentState = {
 		attached: false,
@@ -14502,7 +14765,6 @@ var MonacoApp = class {
 		this.originalModel = null;
 		this.modifiedModel = null;
 		this._eagerPrefetchStarted = false;
-		this._commitPopoverEl = null;
 		this.currentFileIsCommit = false;
 		this._commitViewEl = null;
 		this.collapsedDirs = /* @__PURE__ */ new Set();
@@ -14523,6 +14785,7 @@ var MonacoApp = class {
 			this.renderFileList();
 		});
 		this.reviewNoteManager.onChange(() => {
+			this.persistComments();
 			this.renderReviewNotes();
 			this.renderFileList();
 			if (this.currentFileIsCommit) this.loadCommitView();
@@ -14647,31 +14910,52 @@ var MonacoApp = class {
 		if (!this.commentDraftKey) return;
 		const key = this.commentDraftKey;
 		const comments = this.commentManager.getComments();
-		this.commentDraftWrite = this.commentDraftWrite.catch(() => void 0).then(() => saveCommentDraft(key, comments)).then(() => this.reviewSubmitted ? void 0 : syncCommentDraftToServer(comments));
+		const dispositions = this.reviewNoteManager.getDispositions();
+		const edits = this.reviewNoteManager.getEdits();
+		const notes = this.reviewNoteManager.getNotes();
+		const restorePending = this.commentDraftRestorePending;
+		this.commentDraftWrite = this.commentDraftWrite.catch(() => void 0).then(() => restorePending ? void 0 : saveCommentDraft(key, comments, dispositions, edits)).then(() => this.reviewSubmitted ? void 0 : syncCommentDraftToServer(comments, notes));
 	}
 	async restorePersistedComments() {
 		if (!this.commentDraftKey) return;
-		const comments = await loadCommentDraft(this.commentDraftKey);
-		if (comments.length === 0) return;
+		const draft = await loadCommentDraft(this.commentDraftKey);
+		const dispositions = { ...draft.dispositions };
+		const comments = draft.comments.filter((comment) => {
+			if (!isAcceptRequest(comment)) return true;
+			const id = comment.in_reply_to?.id;
+			if (id && dispositions[id] === void 0) dispositions[id] = "accepted";
+			return false;
+		});
+		const dispositionCount = Object.values(dispositions).filter((value) => value !== "open").length;
+		if (comments.length === 0 && dispositionCount === 0) {
+			this.commentDraftRestorePending = false;
+			this.persistComments();
+			return;
+		}
 		const banner = document.getElementById("restore-banner");
 		const msg = document.getElementById("restore-banner-msg");
 		const yesBtn = document.getElementById("restore-yes-btn");
 		const noBtn = document.getElementById("restore-no-btn");
 		if (!banner || !msg || !yesBtn || !noBtn) {
+			this.commentDraftRestorePending = false;
+			this.reviewNoteManager.applyDispositions(dispositions, draft.note_edits);
 			this.commentManager.setComments(comments);
 			return;
 		}
-		msg.textContent = `${comments.length} comment${comments.length === 1 ? "" : "s"} from a previous session — restore?`;
+		msg.textContent = `${comments.length} comment${comments.length === 1 ? "" : "s"}${dispositionCount ? ` and ${dispositionCount} note dispositions` : ""} from a previous session — restore?`;
 		banner.style.display = "";
 		const close = () => {
 			banner.style.display = "none";
 		};
 		yesBtn.onclick = () => {
+			this.commentDraftRestorePending = false;
+			this.reviewNoteManager.applyDispositions(dispositions, draft.note_edits);
 			this.commentManager.setComments(comments);
 			close();
 		};
 		noBtn.onclick = () => {
-			this.clearPersistedComments();
+			this.commentDraftRestorePending = false;
+			this.clearPersistedComments().then(() => this.persistComments());
 			close();
 		};
 	}
@@ -14753,6 +15037,7 @@ var MonacoApp = class {
 		});
 	}
 	renderProjectInfo() {
+		this.renderCommitBar();
 		const container = $$1("#project-info");
 		if (!container) return;
 		clearEl(container);
@@ -14781,25 +15066,6 @@ var MonacoApp = class {
 				text: this.context.git_branch
 			}));
 		}
-		if (this.diff && (this.diff.commit_message || this.diff.commit_hash)) {
-			container.appendChild(el("span", {
-				className: "project-info-separator",
-				text: "·"
-			}));
-			const mm = el("span", { className: "commit-message" });
-			const rev = this.diff.commit_hash ? `${this.diff.commit_hash.substring(0, 7)}: ` : "";
-			const firstLine = (this.diff.commit_message ?? "").split("\n")[0];
-			appendLinkifiedText(mm, rev + firstLine);
-			if (this.diff.commit_message) mm.title = this.diff.commit_message;
-			mm.addEventListener("click", (ev) => {
-				if (ev.target?.closest("a")) {
-					ev.stopPropagation();
-					return;
-				}
-				this.showCommitMessagePopover(ev.currentTarget, this.diff?.commit_message ?? "", this.diff?.commit_hash ?? "");
-			});
-			container.appendChild(mm);
-		}
 	}
 	setupUI() {
 		$$1("#file-list")?.addEventListener("click", (e) => {
@@ -14826,6 +15092,7 @@ var MonacoApp = class {
 			this.showSettingsModal();
 		});
 		$$1("#help-btn")?.addEventListener("click", () => this.showKeyboardHelp());
+		this.setupRequestReview();
 		this.setupConnectAgent();
 		$$1("#submit-review")?.addEventListener("click", () => {
 			this.showSubmitConfirmation();
@@ -14894,6 +15161,7 @@ applyMixin(MonacoApp, SeriesMethods);
 applyMixin(MonacoApp, StackedViewMethods);
 applyMixin(MonacoApp, PublishDialogMethods);
 applyMixin(MonacoApp, ConnectAgentMethods);
+applyMixin(MonacoApp, CommitBarMethods);
 //#endregion
 //#region web/src/main.ts
 document.title = "lrv — Loading…";

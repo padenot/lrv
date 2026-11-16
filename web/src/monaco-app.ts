@@ -1,5 +1,5 @@
 import { $, clearEl, el } from './dom';
-import { CommentManager } from './comments';
+import { isAcceptRequest, CommentManager } from './comments';
 import { DiscussionManager, type Discussion } from './discussions';
 import { ConnectAgentMethods } from './connect-agent-methods';
 import { DiscussionMethods } from './discussion-methods';
@@ -17,13 +17,13 @@ import {
 } from './comment-draft-storage';
 import { CUSTOM_THEMES } from './themes';
 import { markAppReady } from './ui-signals';
-import { appendLinkifiedText } from './linkify';
 import { sortDiffFiles } from './file-order';
 
 import { FileDataMethods } from './file-data-methods';
 import { FileListMethods } from './file-list-methods';
 import { FileLoadingMethods } from './file-loading-methods';
 import { NavigationMethods } from './navigation-methods';
+import { CommitBarMethods } from './commit-bar-methods';
 import { CommitMethods } from './commit-methods';
 import { CommentsUIMethods } from './comments-ui-methods';
 import { ReviewNoteMethods } from './review-note-methods';
@@ -66,6 +66,7 @@ function applyMixin(TargetClass: Constructor, MethodsClass: Constructor) {
 export class MonacoApp {
   agentAttached = false;
   publishedCommentKeys = new Set<string>();
+  publishedNoteIds = new Set<string>();
   publishedRevisionIds = new Set<string>();
   publishStates = new Map<string, PublishState>();
   phabStatus: Promise<PhabStatus> | null = null;
@@ -113,7 +114,6 @@ export class MonacoApp {
   originalModel: editor.ITextModel | null;
   modifiedModel: editor.ITextModel | null;
   _eagerPrefetchStarted: boolean;
-  _commitPopoverEl: HTMLElement | null;
   currentFileIsCommit: boolean;
   _commitViewEl: HTMLElement | null;
   collapsedDirs: Set<string>;
@@ -122,6 +122,7 @@ export class MonacoApp {
   currentCommitIdx: number;
   commitLoadGeneration: number;
   commentDraftKey: string | null;
+  private commentDraftRestorePending = true;
   commentDraftWrite: Promise<void>;
   declare updateUI: () => void;
   declare renderReviewNotes: () => void;
@@ -131,7 +132,6 @@ export class MonacoApp {
   declare nextCommit: () => void;
   declare previousCommit: () => void;
   declare loadFile: (index: number) => Promise<void>;
-  declare showCommitMessagePopover: (anchorEl: HTMLElement, message: string, rev: string) => void;
   declare loadCommitView: () => void;
   declare showSettingsModal: () => void;
   declare showKeyboardHelp: () => void;
@@ -153,6 +153,8 @@ export class MonacoApp {
   agentState: AgentState = { attached: false, busy: false, launch: 'idle' };
   declare setAgentState: (state: AgentState) => void;
   declare setupConnectAgent: () => void;
+  declare setupRequestReview: () => void;
+  declare updateCommitBarVisibility: () => void;
 
   constructor() {
     this.commentManager = new CommentManager();
@@ -186,7 +188,6 @@ export class MonacoApp {
     this.originalModel = null;
     this.modifiedModel = null;
     this._eagerPrefetchStarted = false;
-    this._commitPopoverEl = null;
     this.currentFileIsCommit = false;
     this._commitViewEl = null;
     this.collapsedDirs = new Set();
@@ -210,6 +211,7 @@ export class MonacoApp {
       this.renderFileList();
     });
     this.reviewNoteManager.onChange(() => {
+      this.persistComments();
       this.renderReviewNotes();
       this.renderFileList();
       if (this.currentFileIsCommit) {
@@ -401,10 +403,18 @@ export class MonacoApp {
 
     const key = this.commentDraftKey;
     const comments = this.commentManager.getComments();
+    const dispositions = this.reviewNoteManager.getDispositions();
+    const edits = this.reviewNoteManager.getEdits();
+    const notes = this.reviewNoteManager.getNotes();
+    // Until the restore banner is answered, the IndexedDB draft is the previous session's work,
+    // so leave it alone. The SQLite session belongs to this run and is always safe to update.
+    const restorePending = this.commentDraftRestorePending;
     this.commentDraftWrite = this.commentDraftWrite
       .catch(() => undefined)
-      .then(() => saveCommentDraft(key, comments))
-      .then(() => (this.reviewSubmitted ? undefined : syncCommentDraftToServer(comments)));
+      .then(() =>
+        restorePending ? undefined : saveCommentDraft(key, comments, dispositions, edits),
+      )
+      .then(() => (this.reviewSubmitted ? undefined : syncCommentDraftToServer(comments, notes)));
   }
 
   private async restorePersistedComments() {
@@ -412,8 +422,22 @@ export class MonacoApp {
       return;
     }
 
-    const comments = await loadCommentDraft(this.commentDraftKey);
-    if (comments.length === 0) {
+    const draft = await loadCommentDraft(this.commentDraftKey);
+    const dispositions = { ...draft.dispositions };
+    const comments = draft.comments.filter((comment) => {
+      if (!isAcceptRequest(comment)) {
+        return true;
+      }
+      const id = comment.in_reply_to?.id;
+      if (id && dispositions[id] === undefined) {
+        dispositions[id] = 'accepted';
+      }
+      return false;
+    });
+    const dispositionCount = Object.values(dispositions).filter((value) => value !== 'open').length;
+    if (comments.length === 0 && dispositionCount === 0) {
+      this.commentDraftRestorePending = false;
+      this.persistComments();
       return;
     }
 
@@ -422,11 +446,13 @@ export class MonacoApp {
     const yesBtn = document.getElementById('restore-yes-btn');
     const noBtn = document.getElementById('restore-no-btn');
     if (!banner || !msg || !yesBtn || !noBtn) {
+      this.commentDraftRestorePending = false;
+      this.reviewNoteManager.applyDispositions(dispositions, draft.note_edits);
       this.commentManager.setComments(comments);
       return;
     }
 
-    msg.textContent = `${comments.length} comment${comments.length === 1 ? '' : 's'} from a previous session — restore?`;
+    msg.textContent = `${comments.length} comment${comments.length === 1 ? '' : 's'}${dispositionCount ? ` and ${dispositionCount} note dispositions` : ''} from a previous session — restore?`;
     banner.style.display = '';
 
     const close = () => {
@@ -434,11 +460,14 @@ export class MonacoApp {
     };
 
     yesBtn.onclick = () => {
+      this.commentDraftRestorePending = false;
+      this.reviewNoteManager.applyDispositions(dispositions, draft.note_edits);
       this.commentManager.setComments(comments);
       close();
     };
     noBtn.onclick = () => {
-      void this.clearPersistedComments();
+      this.commentDraftRestorePending = false;
+      void this.clearPersistedComments().then(() => this.persistComments());
       close();
     };
   }
@@ -558,7 +587,10 @@ export class MonacoApp {
     });
   }
 
+  declare renderCommitBar: () => void;
+
   renderProjectInfo() {
+    this.renderCommitBar();
     const container = $('#project-info');
     if (!container) {
       return;
@@ -569,7 +601,6 @@ export class MonacoApp {
       container.appendChild(
         el('span', { className: 'project-info-value', text: t, attrs: { title: t } }),
       );
-      // fall through to optionally show commit message as well
     }
     const wd = this.context.working_directory ?? '';
     const dirName = wd.split('/').pop() || wd;
@@ -581,31 +612,6 @@ export class MonacoApp {
       container.appendChild(
         el('span', { className: 'project-info-value git-branch', text: this.context.git_branch }),
       );
-    }
-
-    // Optional commit message from diff (when reviewing full commits)
-    if (this.diff && (this.diff.commit_message || this.diff.commit_hash)) {
-      container.appendChild(el('span', { className: 'project-info-separator', text: '·' }));
-      const mm = el('span', { className: 'commit-message' });
-      const rev = this.diff.commit_hash ? `${this.diff.commit_hash.substring(0, 7)}: ` : '';
-      const firstLine = (this.diff.commit_message ?? '').split('\n')[0];
-      appendLinkifiedText(mm, rev + firstLine);
-      if (this.diff.commit_message) {
-        mm.title = this.diff.commit_message;
-      }
-      mm.addEventListener('click', (ev) => {
-        const target = ev.target as Element | null;
-        if (target?.closest('a')) {
-          ev.stopPropagation();
-          return;
-        }
-        this.showCommitMessagePopover(
-          ev.currentTarget as HTMLElement,
-          this.diff?.commit_message ?? '',
-          this.diff?.commit_hash ?? '',
-        );
-      });
-      container.appendChild(mm);
     }
   }
 
@@ -647,6 +653,7 @@ export class MonacoApp {
     // Help button
     $('#help-btn')?.addEventListener('click', () => this.showKeyboardHelp());
 
+    this.setupRequestReview();
     this.setupConnectAgent();
 
     $('#submit-review')?.addEventListener('click', () => {
@@ -745,3 +752,5 @@ applyMixin(MonacoApp, StackedViewMethods);
 applyMixin(MonacoApp, PublishDialogMethods);
 
 applyMixin(MonacoApp, ConnectAgentMethods);
+
+applyMixin(MonacoApp, CommitBarMethods);

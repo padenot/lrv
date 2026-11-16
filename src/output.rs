@@ -281,6 +281,23 @@ pub fn format_listen(poll: &Poll, format: &OutputFormat) -> String {
                             }
                             output.push('\n');
                         }
+                        AgentEvent::ReviewRequest {
+                            commit_idx,
+                            commit_hash,
+                            subject,
+                        } => {
+                            let hash = commit_hash
+                                .as_ref()
+                                .map(|hash| format!(" ({hash})"))
+                                .unwrap_or_default();
+                            let subject = subject
+                                .as_ref()
+                                .map(|subject| format!(" {subject}"))
+                                .unwrap_or_default();
+                            output.push_str(&format!(
+                                "Review request for commit {commit_idx}{hash}{subject}\n\n"
+                            ));
+                        }
                         AgentEvent::DiscussionDeleted { id } => {
                             output.push_str(&format!("Discussion {id} was deleted by the reviewer; stop work on it and don't reply.\n\n"));
                         }

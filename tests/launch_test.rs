@@ -18,7 +18,6 @@ fn request_validation_and_provider_arguments() {
                 provider: provider.into(),
                 model: if options { "model-1.2:tag[fast]" } else { "" }.into(),
                 effort: if options { "high" } else { "" }.into(),
-                initial_review: true,
             };
             req.validate().unwrap();
             let ctx = context();
@@ -31,7 +30,13 @@ fn request_validation_and_provider_arguments() {
             );
             let args: Vec<_> = command.get_args().map(|s| s.to_str().unwrap()).collect();
             let mut expected = if provider == "claude" {
-                vec!["-p", "the prompt"]
+                vec![
+                    "-p",
+                    "the prompt",
+                    "--output-format",
+                    "stream-json",
+                    "--verbose",
+                ]
             } else {
                 vec!["exec"]
             };
@@ -44,6 +49,7 @@ fn request_validation_and_provider_arguments() {
             }
             if provider == "claude" {
                 expected.extend([
+                    "--strict-mcp-config",
                     "--tools",
                     "Bash,Read,Grep,Glob",
                     "--allowedTools",
@@ -65,7 +71,6 @@ fn request_validation_and_provider_arguments() {
             }
             assert_eq!(args, expected);
             let prompt = build_prompt(
-                &req,
                 &[
                     PathBuf::from("/tmp/commit-0.diff"),
                     PathBuf::from("/tmp/commit-1.diff"),
@@ -73,7 +78,7 @@ fn request_validation_and_provider_arguments() {
                 &[],
             );
             assert!(prompt.contains("commit_idx 1: file /tmp/commit-1.diff"));
-            assert!(prompt.contains("First review the supplied diff files"));
+            assert!(prompt.contains("Immediately run lrv --listen"));
             assert!(prompt.contains("--listen-timeout 540"));
             assert!(prompt.contains(lrv::skill::EMBEDDED_SKILL));
         }
@@ -89,4 +94,41 @@ fn request_validation_and_provider_arguments() {
     }
     req.provider = "bash".into();
     assert!(req.validate().is_err());
+}
+
+#[test]
+fn stream_json_events_are_summarized() {
+    use lrv::launch::summarize_event;
+    let ev = |v: serde_json::Value| summarize_event(&v);
+    assert_eq!(
+        ev(serde_json::json!({"type":"system","subtype":"init","model":"m1"})),
+        ["started (m1)"]
+    );
+    assert_eq!(
+        ev(serde_json::json!({"type":"assistant","message":{"content":[
+            {"type":"text","text":"Listening\nnow"},
+            {"type":"tool_use","name":"Bash","input":{"command":"lrv --listen"}}
+        ]}})),
+        ["Listening now", "Bash: lrv --listen"]
+    );
+    assert!(ev(serde_json::json!({"type":"user","message":{"content":[
+        {"type":"tool_result","content":"ok"}
+    ]}}))
+    .is_empty());
+    assert_eq!(
+        ev(serde_json::json!({"type":"user","message":{"content":[
+            {"type":"tool_result","is_error":true,"content":"boom"}
+        ]}})),
+        ["tool error: boom"]
+    );
+    assert_eq!(
+        ev(serde_json::json!({"type":"result","subtype":"success","result":"done"})),
+        ["finished (success): done"]
+    );
+    assert_eq!(ev(serde_json::json!({"type":"stream_event"})).len(), 0);
+    let long = "x".repeat(400);
+    let out = ev(
+        serde_json::json!({"type":"assistant","message":{"content":[{"type":"text","text":long}]}}),
+    );
+    assert_eq!(out[0].chars().count(), 301);
 }

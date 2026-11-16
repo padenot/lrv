@@ -88,6 +88,7 @@ fn make_jj_state(
             comment_store_error: None,
             phabricator_available: false,
             phabricator_revisions: Vec::new(),
+            own_revisions: Vec::new(),
         }),
         old_caches: Arc::new(vec![tokio::sync::Mutex::new(
             std::collections::HashMap::new(),
@@ -367,6 +368,7 @@ fn make_state_from_patch(repo_dir: &std::path::Path, patch: &str) -> lrv::server
             comment_store_error: None,
             phabricator_available: false,
             phabricator_revisions: Vec::new(),
+            own_revisions: Vec::new(),
         }),
         old_caches: Arc::new(vec![tokio::sync::Mutex::new(
             std::collections::HashMap::new(),

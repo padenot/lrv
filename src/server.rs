@@ -807,6 +807,7 @@ pub fn create_router(state: AppState, enable_trace: bool) -> Router {
         .route("/api/comment", post(add_comment))
         .route("/api/comments/sync", post(sync_comments))
         .route("/api/events", get(events))
+        .route("/api/agent/review", post(request_review))
         .route(
             "/api/discussions",
             get(get_discussions).post(add_discussion),
@@ -1446,6 +1447,8 @@ async fn add_comment(State(state): State<AppState>, Json(comment): Json<Comment>
 #[derive(Deserialize)]
 struct CommentSync {
     comments: Vec<Comment>,
+    #[serde(default)]
+    notes: Vec<crate::store::StoredNoteDisposition>,
 }
 
 // Mirror the browser's comment drafts into the SQLite store on every change so
@@ -1454,14 +1457,20 @@ async fn sync_comments(
     State(state): State<AppState>,
     Json(payload): Json<CommentSync>,
 ) -> (StatusCode, String) {
-    if payload.comments.iter().any(|c| !c.is_valid()) {
+    if payload.comments.iter().any(|c| !c.is_valid())
+        || payload.notes.iter().any(|entry| {
+            entry.note.id.as_ref().is_none_or(|id| id.is_empty())
+                || !entry.note.line.is_valid()
+                || entry.note.discussion_id.is_some()
+        })
+    {
         return (StatusCode::BAD_REQUEST, String::new());
     }
     // A missing store is reported once, at startup and in the page banner.
     let Some(store) = state.store.clone() else {
         return (StatusCode::OK, String::new());
     };
-    if let Err(e) = store.replace_comments(&payload.comments) {
+    if let Err(e) = store.replace_draft(&payload.comments, &payload.notes) {
         // Comments are synced on every edit: warn once rather than per keystroke.
         static WARNED: AtomicBool = AtomicBool::new(false);
         if !WARNED.swap(true, Ordering::Relaxed) {
@@ -1531,6 +1540,36 @@ async fn delete_discussion(
         state.notes_version.send_modify(|version| *version += 1);
     }
     StatusCode::NO_CONTENT
+}
+
+#[derive(Deserialize)]
+struct ReviewRequest {
+    commit_idx: usize,
+}
+
+async fn request_review(State(state): State<AppState>, Json(req): Json<ReviewRequest>) -> Response {
+    if state.context.is_public {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let Some(diff) = state.diffs.get(req.commit_idx) else {
+        return StatusCode::BAD_REQUEST.into_response();
+    };
+    if !state.agent.attached() {
+        return StatusCode::CONFLICT.into_response();
+    }
+    let seq = state.agent.request_review(
+        req.commit_idx,
+        diff.commit_hash.clone(),
+        diff.commit_message
+            .as_deref()
+            .and_then(|message| message.lines().next())
+            .map(str::to_owned),
+    );
+    (
+        StatusCode::ACCEPTED,
+        Json(serde_json::json!({ "seq": seq })),
+    )
+        .into_response()
 }
 
 async fn add_discussion(
@@ -1960,5 +1999,55 @@ async fn publish_phabricator(
             };
             (status, message)
         }
+    }
+}
+
+#[cfg(test)]
+mod discussion_note_tests {
+    use super::DiscussionRequest;
+    use crate::agent::AgentChannel;
+    use serde_json::json;
+    use std::time::Duration;
+
+    fn request() -> serde_json::Value {
+        json!({
+            "file": "a.rs", "line": [2, 4], "side": "old", "body": "Why this finding?",
+            "note": {"id": "note-1", "body": "Finding", "author": "Reviewer", "origin": "host", "source_url": "https://example.com/note"}
+        })
+    }
+
+    #[test]
+    fn note_context_is_valid_only_on_root_discussions() {
+        let mut value = request();
+        assert!(serde_json::from_value::<DiscussionRequest>(value.clone())
+            .unwrap()
+            .is_valid());
+        value["thread_id"] = json!("lrv-discussion-1");
+        assert!(!serde_json::from_value::<DiscussionRequest>(value.clone())
+            .unwrap()
+            .is_valid());
+        value.as_object_mut().unwrap().remove("note");
+        assert!(serde_json::from_value::<DiscussionRequest>(value)
+            .unwrap()
+            .is_valid());
+    }
+
+    #[tokio::test]
+    async fn note_context_survives_storage_listing_and_agent_events() {
+        let channel = AgentChannel::new(Duration::from_secs(300));
+        let request = request();
+        let discussion = channel
+            .add_discussion(serde_json::from_value(request.clone()).unwrap())
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(&discussion).unwrap()["note"],
+            request["note"]
+        );
+        assert_eq!(
+            serde_json::to_value(channel.discussions()).unwrap()[0]["note"],
+            request["note"]
+        );
+        let events = serde_json::to_value(channel.wait(0, Duration::ZERO).await).unwrap();
+        assert_eq!(events["events"][0]["discussion"]["note"], request["note"]);
     }
 }

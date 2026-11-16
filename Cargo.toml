@@ -31,6 +31,7 @@ mime_guess = "2.0"
 moz-cli-version-check = "0.2.3"
 reqwest = { version = "0.13", default-features = false, features = ["form", "json", "rustls"] }
 rusqlite = { version = "0.40", features = ["bundled"] }
+sha1_smol = "1.0.1"
 
 [[bin]]
 name = "lrv"

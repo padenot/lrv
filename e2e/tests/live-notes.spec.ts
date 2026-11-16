@@ -21,6 +21,7 @@ for (const stacked of [false, true]) {
       ...process.env,
       LRV_SERVER_DIR: serverDir,
       LRV_COMMENT_DB: path.join(root, 'comments.db'),
+      LRV_AGENT_LEASE_SECS: '1',
       XDG_CONFIG_HOME: path.join(root, 'config'),
     };
     let child: ChildProcess | null = null;
@@ -111,6 +112,9 @@ for (const stacked of [false, true]) {
       await expect(page.getByText(second.body, { exact: true })).toHaveCount(0);
       await page.locator('.review-note-reply button', { hasText: 'Queue' }).click();
       await expect(page.getByText(second.body, { exact: true })).toBeVisible();
+      await expect(page.locator('#comment-count')).toHaveText('1');
+      await page.locator('.review-note').first().locator('button', { hasText: 'Accept' }).click();
+      await expect(page.locator('#comment-count')).toHaveText('1');
       await expect(page.locator('.review-note button', { hasText: 'Undo' })).toHaveCount(1);
       expect(await add([first, second])).toEqual({ added: 0, skipped: 2 });
       await expect(page.locator('.review-note button', { hasText: 'Undo' })).toHaveCount(1);

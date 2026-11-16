@@ -39,7 +39,7 @@ fn drafts_round_trip_through_sqlite() {
         comment("src/a.rs", CommentLine::Single(12), "first", None),
         comment("src/b.rs", CommentLine::Range((3, 7)), "second", Some(2)),
     ];
-    store.replace_comments(&comments).unwrap();
+    store.replace_draft(&comments, &[]).unwrap();
 
     let (session, stored) = CommentStore::load_session(&path, None).unwrap().unwrap();
     assert_eq!(session.comment_count, 2);
@@ -59,6 +59,7 @@ fn replies_keep_the_note_they_answer() {
     let path = db_path("reply");
     let store = CommentStore::open(&path, meta()).unwrap();
     let note = ReplyTarget {
+        origin: lrv::types::NoteOrigin::Agent,
         id: Some("42".to_string()),
         author: Some("alice".to_string()),
         body: "Why?".to_string(),
@@ -68,7 +69,7 @@ fn replies_keep_the_note_they_answer() {
         in_reply_to: Some(note.clone()),
         ..comment("src/a.rs", CommentLine::Single(3), "", None)
     };
-    store.replace_comments(&[address]).unwrap();
+    store.replace_draft(&[address], &[]).unwrap();
 
     let (_, stored) = CommentStore::load_session(&path, None).unwrap().unwrap();
     assert_eq!(stored[0].body, "");
@@ -118,7 +119,10 @@ fn databases_from_older_versions_are_migrated() {
     assert_eq!(stored[0].in_reply_to, None);
 
     store
-        .replace_comments(&[comment("src/a.rs", CommentLine::Single(1), "new", None)])
+        .replace_draft(
+            &[comment("src/a.rs", CommentLine::Single(1), "new", None)],
+            &[],
+        )
         .unwrap();
     // Opening again must not try to add the column twice.
     CommentStore::open(&path, meta()).unwrap();
@@ -130,13 +134,16 @@ fn each_sync_replaces_the_previous_state() {
     let store = CommentStore::open(&path, meta()).unwrap();
 
     store
-        .replace_comments(&[
-            comment("a", CommentLine::Single(1), "one", None),
-            comment("b", CommentLine::Single(2), "two", None),
-        ])
+        .replace_draft(
+            &[
+                comment("a", CommentLine::Single(1), "one", None),
+                comment("b", CommentLine::Single(2), "two", None),
+            ],
+            &[],
+        )
         .unwrap();
     store
-        .replace_comments(&[comment("a", CommentLine::Single(1), "edited", None)])
+        .replace_draft(&[comment("a", CommentLine::Single(1), "edited", None)], &[])
         .unwrap();
 
     let (_, stored) = CommentStore::load_session(&path, None).unwrap().unwrap();
@@ -151,11 +158,11 @@ fn submitted_comments_are_frozen() {
     let store = CommentStore::open(&path, meta()).unwrap();
 
     let comments = vec![comment("a", CommentLine::Single(1), "keep me", None)];
-    store.replace_comments(&comments).unwrap();
+    store.replace_draft(&comments, &[]).unwrap();
     store.finish(&comments, Some("looks good")).unwrap();
 
     // The UI clears its drafts after submitting; that must not erase the record.
-    store.replace_comments(&[]).unwrap();
+    store.replace_draft(&[], &[]).unwrap();
 
     let (session, stored) = CommentStore::load_session(&path, None).unwrap().unwrap();
     assert!(session.submitted_at.is_some());
@@ -171,7 +178,7 @@ fn sessions_are_only_created_once_comments_exist() {
     assert!(CommentStore::list_sessions(&path, 10).unwrap().is_empty());
 
     store
-        .replace_comments(&[comment("a", CommentLine::Single(1), "x", None)])
+        .replace_draft(&[comment("a", CommentLine::Single(1), "x", None)], &[])
         .unwrap();
     assert_eq!(CommentStore::list_sessions(&path, 10).unwrap().len(), 1);
 }
@@ -190,7 +197,7 @@ fn sessions_are_loadable_by_id() {
     for body in ["older", "newer"] {
         let store = CommentStore::open(&path, meta()).unwrap();
         store
-            .replace_comments(&[comment("a", CommentLine::Single(1), body, None)])
+            .replace_draft(&[comment("a", CommentLine::Single(1), body, None)], &[])
             .unwrap();
     }
 
@@ -224,4 +231,96 @@ fn open_default_reports_unusable_locations() {
     std::env::remove_var("LRV_COMMENT_DB");
     assert!(failures.is_empty());
     assert_eq!(opened.map(|(_, path)| path), Some(usable));
+}
+
+#[test]
+fn dispositions_create_sessions_replace_and_freeze() {
+    use lrv::store::{NoteDisposition, StoredNoteDisposition};
+    let path = db_path("dispositions");
+    let store = CommentStore::open(&path, meta()).unwrap();
+    store.replace_draft(&[], &[]).unwrap();
+    assert!(CommentStore::list_sessions(&path, 10).unwrap().is_empty());
+    let entry = StoredNoteDisposition {
+        note: serde_json::from_value(serde_json::json!({
+            "id": "note-1", "file": "a.rs", "line": 2, "side": "new", "body": "Fix this"
+        }))
+        .unwrap(),
+        disposition: NoteDisposition::Accepted,
+    };
+    store
+        .replace_draft(&[], std::slice::from_ref(&entry))
+        .unwrap();
+    assert_eq!(CommentStore::list_sessions(&path, 10).unwrap().len(), 1);
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    let (state, note): (String, String) = conn
+        .query_row(
+            "SELECT disposition, note FROM note_dispositions",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(state, "accepted");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&note).unwrap()["body"],
+        "Fix this"
+    );
+    store
+        .replace_draft(
+            &[],
+            &[StoredNoteDisposition {
+                disposition: NoteDisposition::Ignored,
+                ..entry
+            }],
+        )
+        .unwrap();
+    store.finish(&[], None).unwrap();
+    store.replace_draft(&[], &[]).unwrap();
+    let state: String = conn
+        .query_row("SELECT disposition FROM note_dispositions", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(state, "ignored");
+}
+
+#[test]
+fn accepted_note_recovery_matches_legacy_output() {
+    use lrv::output::{format_output, OutputFormat};
+    use lrv::store::{NoteDisposition, StoredNoteDisposition};
+    let path = db_path("accepted-output");
+    let store = CommentStore::open(&path, meta()).unwrap();
+    let note = serde_json::from_value(serde_json::json!({
+        "id": "note-1", "file": "a.rs", "line": [2, 3], "side": "old", "body": "Fix this", "author": "Alice"
+    })).unwrap();
+    store
+        .replace_draft(
+            &[],
+            &[StoredNoteDisposition {
+                note,
+                disposition: NoteDisposition::Accepted,
+            }],
+        )
+        .unwrap();
+    let (session, recovered) = CommentStore::load_session(&path, None).unwrap().unwrap();
+    assert_eq!(session.comment_count, 1);
+    let legacy: Comment = serde_json::from_value(serde_json::json!({
+        "file": "a.rs", "line": [2, 3], "side": "old", "body": "",
+        "in_reply_to": { "id": "note-1", "body": "Fix this", "author": "Alice" }
+    }))
+    .unwrap();
+    for format in [OutputFormat::Json, OutputFormat::Text] {
+        assert_eq!(
+            format_output(recovered.clone(), &format, &[], false, None),
+            format_output(vec![legacy.clone()], &format, &[], false, None)
+        );
+    }
+    store.finish(&recovered, None).unwrap();
+    assert_eq!(
+        CommentStore::load_session(&path, None)
+            .unwrap()
+            .unwrap()
+            .1
+            .len(),
+        1
+    );
 }

@@ -82,10 +82,26 @@ pub struct Comment {
     pub in_reply_to: Option<ReplyTarget>,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum NoteOrigin {
+    #[default]
+    Agent,
+    Host,
+}
+
+impl NoteOrigin {
+    fn is_agent(&self) -> bool {
+        *self == Self::Agent
+    }
+}
+
 /// A copy of the review note a comment responds to, so the comment can be understood without
 /// the notes it was written against (e.g. by `--recover`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ReplyTarget {
+    #[serde(default, skip_serializing_if = "NoteOrigin::is_agent")]
+    pub origin: NoteOrigin,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -97,6 +113,8 @@ pub struct ReplyTarget {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReviewNote {
+    #[serde(default, skip_serializing_if = "NoteOrigin::is_agent")]
+    pub origin: NoteOrigin,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -179,6 +197,7 @@ impl ReviewNote {
         commit_idx: Option<usize>,
     ) -> Self {
         Self {
+            origin: NoteOrigin::Host,
             id,
             file: "(commit)".to_string(),
             line: CommentLine::Single(1),
@@ -249,6 +268,9 @@ pub struct ProjectContext {
     /// doesn't wait for Conduit validation to show it.
     #[serde(default)]
     pub phabricator_revisions: Vec<Option<String>>,
+    /// Per-commit ownership; unknown ownership preserves all review note actions.
+    #[serde(default)]
+    pub own_revisions: Vec<Option<bool>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -281,6 +303,8 @@ pub struct PrInfo {
     pub number: u64,
     pub title: Option<String>,
     pub url: Option<String>,
+    #[serde(default)]
+    pub author: Option<String>,
 }
 
 /// Which pull request each commit of the series belongs to.
@@ -364,6 +388,7 @@ mod tests {
 
     fn note(file: &str, commit_idx: Option<usize>) -> ReviewNote {
         ReviewNote {
+            origin: NoteOrigin::Agent,
             id: None,
             file: file.to_string(),
             line: CommentLine::Single(1),

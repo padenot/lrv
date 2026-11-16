@@ -15,10 +15,12 @@ async fn detects_the_earliest_open_pr_per_commit() {
         &script,
         r#"#!/bin/bash
 case "$*" in
-  *"commits/c1/pulls"*) echo '[["o/r",7,"First","u7"]]' ;;
-  *"commits/c2/pulls"*) echo '[["o/r",9,"Second","u9"],["o/r",7,"First","u7"]]' ;;
+  *"commits/c1/pulls"*) echo '[["o/r",7,"First","u7","alice"]]' ;;
+  *"commits/c2/pulls"*) echo '[["o/r",9,"Second","u9","bob"],["o/r",7,"First","u7","alice"]]' ;;
   *"commits/c3/pulls"*) echo '[]' ;;
-  *"commits/c4/pulls"*) echo '[["o/r",9,"Second","u9"]]' ;;
+  *"commits/c4/pulls"*) echo '[["o/r",9,"Second","u9","bob"]]' ;;
+  "api user --jq .login") echo 'alice' ;;
+  "api repos/o/r/pulls/7 --jq "*) echo '["First","u7","alice"]' ;;
   *) exit 1 ;;
 esac
 "#,
@@ -37,7 +39,29 @@ esac
         .collect();
 
     let remotes = [("o".to_string(), "r".to_string())];
+    assert_eq!(lrv::github::viewer_login().await.as_deref(), Some("alice"));
+    let info = lrv::github::fetch_pr_info(&lrv::github::PrRef {
+        owner: "o".into(),
+        repo: "r".into(),
+        number: 7,
+    })
+    .await;
+    assert_eq!(info.author.as_deref(), Some("alice"));
+    assert_eq!(info.title.as_deref(), Some("First"));
     let groups = detect_prs_in(&remotes, &diffs).await;
+    assert_eq!(groups[0].0.author.as_deref(), Some("alice"));
+    assert_eq!(
+        lrv::github::is_own_pr(&groups[0].0, Some("Alice")),
+        Some(true)
+    );
+    assert_eq!(
+        lrv::github::is_own_pr(&groups[0].0, Some("bob")),
+        Some(false)
+    );
+    assert_eq!(lrv::github::is_own_pr(&groups[0].0, None), None);
+    let mut unknown = groups[0].0.clone();
+    unknown.author = None;
+    assert_eq!(lrv::github::is_own_pr(&unknown, Some("alice")), None);
     let got: Vec<_> = groups
         .iter()
         .map(|(pr, commits)| (pr.number, pr.title.as_deref(), commits.clone()))

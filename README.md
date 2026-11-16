@@ -109,6 +109,7 @@ Notes:
   `lrv`, write its findings as review notes JSON, and pass that file with
   `--review-notes-file`. The author can then Address, Reply, or Ignore those
   local reviewer comments in the UI before finishing.
+- Edit accepts an agent note with replacement text for Finish, Publish and recovery; Undo discards the edit and restores the original.
 - Phabricator notes use `PHABRICATOR_API_KEY` or `PHABRICATOR_TOKEN`, falling back to the token in `~/.arcrc` (written by `moz-phab install-certificate`); set
   `PHABRICATOR_BASE_URL` or pass `--phab-base-url` for non-Mozilla instances.
 - `lrv --version` prints the current version and can warn if a newer release exists.
@@ -164,7 +165,7 @@ Delete removes a discussion thread and its agent replies; the agent receives a
 Agent replies are notes with `discussion_id` naming the root discussion
 (use `thread_id` from a follow-up event). Send them with `--add-notes`, not
 `--review-notes-file`. Finish ends the review: comments go to the terminal
-that started lrv, and a pending listener reports `ended`. Attached agents only handle discussions and never receive the final review.
+that started lrv, and a pending listener reports `ended`. Attached agents handle review requests and discussions and never receive the final review.
 
 When Phabricator is available, **Publish D123** beside Finish follows the selected
 commit. It opens a dialog for that revision's verdict and overall comment.
@@ -176,15 +177,18 @@ Convert discussions to comments before Finish to keep them.
 
 Click **Connect Agent** beside Finish to start a local `claude` or `codex`
 CLI (installed and authenticated on the server machine). Choose a provider and
-optionally a model and effort; empty fields use the CLI defaults. **Perform
-initial review** posts findings before the agent starts listening for discussions.
+optionally a model and effort; empty fields use the CLI defaults. Once the agent
+is attached, **Request Review** in the commit bar asks it to review the current
+commit. It posts findings only against that commit, then listens again.
 Your choices are remembered in this browser.
 
 The button is replaced by a **Connected** badge whose dot is green while the
 agent listens and pulses amber while it reviews or answers a discussion; the
 text stays the same. Failed launches show an error when you reopen the
-popover, including the agent log path if the process exited. Only one agent can
-be launched at a time. The button is unavailable in public mode.
+popover, including the agent log path if the process exited. While it runs, the
+agent's progress (messages and tool calls) is echoed to lrv's stderr with an
+`[agent]` prefix. Only one agent can be launched at a time. The button is
+unavailable in public mode.
 
 lrv supplies private temporary diff files for every commit and removes them on
 shutdown, after allowing the agent to exit and killing it if necessary. A launched
