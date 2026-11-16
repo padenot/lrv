@@ -700,7 +700,9 @@ export class MonacoApp {
     void fetch('/api/update-check')
       .then((response) => (response.ok ? response.json() : null))
       .then((version: unknown) => {
-        if (typeof version !== 'string') return;
+        if (typeof version !== 'string') {
+          return;
+        }
         const banner = $<HTMLElement>('#update-banner');
         const message = $<HTMLElement>('#update-banner-msg');
         if (banner && message) {
