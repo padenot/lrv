@@ -812,21 +812,22 @@ var ConnectAgentMethods = class {
 		document.body.classList.toggle("agent-attached", state.attached);
 		const available = this.context?.launch_available === true;
 		const active = state.attached || state.launch === "running";
-		const button = $$1("#connect-agent");
+		const split = $$1("#connect-agent-split");
 		const badge = $$1("#agent-status");
-		button.hidden = !available || active;
+		split.hidden = !available || active;
 		badge.hidden = !available || !active;
 		const busy = state.busy || !state.attached && state.launch === "running";
 		badge.classList.toggle("busy", busy);
 		badge.title = busy ? "The agent is working" : "The agent is waiting for discussion comments";
 		if (active) {
 			$$1("#connect-agent-popover").hidden = true;
-			button.setAttribute("aria-expanded", "false");
+			$$1("#connect-agent-options").setAttribute("aria-expanded", "false");
 		}
 		this.updateCommitBarVisibility();
 	}
 	setupConnectAgent() {
 		const button = $$1("#connect-agent");
+		const options = $$1("#connect-agent-options");
 		const popover = $$1("#connect-agent-popover");
 		const form = $$1("#connect-agent-form");
 		const provider = $$1("#agent-provider");
@@ -854,17 +855,43 @@ var ConnectAgentMethods = class {
 		};
 		form.addEventListener("input", save);
 		form.addEventListener("change", save);
+		const open = (message) => {
+			popover.hidden = false;
+			options.setAttribute("aria-expanded", "true");
+			error.textContent = message;
+			provider.focus();
+		};
 		const close = () => {
 			popover.hidden = true;
-			button.setAttribute("aria-expanded", "false");
+			options.setAttribute("aria-expanded", "false");
+		};
+		const launch = () => {
+			save();
+			button.disabled = true;
+			submit.disabled = true;
+			error.textContent = "";
+			const previousState = this.agentState;
+			launchAgent(values()).then(() => {
+				if (this.agentState === previousState) this.setAgentState({
+					attached: this.agentAttached,
+					busy: true,
+					launch: "running"
+				});
+				close();
+			}).catch((reason) => {
+				open(reason instanceof Error ? reason.message : String(reason));
+			}).finally(() => {
+				button.disabled = false;
+				submit.disabled = false;
+			});
 		};
 		button.addEventListener("click", () => {
-			popover.hidden = !popover.hidden;
-			button.setAttribute("aria-expanded", String(!popover.hidden));
-			if (!popover.hidden) {
-				error.textContent = this.agentState.error || "";
-				provider.focus();
-			}
+			close();
+			launch();
+		});
+		options.addEventListener("click", () => {
+			if (popover.hidden) open(this.agentState.error || "");
+			else close();
 		});
 		document.addEventListener("click", (event) => {
 			if (!(event.target instanceof Node) || !button.parentElement?.contains(event.target)) close();
@@ -873,28 +900,12 @@ var ConnectAgentMethods = class {
 			if (event.key === "Escape" && !popover.hidden) {
 				event.stopPropagation();
 				close();
-				button.focus();
+				options.focus();
 			}
 		});
 		form.addEventListener("submit", (event) => {
 			event.preventDefault();
-			save();
-			submit.disabled = true;
-			error.textContent = "";
-			const req = values();
-			const previousState = this.agentState;
-			launchAgent(req).then(() => {
-				if (this.agentState === previousState) this.setAgentState({
-					attached: this.agentAttached,
-					busy: true,
-					launch: "running"
-				});
-				close();
-			}).catch((reason) => {
-				error.textContent = reason instanceof Error ? reason.message : String(reason);
-			}).finally(() => {
-				submit.disabled = false;
-			});
+			launch();
 		});
 		this.setAgentState(this.agentState);
 	}
