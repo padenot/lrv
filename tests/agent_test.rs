@@ -331,16 +331,20 @@ async fn busy_until_next_poll_and_reset_on_expiry() {
     channel.wait(0, TIMEOUT).await;
     assert!(presence.borrow().attached);
     assert!(presence.borrow().busy);
+    assert_eq!(presence.borrow().acked, 0);
     let next = channel.clone();
     let poll = tokio::spawn(async move { next.wait(1, TIMEOUT).await });
     tokio::task::yield_now().await;
     assert!(!presence.borrow().busy);
+    assert_eq!(presence.borrow().acked, 1);
     assert!(presence.borrow().attached);
     advance(TIMEOUT).await;
     assert!(poll.await.unwrap().events.is_empty());
     assert!(!presence.borrow().busy);
     channel.wait(0, TIMEOUT).await;
     assert!(presence.borrow().busy);
+    // A replayed cursor doesn't un-handle earlier events.
+    assert_eq!(presence.borrow().acked, 1);
     advance(LEASE).await;
     tokio::task::yield_now().await;
     assert!(!presence.borrow().attached);

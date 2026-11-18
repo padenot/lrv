@@ -266,6 +266,8 @@ export type AgentState = {
   busy: boolean;
   launch: 'idle' | 'running' | 'failed';
   error?: string | null;
+  /** Highest event seq the agent has polled past, i.e. finished handling. */
+  acked?: number;
 };
 export type LaunchRequest = {
   provider: 'claude' | 'codex';

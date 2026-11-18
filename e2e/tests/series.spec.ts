@@ -224,31 +224,46 @@ test.describe('Series mode E2E', () => {
     }
   });
 
-  test('Request Review follows the selected commit and stays disabled until agent state changes', async ({
-    page,
-  }) => {
+  test('Request Review is disabled only for commits with a pending request', async ({ page }) => {
     await openApp(page);
-    await page.evaluate(() =>
-      (window as any).__APP.setAgentState({ attached: true, busy: false, launch: 'idle' }),
-    );
+    const setAgentState = (state: object) =>
+      page.evaluate((s) => (window as any).__APP.setAgentState(s), state);
+    await setAgentState({ attached: true, busy: false, launch: 'idle', acked: 0 });
     const button = page.locator('#request-review');
+    const commits = page.locator('#commit-strip .series-commit');
     await expect(button).toBeVisible();
     await expect(button).toHaveAttribute('aria-label', 'Request review of commit 1');
-    await page.locator('#commit-strip .series-commit').nth(1).click();
+    await commits.nth(1).click();
     await expect(button).toHaveAttribute('aria-label', 'Request review of commit 2');
-    let payload: unknown;
+    const payloads: unknown[] = [];
     await page.route('**/api/agent/review', async (route) => {
-      payload = route.request().postDataJSON();
-      await route.fulfill({ status: 202, json: { seq: 1 } });
+      payloads.push(route.request().postDataJSON());
+      await route.fulfill({ status: 202, json: { seq: payloads.length } });
     });
     await button.click();
     await expect(button).toBeDisabled();
-    expect(payload).toEqual({ commit_idx: 1 });
-    await page.locator('#commit-strip .series-commit').first().click();
+    expect(payloads).toEqual([{ commit_idx: 1 }]);
+    // Other commits stay requestable while the agent works; the server queues them.
+    await setAgentState({ attached: true, busy: true, launch: 'idle', acked: 0 });
+    await commits.first().click();
+    await expect(button).toBeEnabled();
+    await expect(button).toHaveAttribute('title', /will be queued/);
+    await button.click();
     await expect(button).toBeDisabled();
-    await page.evaluate(() =>
-      (window as any).__APP.setAgentState({ attached: true, busy: false, launch: 'idle' }),
-    );
+    expect(payloads).toEqual([{ commit_idx: 1 }, { commit_idx: 0 }]);
+    // A request ends once the agent polls past its seq.
+    await setAgentState({ attached: true, busy: true, launch: 'idle', acked: 1 });
+    await expect(button).toBeDisabled();
+    await commits.nth(1).click();
+    await expect(button).toBeEnabled();
+    await commits.first().click();
+    await setAgentState({ attached: true, busy: false, launch: 'idle', acked: 2 });
+    await expect(button).toBeEnabled();
+    // A departing agent drops pending requests.
+    await button.click();
+    await expect(button).toBeDisabled();
+    await setAgentState({ attached: false, busy: false, launch: 'idle', acked: 2 });
+    await setAgentState({ attached: true, busy: false, launch: 'idle', acked: 2 });
     await expect(button).toBeEnabled();
     await page.route('**/api/agent/review', async (route) => {
       await route.fulfill({ status: 409, body: 'No attached agent' });

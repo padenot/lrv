@@ -122,6 +122,12 @@ while [ ! -f "$LRV_TEST_ROOT/exit" ]; do /bin/sleep 0.05; done
         v["launch"] == "idle" && v["attached"] == false
     })
     .await;
+    let review = || {
+        client
+            .post(format!("{}/api/agent/review", info.url))
+            .json(&serde_json::json!({"commit_idx": 0}))
+    };
+    assert_eq!(review().send().await.unwrap().status(), 409);
     let missing = client
         .post(format!("{}/api/agent/launch", info.url))
         .json(&serde_json::json!({"provider":"codex"}))
@@ -147,6 +153,8 @@ while [ ! -f "$LRV_TEST_ROOT/exit" ]; do /bin/sleep 0.05; done
     })
     .await;
     assert_eq!(launch().send().await.unwrap().status(), 409);
+    // Requested while the agent is still starting: queued for its first poll.
+    assert_eq!(review().send().await.unwrap().status(), 202);
     client
         .post(format!("{}/api/review-notes", info.url))
         .bearer_auth(&info.token)
@@ -180,9 +188,20 @@ while [ ! -f "$LRV_TEST_ROOT/exit" ]; do /bin/sleep 0.05; done
     );
     fs::write(server.root.join("attach"), "").unwrap();
     event(&mut sse, &mut pending, |v| {
-        v["attached"] == true && v["busy"] == false && v["launch"] == "running"
+        v["attached"] == true && v["busy"] == true && v["launch"] == "running"
     })
     .await;
+    let log = diff.parent().unwrap().join("agent.log");
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while !fs::read_to_string(&log)
+            .unwrap_or_default()
+            .contains("review_request")
+        {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("queued review request delivered on first listen");
     fs::write(server.root.join("exit"), "").unwrap();
     event(&mut sse, &mut pending, |v| v["launch"] == "idle").await;
     event(&mut sse, &mut pending, |v| v["attached"] == false).await;

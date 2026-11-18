@@ -70,6 +70,11 @@ impl AgentLauncher {
         })
     }
 
+    /// Whether a launched agent process is alive, even if it hasn't listened yet.
+    pub fn running(&self) -> bool {
+        self.child.lock().unwrap().is_some()
+    }
+
     pub fn subscribe(&self) -> watch::Receiver<LaunchState> {
         self.state.subscribe()
     }
@@ -80,6 +85,7 @@ impl AgentLauncher {
         serde_json::json!({
             "attached": presence.attached,
             "busy": presence.busy || starting,
+            "acked": presence.acked,
             "launch": state.launch,
             "error": state.error,
         })

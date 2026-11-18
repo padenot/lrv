@@ -2380,10 +2380,17 @@ body:not(.agent-attached) .discuss-hint {
 }
 .connect-agent-split {
   position: relative;
+  display: flex;
+  gap: 1px;
 }
-#connect-agent[hidden],
+.connect-agent-split[hidden],
 #connect-agent-popover[hidden] {
   display: none;
+}
+.header #connect-agent-options {
+  display: flex;
+  align-items: center;
+  padding: 6px 7px;
 }
 #connect-agent-popover {
   position: absolute;
