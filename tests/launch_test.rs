@@ -1,6 +1,6 @@
-use lrv::launch::{build_command, build_prompt, LaunchRequest};
+use lrv::launch::{build_command, build_prompt, permission_rule_path, LaunchRequest};
 use lrv::types::ProjectContext;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 fn context() -> ProjectContext {
     serde_json::from_value(serde_json::json!({
@@ -8,6 +8,29 @@ fn context() -> ProjectContext {
         "is_public": false, "claude_skill_installed": false, "comment_store_error": null
     }))
     .unwrap()
+}
+
+#[test]
+fn permission_rule_paths_use_posix_form() {
+    let cases: &[(&str, &str)] = if cfg!(windows) {
+        &[
+            (
+                r"C:\mozilla-build\msys2\tmp\lrv-agent-x",
+                "/c/mozilla-build/msys2/tmp/lrv-agent-x",
+            ),
+            (r"\\?\D:\Temp\lrv-agent-x", "/d/Temp/lrv-agent-x"),
+            ("C:/Temp/lrv-agent-x", "/c/Temp/lrv-agent-x"),
+            ("/tmp/lrv-agent-x", "/tmp/lrv-agent-x"),
+        ]
+    } else {
+        &[
+            ("/tmp/lrv-agent-x", "/tmp/lrv-agent-x"),
+            ("/tmp//lrv-agent-x/", "/tmp/lrv-agent-x"),
+        ]
+    };
+    for (path, expected) in cases {
+        assert_eq!(permission_rule_path(Path::new(path)), *expected);
+    }
 }
 
 #[test]
