@@ -5,7 +5,7 @@ use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File};
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf, Prefix};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -253,8 +253,8 @@ pub fn build_command(
         // Without Write, the agent can only create notes files through shell
         // redirection or heredocs, which non-interactive permission checks refuse.
         // `//` marks an absolute path in permission rules; Edit rules cover Write.
+        let write_rule = format!("Edit(/{}/**)", permission_rule_path(dir));
         let dir = dir.display().to_string();
-        let write_rule = format!("Edit(/{dir}/**)");
         command.args([
             "--strict-mcp-config",
             "--add-dir",
@@ -287,6 +287,30 @@ pub fn build_command(
         ]);
     }
     command
+}
+
+/// Converts a path to the POSIX form Claude Code matches permission rules against,
+/// so `C:\Users\x` (or `\\?\C:\Users\x`) becomes `/c/Users/x`.
+/// Drive prefixes are only recognised when compiled for Windows.
+pub fn permission_rule_path(path: &Path) -> String {
+    let mut out = String::new();
+    for component in path.components() {
+        match component {
+            Component::Prefix(prefix) => match prefix.kind() {
+                Prefix::Disk(drive) | Prefix::VerbatimDisk(drive) => {
+                    out.push('/');
+                    out.push(drive.to_ascii_lowercase() as char);
+                }
+                _ => out.push_str(&prefix.as_os_str().to_string_lossy().replace('\\', "/")),
+            },
+            Component::RootDir => {}
+            other => {
+                out.push('/');
+                out.push_str(&other.as_os_str().to_string_lossy());
+            }
+        }
+    }
+    out
 }
 
 pub fn build_prompt(dir: &Path, paths: &[PathBuf], diffs: &[DiffResponse]) -> String {
