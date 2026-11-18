@@ -21,7 +21,8 @@ fn request_validation_and_provider_arguments() {
             };
             req.validate().unwrap();
             let ctx = context();
-            let command = build_command(&req, &ctx, "the prompt", std::path::Path::new("/tmp/lrv"));
+            let dir = std::path::Path::new("/tmp/lrv-agent-x");
+            let command = build_command(&req, &ctx, "the prompt", dir);
             let command = command.as_std();
             assert_eq!(command.get_program(), provider);
             assert_eq!(
@@ -50,6 +51,8 @@ fn request_validation_and_provider_arguments() {
             if provider == "claude" {
                 expected.extend([
                     "--strict-mcp-config",
+                    "--add-dir",
+                    "/tmp/lrv-agent-x",
                     "--tools",
                     "Bash,Read,Grep,Glob,Write",
                     "--allowedTools",
@@ -57,7 +60,7 @@ fn request_validation_and_provider_arguments() {
                     "Read",
                     "Grep",
                     "Glob",
-                    "Write(/tmp/lrv/**)",
+                    "Edit(//tmp/lrv-agent-x/**)",
                 ]);
             } else {
                 expected.extend([
@@ -72,16 +75,18 @@ fn request_validation_and_provider_arguments() {
             }
             assert_eq!(args, expected);
             let prompt = build_prompt(
+                dir,
                 &[
                     PathBuf::from("/tmp/commit-0.diff"),
                     PathBuf::from("/tmp/commit-1.diff"),
                 ],
                 &[],
-                std::path::Path::new("/tmp/lrv"),
             );
             assert!(prompt.contains("commit_idx 1: file /tmp/commit-1.diff"));
             assert!(prompt.contains("Immediately run lrv --listen"));
             assert!(prompt.contains("--listen-timeout 540"));
+            assert!(prompt
+                .contains("inside /tmp/lrv-agent-x (for example /tmp/lrv-agent-x/notes-1.json"));
             assert!(prompt.contains(lrv::skill::EMBEDDED_SKILL));
         }
     }
