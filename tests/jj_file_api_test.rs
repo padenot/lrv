@@ -134,6 +134,7 @@ async fn get_raw_content(
 }
 
 #[tokio::test]
+#[cfg_attr(windows, ignore = "fake jj is a /bin/sh script")]
 async fn test_jj_new_side_uses_commit_hash() {
     let _guard = PATH_LOCK.lock().await;
     let bin_dir = unique_dir("bin-new");
@@ -161,6 +162,7 @@ async fn test_jj_new_side_uses_commit_hash() {
 }
 
 #[tokio::test]
+#[cfg_attr(windows, ignore = "fake jj is a /bin/sh script")]
 async fn test_jj_old_side_uses_parents_of_commit_hash() {
     let _guard = PATH_LOCK.lock().await;
     let bin_dir = unique_dir("bin-old");
@@ -187,6 +189,7 @@ async fn test_jj_old_side_uses_parents_of_commit_hash() {
 }
 
 #[tokio::test]
+#[cfg_attr(windows, ignore = "fake jj is a /bin/sh script")]
 async fn test_jj_old_and_new_differ() {
     let _guard = PATH_LOCK.lock().await;
     let bin_dir = unique_dir("bin-diff");
@@ -218,6 +221,7 @@ async fn test_jj_old_and_new_differ() {
 }
 
 #[tokio::test]
+#[cfg_attr(windows, ignore = "fake jj is a /bin/sh script")]
 async fn test_jj_raw_old_side_ignores_git_blob_ids() {
     let _guard = PATH_LOCK.lock().await;
     let bin_dir = unique_dir("bin-raw-old");
@@ -244,6 +248,7 @@ async fn test_jj_raw_old_side_ignores_git_blob_ids() {
 }
 
 #[tokio::test]
+#[cfg_attr(windows, ignore = "fake jj is a /bin/sh script")]
 async fn test_jj_working_copy_old_side_uses_parent_revision() {
     let _guard = PATH_LOCK.lock().await;
     let bin_dir = unique_dir("bin-working-copy-old");

@@ -112,12 +112,11 @@ pub fn new_token() -> Result<String> {
     Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use crate::repository::tests::{with_path_prefix, write_fake_root_command};
 
-    #[cfg(unix)]
     #[test]
     fn discovery_round_trip_and_owner_cleanup() {
         let base = std::env::temp_dir().join(format!("lrv-discovery-{}", std::process::id()));

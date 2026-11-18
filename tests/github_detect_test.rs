@@ -1,4 +1,6 @@
 //! PR detection, against a fake `gh` script.
+// The fake `gh` is a bash script, so this only runs on Unix.
+#![cfg(unix)]
 
 use lrv::diff::parse_diff;
 use lrv::github::detect_prs_in;

@@ -24,7 +24,7 @@ install:
 test: test-unit test-e2e
 
 test-unit:
-    cargo test
+    cargo test --no-fail-fast
     node scripts/test-web.mjs
     node scripts/check-package-assets.mjs
 
@@ -78,7 +78,12 @@ typecheck-web:
 
 check-web: typecheck-web lint-web
 
+[unix]
 ci: fmt-check fmt-web-check check-web lint test-unit
+
+# Formatting and lint results don't depend on the OS, so Windows only runs the tests.
+[windows]
+ci: test-unit
 
 ci-e2e:
     just test-e2e

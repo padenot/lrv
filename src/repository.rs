@@ -33,7 +33,8 @@ fn command_root(program: &str, args: &[&str], cwd: &Path) -> Option<PathBuf> {
     (!path.as_os_str().is_empty() && path.is_dir()).then_some(path)
 }
 
-#[cfg(test)]
+// These tests put fake `#!/bin/sh` jj/git scripts on a `:`-separated PATH.
+#[cfg(all(test, unix))]
 pub(crate) mod tests {
     use super::{is_jj_repo, root};
     use std::fs;
@@ -50,7 +51,6 @@ pub(crate) mod tests {
         std::env::temp_dir().join(format!("lrv-repository-test-{}-{id}", std::process::id()))
     }
 
-    #[cfg(unix)]
     pub(crate) fn write_fake_root_command(bin: &Path, name: &str, root: &Path) {
         use std::os::unix::fs::PermissionsExt;
 
@@ -86,7 +86,6 @@ pub(crate) mod tests {
         result
     }
 
-    #[cfg(unix)]
     #[test]
     fn finds_a_jj_only_repository_from_a_subdirectory() {
         let base = test_base();
@@ -106,7 +105,6 @@ pub(crate) mod tests {
         let _ = fs::remove_dir_all(base);
     }
 
-    #[cfg(unix)]
     #[test]
     fn prefers_a_git_repository_nested_inside_a_jj_directory() {
         let base = test_base();
@@ -128,7 +126,6 @@ pub(crate) mod tests {
         let _ = fs::remove_dir_all(base);
     }
 
-    #[cfg(unix)]
     #[test]
     fn prefers_jj_in_a_colocated_repository() {
         let base = test_base();
