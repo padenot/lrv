@@ -25,7 +25,6 @@ export class CommentsUIMethods {
   declare modifiedDecorations: string[];
   declare originalDecorations: string[];
   declare currentWidget: AppContext['currentWidget'];
-  declare currentWidgetEditor?: AppContext['currentWidgetEditor'];
   declare renderFileList: () => void;
   declare lastModifiedRangeSelection: EditorSelection | null;
   declare lastOriginalRangeSelection: EditorSelection | null;
@@ -106,14 +105,7 @@ export class CommentsUIMethods {
       }
     }
 
-    // Remove any existing widget
-    if (this.currentWidget) {
-      if (this.currentWidgetEditor) {
-        this.currentWidgetEditor.removeContentWidget(this.currentWidget);
-      }
-      this.currentWidget = null;
-      this.currentWidgetEditor = null;
-    }
+    this.currentWidget?.close();
 
     // Check for existing comment
     const existingIndex = discussion
@@ -136,7 +128,7 @@ export class CommentsUIMethods {
     });
     const textarea = el('textarea', {
       className: 'comment-textarea',
-      attrs: { placeholder: 'Add your comment...', autofocus: true },
+      attrs: { placeholder: 'Add your comment...' },
     });
     const discuss =
       existingComment || discussion
@@ -189,8 +181,6 @@ export class CommentsUIMethods {
       updateMaxWidth();
       targetEditor.layoutContentWidget(widget);
     });
-    this.currentWidget = widget;
-    this.currentWidgetEditor = targetEditor;
 
     const saveBtn = domNode.querySelector<HTMLButtonElement>('.save-btn');
     const cancelBtn = domNode.querySelector<HTMLButtonElement>('.cancel-btn');
@@ -207,7 +197,7 @@ export class CommentsUIMethods {
     // Keyboard shortcuts
     const handleKeydown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        cleanup();
+        close();
       } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
         if (e.altKey) {
@@ -221,43 +211,56 @@ export class CommentsUIMethods {
     };
     textarea.addEventListener('keydown', handleKeydown);
 
-    const cleanup = () => {
+    const close = () => {
+      if (this.currentWidget?.close !== close) {
+        return;
+      }
+      clearTimeout(focusTimer);
       targetEditor.removeContentWidget(widget);
       layoutListener.dispose();
       this.currentWidget = null;
       textarea.removeEventListener('keydown', handleKeydown);
       textarea.removeEventListener('input', autoResize);
     };
+    this.currentWidget = { discussionId: discussion?.id, close };
+    const relayout = () => {
+      if (this.currentWidget?.close === close) {
+        targetEditor.layoutContentWidget(widget);
+      }
+    };
 
     const saveComment = async () => {
-      if (!textarea.value.trim()) {
+      const body = textarea.value;
+      if (!body.trim()) {
         textarea.focus();
         return;
       }
+      const commitIdx = this.commentManager.currentCommitIdx;
       if (discussion) {
         try {
           await this.deleteDiscussion(discussion);
         } catch (err) {
           error.textContent = err instanceof Error ? err.message : 'Failed to delete discussion';
           error.hidden = false;
-          targetEditor.layoutContentWidget(widget);
+          relayout();
           return;
         }
       }
 
       if (existingIndex >= 0) {
-        this.commentManager.updateComment(existingIndex, textarea.value);
+        this.commentManager.updateComment(existingIndex, body);
       } else {
         const comment = {
           file,
           line: commentLine,
           side,
-          body: textarea.value,
+          body,
+          ...(commitIdx === null ? {} : { commit_idx: commitIdx }),
         };
         this.commentManager.addComment(comment);
       }
       this.updateDecorations();
-      cleanup();
+      close();
     };
 
     const sendDiscussion = async () => {
@@ -273,14 +276,14 @@ export class CommentsUIMethods {
       error.hidden = true;
       try {
         await this.discussionManager.send({ file, line: commentLine, side, body });
-        cleanup();
+        close();
       } catch (err) {
         error.textContent =
           err instanceof DiscussionError && err.status === 409
             ? 'No agent is listening any more'
             : 'Failed to send discussion. Try again.';
         error.hidden = false;
-        targetEditor.layoutContentWidget(widget);
+        relayout();
       } finally {
         discuss.disabled = false;
       }
@@ -305,7 +308,7 @@ export class CommentsUIMethods {
         } finally {
           summarize.disabled = false;
           summarize.textContent = 'Summarize';
-          targetEditor.layoutContentWidget(widget);
+          relayout();
         }
       };
     }
@@ -314,7 +317,7 @@ export class CommentsUIMethods {
       saveBtn.onclick = () => void saveComment();
     }
     if (cancelBtn) {
-      cancelBtn.onclick = cleanup;
+      cancelBtn.onclick = close;
     }
 
     // Delete button (only present for existing comments)
@@ -323,14 +326,14 @@ export class CommentsUIMethods {
       deleteBtnEl.onclick = () => {
         this.commentManager.removeComment(existingIndex);
         this.updateDecorations();
-        cleanup();
+        close();
       };
     }
 
     // Focus after a brief delay to let Monaco position the widget, then
     // size to content (needed when pre-filling an existing comment).
-    setTimeout(() => {
-      textarea.focus();
+    const focusTimer = setTimeout(() => {
+      textarea.focus({ preventScroll: true });
       autoResize();
       targetEditor.layoutContentWidget(widget);
     }, 100);

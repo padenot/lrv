@@ -401,6 +401,29 @@ test.describe('Review Workflow E2E', () => {
 
       await fileTreeRow(page, 'file2.txt').click();
       await expect.poll(getScrollTop).toBe(1000);
+
+      if (stacked) {
+        const navigations = await page.evaluate(async () => {
+          const app = window.__APP!;
+          const navigate = app.scrollToFileInStacked;
+          const targets: string[] = [];
+          app.scrollToFileInStacked = (index) => {
+            targets.push(app.files[index]!.path);
+            return navigate.call(app, index);
+          };
+          try {
+            app.renderFileList();
+            await app.scrollToFileInStacked(
+              app.files.findIndex((file) => file.path === 'file3.txt'),
+            );
+            await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+            return targets;
+          } finally {
+            app.scrollToFileInStacked = navigate;
+          }
+        });
+        expect(navigations).toEqual(['file3.txt']);
+      }
     });
   }
 

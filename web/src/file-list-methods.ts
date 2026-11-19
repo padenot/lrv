@@ -301,7 +301,8 @@ export class FileListMethods {
 
     this.renderSummary(this.visibleFileCount());
     requestAnimationFrame(() => {
-      if (selectedPath && !this.currentFileIsCommit) {
+      // Stacked scrolling can rebuild the sidebar before this frame runs.
+      if (this.fileTree === tree && selectedPath && !this.currentFileIsCommit) {
         this.selectFileTreePath(selectedPath);
         tree.scrollToPath(selectedPath, { focus: true, offset: 'nearest' });
       }

@@ -37,6 +37,7 @@ import type {
   PublishState,
   AppConfig,
   AppConfigInput,
+  AppContext,
   AppContextData,
   DiffFile,
   DiffStats,
@@ -93,8 +94,7 @@ export class MonacoApp {
   focusedLineDecorationsNew: string[];
   focusedLineDecorationsOld: string[];
   currentFocusedLine: { side: 'old' | 'new'; line: number } | null;
-  currentWidget: editor.IContentWidget | null;
-  currentWidgetEditor?: editor.ICodeEditor | null;
+  currentWidget: AppContext['currentWidget'];
   diff: {
     files: DiffFile[];
     stats: DiffStats;

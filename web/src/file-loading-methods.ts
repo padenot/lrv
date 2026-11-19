@@ -22,7 +22,6 @@ export class FileLoadingMethods {
   declare originalModel: AppContext['originalModel'];
   declare modifiedModel: AppContext['modifiedModel'];
   declare currentWidget: AppContext['currentWidget'];
-  declare currentWidgetEditor?: AppContext['currentWidgetEditor'];
   declare currentFocusedLine: AppContext['currentFocusedLine'];
   declare modifiedDecorations: AppContext['modifiedDecorations'];
   declare originalDecorations: AppContext['originalDecorations'];
@@ -70,11 +69,7 @@ export class FileLoadingMethods {
     }
     this.editorClickDisposables?.forEach((disposable) => disposable.dispose());
     this.editorClickDisposables = [];
-    if (this.currentWidget && this.currentWidgetEditor) {
-      this.currentWidgetEditor.removeContentWidget(this.currentWidget);
-    }
-    this.currentWidget = null;
-    this.currentWidgetEditor = null;
+    this.currentWidget?.close();
     this.editor?.setModel(null);
     this.originalModel?.dispose();
     this.modifiedModel?.dispose();

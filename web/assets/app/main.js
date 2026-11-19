@@ -1003,6 +1003,8 @@ var DiscussionMethods = class {
 	deleteDiscussion(root) {
 		return this.discussionManager.delete(root.id, () => {
 			this.reviewNoteManager.removeDiscussionReplies(root.id);
+			if (this.currentWidget?.discussionId === root.id) this.currentWidget.close();
+			this.discardStackedDiscussionDraft(root.id);
 		});
 	}
 	async summarizeDiscussion(root) {
@@ -11049,7 +11051,7 @@ var FileListMethods = class {
 		}
 		this.renderSummary(this.visibleFileCount());
 		requestAnimationFrame(() => {
-			if (selectedPath && !this.currentFileIsCommit) {
+			if (this.fileTree === tree && selectedPath && !this.currentFileIsCommit) {
 				this.selectFileTreePath(selectedPath);
 				tree.scrollToPath(selectedPath, {
 					focus: true,
@@ -11295,9 +11297,7 @@ var FileLoadingMethods = class {
 		}
 		this.editorClickDisposables?.forEach((disposable) => disposable.dispose());
 		this.editorClickDisposables = [];
-		if (this.currentWidget && this.currentWidgetEditor) this.currentWidgetEditor.removeContentWidget(this.currentWidget);
-		this.currentWidget = null;
-		this.currentWidgetEditor = null;
+		this.currentWidget?.close();
 		this.editor?.setModel(null);
 		this.originalModel?.dispose();
 		this.modifiedModel?.dispose();
@@ -12479,11 +12479,7 @@ var CommentsUIMethods = class {
 			const resolvedCommentLine = this.commentLineFromEditorSelection(targetEditor, monacoLineNumber, side === "new" ? this.lastModifiedRangeSelection : this.lastOriginalRangeSelection);
 			if (Array.isArray(resolvedCommentLine)) commentLine = resolvedCommentLine;
 		}
-		if (this.currentWidget) {
-			if (this.currentWidgetEditor) this.currentWidgetEditor.removeContentWidget(this.currentWidget);
-			this.currentWidget = null;
-			this.currentWidgetEditor = null;
-		}
+		this.currentWidget?.close();
 		const existingIndex = discussion ? -1 : this.commentManager.findComment(file, monacoLineNumber, side);
 		const existingComment = existingIndex >= 0 ? this.commentManager.comments[existingIndex] : null;
 		const domNode = el("div", { className: "inline-comment-box" });
@@ -12497,10 +12493,7 @@ var CommentsUIMethods = class {
 		const title = el("h3", { text: `Line ${existingComment ? commentLineLabel(existingComment) : this.commentLineLabel(commentLine)}${existingComment ? " - Edit" : ""}` });
 		const textarea = el("textarea", {
 			className: "comment-textarea",
-			attrs: {
-				placeholder: "Add your comment...",
-				autofocus: true
-			}
+			attrs: { placeholder: "Add your comment..." }
 		});
 		const discuss = existingComment || discussion ? null : el("button", {
 			className: "btn-secondary discuss-btn",
@@ -12562,8 +12555,6 @@ var CommentsUIMethods = class {
 			updateMaxWidth();
 			targetEditor.layoutContentWidget(widget);
 		});
-		this.currentWidget = widget;
-		this.currentWidgetEditor = targetEditor;
 		const saveBtn = domNode.querySelector(".save-btn");
 		const cancelBtn = domNode.querySelector(".cancel-btn");
 		const autoResize = () => {
@@ -12573,7 +12564,7 @@ var CommentsUIMethods = class {
 		textarea.addEventListener("input", autoResize);
 		if (existingComment) textarea.value = existingComment.body;
 		const handleKeydown = (e) => {
-			if (e.key === "Escape") cleanup();
+			if (e.key === "Escape") close();
 			else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
 				e.preventDefault();
 				if (e.altKey) {
@@ -12584,38 +12575,50 @@ var CommentsUIMethods = class {
 			}
 		};
 		textarea.addEventListener("keydown", handleKeydown);
-		const cleanup = () => {
+		const close = () => {
+			if (this.currentWidget?.close !== close) return;
+			clearTimeout(focusTimer);
 			targetEditor.removeContentWidget(widget);
 			layoutListener.dispose();
 			this.currentWidget = null;
 			textarea.removeEventListener("keydown", handleKeydown);
 			textarea.removeEventListener("input", autoResize);
 		};
+		this.currentWidget = {
+			discussionId: discussion?.id,
+			close
+		};
+		const relayout = () => {
+			if (this.currentWidget?.close === close) targetEditor.layoutContentWidget(widget);
+		};
 		const saveComment = async () => {
-			if (!textarea.value.trim()) {
+			const body = textarea.value;
+			if (!body.trim()) {
 				textarea.focus();
 				return;
 			}
+			const commitIdx = this.commentManager.currentCommitIdx;
 			if (discussion) try {
 				await this.deleteDiscussion(discussion);
 			} catch (err) {
 				error.textContent = err instanceof Error ? err.message : "Failed to delete discussion";
 				error.hidden = false;
-				targetEditor.layoutContentWidget(widget);
+				relayout();
 				return;
 			}
-			if (existingIndex >= 0) this.commentManager.updateComment(existingIndex, textarea.value);
+			if (existingIndex >= 0) this.commentManager.updateComment(existingIndex, body);
 			else {
 				const comment = {
 					file,
 					line: commentLine,
 					side,
-					body: textarea.value
+					body,
+					...commitIdx === null ? {} : { commit_idx: commitIdx }
 				};
 				this.commentManager.addComment(comment);
 			}
 			this.updateDecorations();
-			cleanup();
+			close();
 		};
 		const sendDiscussion = async () => {
 			const body = textarea.value.trim();
@@ -12633,11 +12636,11 @@ var CommentsUIMethods = class {
 					side,
 					body
 				});
-				cleanup();
+				close();
 			} catch (err) {
 				error.textContent = err instanceof DiscussionError && err.status === 409 ? "No agent is listening any more" : "Failed to send discussion. Try again.";
 				error.hidden = false;
-				targetEditor.layoutContentWidget(widget);
+				relayout();
 			} finally {
 				discuss.disabled = false;
 			}
@@ -12656,19 +12659,19 @@ var CommentsUIMethods = class {
 			} finally {
 				summarize.disabled = false;
 				summarize.textContent = "Summarize";
-				targetEditor.layoutContentWidget(widget);
+				relayout();
 			}
 		};
 		if (saveBtn) saveBtn.onclick = () => void saveComment();
-		if (cancelBtn) cancelBtn.onclick = cleanup;
+		if (cancelBtn) cancelBtn.onclick = close;
 		const deleteBtnEl = domNode.querySelector(".delete-btn");
 		if (deleteBtnEl) deleteBtnEl.onclick = () => {
 			this.commentManager.removeComment(existingIndex);
 			this.updateDecorations();
-			cleanup();
+			close();
 		};
-		setTimeout(() => {
-			textarea.focus();
+		const focusTimer = setTimeout(() => {
+			textarea.focus({ preventScroll: true });
 			autoResize();
 			targetEditor.layoutContentWidget(widget);
 		}, 100);
@@ -14370,6 +14373,13 @@ var StackedViewMethods = class {
 		};
 		this.renderStackedComments();
 	}
+	discardStackedDiscussionDraft(discussionId) {
+		if (this.stackedDraft?.discussion?.id === discussionId) {
+			this.stackedDraft = null;
+			this.stackedLastRangeSelection = null;
+			this.stackedCodeView?.clearSelectedLines({ notify: false });
+		}
+	}
 	showStackedDraftFromSelection(file, range) {
 		if (!file || !range) return;
 		const startSide = range.side ? this.fromAnnotationSide(range.side) : null;
@@ -14406,6 +14416,9 @@ var StackedViewMethods = class {
 	}
 	renderStackedComments() {
 		if (!this.isStacked) return;
+		const draft = this.stackedDraft;
+		const previousTextarea = draft?.textarea;
+		const wasFocused = previousTextarea && document.activeElement === previousTextarea;
 		for (const [path, item] of this.stackedItems) {
 			const nextItem = {
 				...item,
@@ -14416,11 +14429,16 @@ var StackedViewMethods = class {
 			if (!this.stackedCodeView?.updateItem(nextItem)) continue;
 		}
 		this.stackedCodeView?.render(true);
+		const textarea = draft?.textarea;
+		if (wasFocused && textarea?.isConnected && textarea !== previousTextarea) {
+			textarea.focus({ preventScroll: true });
+			textarea.setSelectionRange(previousTextarea.selectionStart, previousTextarea.selectionEnd, previousTextarea.selectionDirection);
+		}
 	}
 	renderStackedAnnotation(annotation) {
 		const metadata = annotation.metadata;
 		if (!metadata) return;
-		if (metadata.kind === "draft") return this.buildDraftAnnotation(metadata);
+		if (metadata.kind === "draft") return this.buildDraftAnnotation(metadata.draft);
 		if (metadata.kind === "discussion") {
 			const wrap = el("div", { className: "stacked-annotation" });
 			wrap.appendChild(this.buildDiscussionNode(metadata.discussion));
@@ -14439,10 +14457,11 @@ var StackedViewMethods = class {
 		ta.className = "stacked-comment-ta";
 		ta.placeholder = "Add a comment...";
 		ta.rows = 3;
-		const state = this.stackedDraft ?? draft;
-		ta.value = state.body ?? "";
+		const firstRender = !draft.textarea;
+		draft.textarea = ta;
+		ta.value = draft.body ?? "";
 		ta.addEventListener("input", () => {
-			state.body = ta.value;
+			draft.body = ta.value;
 		});
 		const { discussion } = draft;
 		const save = el("button", {
@@ -14454,6 +14473,7 @@ var StackedViewMethods = class {
 			text: "Cancel"
 		});
 		const reset = () => {
+			if (this.stackedDraft !== draft) return;
 			this.stackedDraft = null;
 			this.stackedLastRangeSelection = null;
 			this.stackedCodeView?.clearSelectedLines({ notify: false });
@@ -14465,8 +14485,8 @@ var StackedViewMethods = class {
 		});
 		const summarize = discussion ? el("button", {
 			className: "stacked-comment-summarize btn-secondary summarize-btn",
-			text: state.summarizing ? "Summarizing…" : "Summarize",
-			attrs: { disabled: state.summarizing }
+			text: draft.summarizing ? "Summarizing…" : "Summarize",
+			attrs: { disabled: draft.summarizing }
 		}) : null;
 		const error = el("div", {
 			className: "comment-error",
@@ -14478,6 +14498,7 @@ var StackedViewMethods = class {
 				ta.focus();
 				return;
 			}
+			const commitIdx = this.seriesInfo?.is_series ? this.currentCommitIdx : void 0;
 			if (discussion) try {
 				await this.deleteDiscussion(discussion);
 			} catch (err) {
@@ -14491,10 +14512,10 @@ var StackedViewMethods = class {
 				side: draft.side,
 				body
 			};
-			this.commentManager.addComment(this.seriesInfo?.is_series ? {
+			this.commentManager.addComment(commitIdx === void 0 ? comment : {
 				...comment,
-				commit_idx: this.currentCommitIdx
-			} : comment);
+				commit_idx: commitIdx
+			});
 			reset();
 		};
 		const sendDiscussion = async () => {
@@ -14523,19 +14544,19 @@ var StackedViewMethods = class {
 		};
 		discuss.addEventListener("click", () => void sendDiscussion());
 		summarize?.addEventListener("click", async () => {
-			state.summarizing = true;
+			draft.summarizing = true;
 			summarize.disabled = true;
 			summarize.textContent = "Summarizing…";
 			error.hidden = true;
 			try {
 				const body = await this.summarizeDiscussion(discussion);
-				delete state.summarizing;
-				if (this.stackedDraft === state) {
-					state.body = body;
+				delete draft.summarizing;
+				if (this.stackedDraft === draft) {
+					draft.body = body;
 					this.renderStackedComments();
 				}
 			} catch (err) {
-				delete state.summarizing;
+				delete draft.summarizing;
 				summarize.disabled = false;
 				summarize.textContent = "Summarize";
 				error.textContent = err instanceof DiscussionError && err.status === 409 ? "No agent is listening any more" : "Failed to request a summary. Try again.";
@@ -14561,7 +14582,9 @@ var StackedViewMethods = class {
 			save,
 			cancel
 		]));
-		queueMicrotask(() => ta.focus());
+		if (firstRender) queueMicrotask(() => {
+			if (this.stackedDraft === draft && ta.isConnected) ta.focus();
+		});
 		return form;
 	}
 	buildCommentAnnotation(comment, index) {
@@ -14658,7 +14681,7 @@ var StackedViewMethods = class {
 			lineNumber: Array.isArray(this.stackedDraft.line) ? this.stackedDraft.line[1] : this.stackedDraft.line,
 			metadata: {
 				kind: "draft",
-				...this.stackedDraft
+				draft: this.stackedDraft
 			}
 		});
 		return annotations;
@@ -14790,7 +14813,6 @@ var MonacoApp = class {
 	focusedLineDecorationsOld;
 	currentFocusedLine;
 	currentWidget;
-	currentWidgetEditor;
 	diff;
 	files;
 	stats;

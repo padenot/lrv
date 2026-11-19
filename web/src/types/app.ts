@@ -175,8 +175,7 @@ export interface AppContext {
   focusedLineDecorationsNew: string[];
   focusedLineDecorationsOld: string[];
   currentFocusedLine: { side: Side; line: number } | null;
-  currentWidget: editor.IContentWidget | null;
-  currentWidgetEditor?: editor.ICodeEditor | null;
+  currentWidget: { discussionId: string | undefined; close: () => void } | null;
   diff: {
     files: DiffFile[];
     stats: DiffStats;
@@ -244,6 +243,7 @@ export interface AppContext {
     discussion?: Discussion,
   ): void;
   showStackedDiscussionDraft(discussion: Discussion): void;
+  discardStackedDiscussionDraft(discussionId: string): void;
   deleteDiscussion(discussion: Discussion): Promise<void>;
   summarizeDiscussion(discussion: Discussion): Promise<string>;
   showCommitSummaryDialog(): void;

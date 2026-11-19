@@ -34,10 +34,15 @@ for (const stacked of [false, true]) {
     };
     try {
       execFileSync('git', ['init', '-q', root]);
-      fs.writeFileSync(path.join(root, 'a.txt'), 'new\n');
+      const lineCount = stacked ? 101 : 1;
+      const oldLines = Array.from({ length: lineCount }, (_, i) => `old ${i + 1}`);
+      const newLines = Array.from({ length: lineCount }, (_, i) => `new ${i + 1}`);
+      fs.writeFileSync(path.join(root, 'a.txt'), newLines.join('\n') + '\n');
       fs.writeFileSync(
         diffPath,
-        'diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-old\n+new\n',
+        `diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1,${lineCount} +1,${lineCount} @@\n` +
+          oldLines.map((line) => `-${line}\n`).join('') +
+          newLines.map((line) => `+${line}\n`).join(''),
       );
       await isolateConfig(page);
       child = spawn(binary, ['--file', diffPath, '--no-open'], { cwd: root, env });
@@ -73,7 +78,7 @@ for (const stacked of [false, true]) {
         if (stacked) {
           await page
             .locator('.stacked-code-view diffs-container [data-additions] [data-column-number]')
-            .last()
+            .first()
             .click({ position: { x: 8, y: 8 } });
         } else {
           await page.evaluate(() => window.__APP!.showCommentDialog('a.txt', 1, 1, 'new'));
@@ -459,6 +464,42 @@ for (const stacked of [false, true]) {
       })();
       await expect(page.locator('#agent-status')).toBeVisible();
       await expect(page.locator('#agent-status')).not.toHaveClass(/busy/);
+      const createThread = (line: number, body: string) =>
+        page.evaluate(
+          ({ line, body }) =>
+            window.__APP!.discussionManager.send({ file: 'a.txt', line, side: 'new', body }),
+          { line, body },
+        );
+      await createThread(1, 'Convert this thread');
+      if (stacked) {
+        await createThread(55, 'Delete this other thread');
+      }
+      const converting = thread.filter({ hasText: 'Convert this thread' });
+      await converting.locator('.discussion-convert-btn').click();
+      await expect(textarea).toHaveCount(1);
+      if (stacked) {
+        await expect(textarea).toBeFocused();
+        await textarea.fill('Keep this conversion');
+        const scroller = page.locator('.stacked-code-view');
+        await scroller.evaluate((node) => {
+          node.scrollTop = 800;
+        });
+        await expect.poll(() => scroller.evaluate((node) => node.scrollTop)).toBeGreaterThan(600);
+        const other = thread.filter({ hasText: 'Delete this other thread' });
+        await other.locator('.discussion-delete-btn').dispatchEvent('click');
+        await expect(other).toHaveCount(0);
+        expect(await scroller.evaluate((node) => node.scrollTop)).toBeGreaterThan(600);
+        await scroller.evaluate((node) => {
+          node.scrollTop = 0;
+        });
+        await expect(textarea).toHaveValue('Keep this conversion');
+      }
+      await converting.locator('.discussion-delete-btn').dispatchEvent('click');
+      await expect(converting).toHaveCount(0);
+      await expect(textarea).toHaveCount(0);
+      if (!stacked) {
+        expect(await page.evaluate(() => window.__APP!.currentWidget)).toBeNull();
+      }
       await page.locator('#submit-review').click();
       await page.locator('.confirm-submit-btn').click();
       expect(await finalListener).toEqual({ status: 'ended' });

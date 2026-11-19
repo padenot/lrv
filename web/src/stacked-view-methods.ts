@@ -29,7 +29,7 @@ type StackedAnnotation =
   | { kind: 'comment'; comment: ReviewComment; index: number }
   | { kind: 'review-note'; note: ReviewNote }
   | { kind: 'discussion'; discussion: Discussion }
-  | ({ kind: 'draft' } & StackedDraft);
+  | { kind: 'draft'; draft: StackedDraft };
 
 // With `discussion`, saving converts that thread into the comment.
 type StackedDraft = {
@@ -39,6 +39,7 @@ type StackedDraft = {
   discussion?: Discussion;
   body?: string;
   summarizing?: boolean;
+  textarea?: HTMLTextAreaElement;
 };
 
 const DIFFS_THEME = { dark: 'pierre-dark', light: 'pierre-light' } as const;
@@ -557,6 +558,14 @@ export class StackedViewMethods {
     this.renderStackedComments();
   }
 
+  discardStackedDiscussionDraft(discussionId: string) {
+    if (this.stackedDraft?.discussion?.id === discussionId) {
+      this.stackedDraft = null;
+      this.stackedLastRangeSelection = null;
+      this.stackedCodeView?.clearSelectedLines({ notify: false });
+    }
+  }
+
   private showStackedDraftFromSelection(file: string, range: SelectedLineRange | null) {
     if (!file || !range) {
       return;
@@ -641,6 +650,9 @@ export class StackedViewMethods {
     if (!this.isStacked) {
       return;
     }
+    const draft = this.stackedDraft;
+    const previousTextarea = draft?.textarea;
+    const wasFocused = previousTextarea && document.activeElement === previousTextarea;
     for (const [path, item] of this.stackedItems) {
       const nextItem = {
         ...item,
@@ -653,6 +665,16 @@ export class StackedViewMethods {
       }
     }
     this.stackedCodeView?.render(true);
+    const textarea = draft?.textarea;
+    // Agent updates can replace an annotation while the user is typing in it.
+    if (wasFocused && textarea?.isConnected && textarea !== previousTextarea) {
+      textarea.focus({ preventScroll: true });
+      textarea.setSelectionRange(
+        previousTextarea.selectionStart,
+        previousTextarea.selectionEnd,
+        previousTextarea.selectionDirection,
+      );
+    }
   }
 
   private renderStackedAnnotation(annotation: DiffLineAnnotation<StackedAnnotation>) {
@@ -661,7 +683,7 @@ export class StackedViewMethods {
       return undefined;
     }
     if (metadata.kind === 'draft') {
-      return this.buildDraftAnnotation(metadata);
+      return this.buildDraftAnnotation(metadata.draft);
     }
     if (metadata.kind === 'discussion') {
       const wrap = el('div', { className: 'stacked-annotation' });
@@ -677,17 +699,18 @@ export class StackedViewMethods {
     }
     return this.buildCommentAnnotation(metadata.comment, metadata.index);
   }
-  private buildDraftAnnotation(draft: Extract<StackedAnnotation, { kind: 'draft' }>) {
+  private buildDraftAnnotation(draft: StackedDraft) {
     const form = el('div', { className: 'stacked-comment-form' });
     const ta = document.createElement('textarea');
     ta.className = 'stacked-comment-ta';
     ta.placeholder = 'Add a comment...';
     ta.rows = 3;
     // Keep the text in the draft so a re-render doesn't lose it.
-    const state = this.stackedDraft ?? draft;
-    ta.value = state.body ?? '';
+    const firstRender = !draft.textarea;
+    draft.textarea = ta;
+    ta.value = draft.body ?? '';
     ta.addEventListener('input', () => {
-      state.body = ta.value;
+      draft.body = ta.value;
     });
     const { discussion } = draft;
 
@@ -697,6 +720,9 @@ export class StackedViewMethods {
       text: 'Cancel',
     });
     const reset = () => {
+      if (this.stackedDraft !== draft) {
+        return;
+      }
       this.stackedDraft = null;
       this.stackedLastRangeSelection = null;
       this.stackedCodeView?.clearSelectedLines({ notify: false });
@@ -709,8 +735,8 @@ export class StackedViewMethods {
     const summarize = discussion
       ? el('button', {
           className: 'stacked-comment-summarize btn-secondary summarize-btn',
-          text: state.summarizing ? 'Summarizing…' : 'Summarize',
-          attrs: { disabled: state.summarizing },
+          text: draft.summarizing ? 'Summarizing…' : 'Summarize',
+          attrs: { disabled: draft.summarizing },
         })
       : null;
     const error = el('div', { className: 'comment-error', attrs: { hidden: true } });
@@ -720,6 +746,7 @@ export class StackedViewMethods {
         ta.focus();
         return;
       }
+      const commitIdx = this.seriesInfo?.is_series ? this.currentCommitIdx : undefined;
       if (discussion) {
         try {
           await this.deleteDiscussion(discussion);
@@ -736,7 +763,7 @@ export class StackedViewMethods {
         body,
       };
       this.commentManager.addComment(
-        this.seriesInfo?.is_series ? { ...comment, commit_idx: this.currentCommitIdx } : comment,
+        commitIdx === undefined ? comment : { ...comment, commit_idx: commitIdx },
       );
       reset();
     };
@@ -771,20 +798,20 @@ export class StackedViewMethods {
     };
     discuss.addEventListener('click', () => void sendDiscussion());
     summarize?.addEventListener('click', async () => {
-      state.summarizing = true;
+      draft.summarizing = true;
       summarize.disabled = true;
       summarize.textContent = 'Summarizing…';
       error.hidden = true;
       try {
         const body = await this.summarizeDiscussion(discussion!);
-        delete state.summarizing;
-        if (this.stackedDraft === state) {
-          state.body = body;
+        delete draft.summarizing;
+        if (this.stackedDraft === draft) {
+          draft.body = body;
           // Sending the request re-rendered the draft, so render it again with the summary.
           this.renderStackedComments();
         }
       } catch (err) {
-        delete state.summarizing;
+        delete draft.summarizing;
         summarize.disabled = false;
         summarize.textContent = 'Summarize';
         error.textContent =
@@ -822,7 +849,14 @@ export class StackedViewMethods {
         cancel,
       ]),
     );
-    queueMicrotask(() => ta.focus());
+    // Only opening the draft should scroll it into view.
+    if (firstRender) {
+      queueMicrotask(() => {
+        if (this.stackedDraft === draft && ta.isConnected) {
+          ta.focus();
+        }
+      });
+    }
     return form;
   }
 
@@ -910,7 +944,7 @@ export class StackedViewMethods {
         lineNumber: Array.isArray(this.stackedDraft.line)
           ? this.stackedDraft.line[1]
           : this.stackedDraft.line,
-        metadata: { kind: 'draft', ...this.stackedDraft },
+        metadata: { kind: 'draft', draft: this.stackedDraft },
       });
     }
     return annotations;

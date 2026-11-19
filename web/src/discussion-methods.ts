@@ -10,10 +10,16 @@ export class DiscussionMethods {
   declare isStacked: AppContext['isStacked'];
   declare showCommentDialog: AppContext['showCommentDialog'];
   declare showStackedDiscussionDraft: AppContext['showStackedDiscussionDraft'];
+  declare discardStackedDiscussionDraft: AppContext['discardStackedDiscussionDraft'];
+  declare currentWidget: AppContext['currentWidget'];
 
   deleteDiscussion(root: Discussion): Promise<void> {
     return this.discussionManager.delete(root.id, () => {
       this.reviewNoteManager.removeDiscussionReplies(root.id);
+      if (this.currentWidget?.discussionId === root.id) {
+        this.currentWidget.close();
+      }
+      this.discardStackedDiscussionDraft(root.id);
     });
   }
 
