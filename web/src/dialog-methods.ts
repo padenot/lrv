@@ -47,6 +47,7 @@ export class DialogMethods {
   declare reviewSubmitted: AppContext['reviewSubmitted'];
   declare applyThemeToUI: (theme: string) => void;
   declare loadFile: (index: number) => Promise<void>;
+  declare updateViewToggleLabel: () => void;
   declare userThemes: AppContext['userThemes'];
   declare isStacked: boolean;
   declare showStackedView: () => void;
@@ -341,6 +342,7 @@ export class DialogMethods {
         if (response.ok) {
           this.config = newConfig;
           this.isInline = !this.config.split_view;
+          this.updateViewToggleLabel();
           monaco.editor.setTheme(this.config.color_scheme);
           this.applyThemeToUI(this.config.color_scheme);
           saveBtn.textContent = 'Saved!';

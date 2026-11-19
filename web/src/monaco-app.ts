@@ -142,6 +142,7 @@ export class MonacoApp {
   declare hideStackedView: () => void;
   declare toggleStackedView: () => void;
   declare scrollToFileInStacked: (index: number) => Promise<void>;
+  declare updateStackedDiffStyle: () => void;
   declare renderStackedComments: () => void;
   declare setupSidebarResizer: () => void;
   declare setupCommitStripResizer: () => void;
