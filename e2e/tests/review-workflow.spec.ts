@@ -1613,6 +1613,22 @@ test.describe('Review Workflow E2E', () => {
     await expect(page.locator('text=Saved!')).toBeVisible({ timeout: 2000 });
   });
 
+  test('saving settings resets the view toggle label to the split view setting', async ({
+    page,
+  }) => {
+    await openApp(page);
+    const toggle = page.locator('#toggle-view');
+    await toggle.click();
+    await expect(toggle).toHaveText('View: Inline');
+
+    await page.locator('#settings-btn').click();
+    await expect(page.locator('#split-view')).toBeChecked();
+    await page.locator('select[name="color_scheme"]').selectOption('github-dark');
+    await page.locator('.save-btn').click();
+    await expect(page.locator('text=Saved!')).toBeVisible({ timeout: 2000 });
+    await expect(toggle).toHaveText('View: Side-by-Side');
+  });
+
   test('should display renamed files correctly', async ({ page }) => {
     // Create a renamed file diff
     if (!testRepoPath) {

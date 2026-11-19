@@ -13287,6 +13287,7 @@ var DialogMethods = class {
 				})).ok) {
 					this.config = newConfig;
 					this.isInline = !this.config.split_view;
+					this.updateViewToggleLabel();
 					monaco.editor.setTheme(this.config.color_scheme);
 					this.applyThemeToUI(this.config.color_scheme);
 					saveBtn.textContent = "Saved!";
