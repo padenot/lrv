@@ -116,6 +116,7 @@ export class StackedViewMethods {
   private stackedRenderToken: number;
   private stackedHydratedFiles: Set<string>;
   private stackedLastRangeSelection: CodeViewLineSelection | null;
+  private stackedFileScrollOffsets?: Map<string, number>;
 
   showStackedView() {
     this.resetFileView();
@@ -203,6 +204,18 @@ export class StackedViewMethods {
     if (!file) {
       return;
     }
+    const previousFile = this.files[this.currentFileIndex];
+    const view = this.stackedCodeView;
+    if (view && previousFile && !this.currentFileIsCommit) {
+      const previousTop = view.getTopForItem(this.stackedItemId(previousFile.path));
+      if (previousTop !== undefined) {
+        const offset = Math.max(0, view.getScrollTop() - previousTop);
+        (this.stackedFileScrollOffsets ??= new Map()).set(
+          this.fileCacheKey(previousFile.path),
+          offset,
+        );
+      }
+    }
     this.currentFileIndex = index;
     this.currentFileIsCommit = false;
     if (this._commitViewEl) {
@@ -237,6 +250,7 @@ export class StackedViewMethods {
         type: 'item',
         id: this.stackedItemId(file.path),
         align: 'start',
+        offset: -(this.stackedFileScrollOffsets?.get(this.fileCacheKey(file.path)) ?? 0),
         behavior: 'instant',
       });
       return;

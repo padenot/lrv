@@ -52,6 +52,8 @@ export class FileLoadingMethods {
   private lastModifiedRangeSelection: EditorSelection | null;
   private lastOriginalRangeSelection: EditorSelection | null;
   private editorClickDisposables: Array<{ dispose(): void }>;
+  private activeFileViewKey: string | undefined;
+  private fileViewStates?: Map<string, editor.IDiffEditorViewState>;
 
   private getCurrentFile(index: number) {
     return this.files[index]!;
@@ -59,6 +61,13 @@ export class FileLoadingMethods {
 
   resetFileView() {
     ++_loadSerial;
+    if (this.activeFileViewKey !== undefined && this.editor) {
+      const viewState = this.editor.saveViewState();
+      if (viewState) {
+        (this.fileViewStates ??= new Map()).set(this.activeFileViewKey, viewState);
+      }
+      this.activeFileViewKey = undefined;
+    }
     this.editorClickDisposables?.forEach((disposable) => disposable.dispose());
     this.editorClickDisposables = [];
     if (this.currentWidget && this.currentWidgetEditor) {
@@ -201,6 +210,8 @@ export class FileLoadingMethods {
     const file = this.getCurrentFile(index);
     const isAddedFile = this.isAddedFile(file);
     const renderSideBySide = !this.isInline && !isAddedFile;
+    const viewKey = `${renderSideBySide ? 'split' : 'inline'}:${this.fileCacheKey(file.path)}`;
+    const viewState = this.fileViewStates?.get(viewKey);
     if (window.DEBUG) {
       console.info('[app] loadFile: path', file.path, 'status', file.status);
     }
@@ -310,28 +321,30 @@ export class FileLoadingMethods {
         editorContainer?.classList.remove('diff-loading');
       }
     };
-    const fallback = setTimeout(uncover, 1500);
     diffEditor.setModel({
       original: this.originalModel!,
       modified: this.modifiedModel!,
     });
     window.Perf.mark('loadFile:setModel:end');
     window.Perf.measure('loadFile:setModel', 'loadFile:setModel:start', 'loadFile:setModel:end');
-    // Use `let` so a synchronous onDidUpdateDiff fire (before scrollReset is
-    // assigned) hits ?.dispose() safely and leaves the listener active for
-    // the real async diff-ready fire.
-    let scrollReset: ReturnType<typeof diffEditor.onDidUpdateDiff>;
-    scrollReset = diffEditor.onDidUpdateDiff(() => {
-      scrollReset?.dispose();
+    const showFileView = () => {
+      diffReady?.dispose();
       clearTimeout(fallback);
       if (!isCurrentLoad()) {
         return;
       }
-      diffEditor.getModifiedEditor().setScrollTop(0);
-      diffEditor.getOriginalEditor().setScrollTop(0);
+      if (viewState) {
+        diffEditor.restoreViewState(viewState);
+      } else {
+        diffEditor.getModifiedEditor().setScrollTop(0);
+        diffEditor.getOriginalEditor().setScrollTop(0);
+      }
+      this.activeFileViewKey = viewKey;
       // Two rAFs: one for Monaco to commit view zones, one for the browser to paint.
       requestAnimationFrame(() => requestAnimationFrame(uncover));
-    });
+    };
+    const fallback = setTimeout(showFileView, 1500);
+    const diffReady = diffEditor.onDidUpdateDiff(showFileView);
     diffEditor.updateOptions({
       renderSideBySide,
       fontFamily: mono,
@@ -398,7 +411,9 @@ export class FileLoadingMethods {
     this.setupEditorClickHandlers(file.path, modifiedEditor, originalEditor);
     this.updateDecorations();
     this.renderReviewNotes();
-    this.applyInitialHunkFocus(file.path);
+    if (!viewState) {
+      this.applyInitialHunkFocus(file.path);
+    }
   }
 
   setupEditorClickHandlers(

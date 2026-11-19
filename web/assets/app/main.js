@@ -11281,11 +11281,18 @@ var FileLoadingMethods = class {
 	lastModifiedRangeSelection;
 	lastOriginalRangeSelection;
 	editorClickDisposables;
+	activeFileViewKey;
+	fileViewStates;
 	getCurrentFile(index) {
 		return this.files[index];
 	}
 	resetFileView() {
 		++_loadSerial;
+		if (this.activeFileViewKey !== void 0 && this.editor) {
+			const viewState = this.editor.saveViewState();
+			if (viewState) (this.fileViewStates ??= /* @__PURE__ */ new Map()).set(this.activeFileViewKey, viewState);
+			this.activeFileViewKey = void 0;
+		}
 		this.editorClickDisposables?.forEach((disposable) => disposable.dispose());
 		this.editorClickDisposables = [];
 		if (this.currentWidget && this.currentWidgetEditor) this.currentWidgetEditor.removeContentWidget(this.currentWidget);
@@ -11417,6 +11424,8 @@ var FileLoadingMethods = class {
 		const file = this.getCurrentFile(index);
 		const isAddedFile = this.isAddedFile(file);
 		const renderSideBySide = !this.isInline && !isAddedFile;
+		const viewKey = `${renderSideBySide ? "split" : "inline"}:${this.fileCacheKey(file.path)}`;
+		const viewState = this.fileViewStates?.get(viewKey);
 		if (window.DEBUG) console.info("[app] loadFile: path", file.path, "status", file.status);
 		this.initFileHunks(file);
 		this.expandCurrentFileAncestors();
@@ -11491,22 +11500,26 @@ var FileLoadingMethods = class {
 		const uncover = () => {
 			if (isCurrentLoad()) editorContainer?.classList.remove("diff-loading");
 		};
-		const fallback = setTimeout(uncover, 1500);
 		diffEditor.setModel({
 			original: this.originalModel,
 			modified: this.modifiedModel
 		});
 		window.Perf.mark("loadFile:setModel:end");
 		window.Perf.measure("loadFile:setModel", "loadFile:setModel:start", "loadFile:setModel:end");
-		let scrollReset;
-		scrollReset = diffEditor.onDidUpdateDiff(() => {
-			scrollReset?.dispose();
+		const showFileView = () => {
+			diffReady?.dispose();
 			clearTimeout(fallback);
 			if (!isCurrentLoad()) return;
-			diffEditor.getModifiedEditor().setScrollTop(0);
-			diffEditor.getOriginalEditor().setScrollTop(0);
+			if (viewState) diffEditor.restoreViewState(viewState);
+			else {
+				diffEditor.getModifiedEditor().setScrollTop(0);
+				diffEditor.getOriginalEditor().setScrollTop(0);
+			}
+			this.activeFileViewKey = viewKey;
 			requestAnimationFrame(() => requestAnimationFrame(uncover));
-		});
+		};
+		const fallback = setTimeout(showFileView, 1500);
+		const diffReady = diffEditor.onDidUpdateDiff(showFileView);
 		diffEditor.updateOptions({
 			renderSideBySide,
 			fontFamily: mono,
@@ -11558,7 +11571,7 @@ var FileLoadingMethods = class {
 		this.setupEditorClickHandlers(file.path, modifiedEditor, originalEditor);
 		this.updateDecorations();
 		this.renderReviewNotes();
-		this.applyInitialHunkFocus(file.path);
+		if (!viewState) this.applyInitialHunkFocus(file.path);
 	}
 	setupEditorClickHandlers(filePath, modifiedEditor, originalEditor) {
 		this.editorClickDisposables?.forEach((disposable) => disposable.dispose());
@@ -14051,6 +14064,7 @@ var StackedViewMethods = class {
 	stackedRenderToken;
 	stackedHydratedFiles;
 	stackedLastRangeSelection;
+	stackedFileScrollOffsets;
 	showStackedView() {
 		this.resetFileView();
 		this.isStacked = true;
@@ -14106,6 +14120,15 @@ var StackedViewMethods = class {
 		if (!this.isStacked) return;
 		const file = this.files[index];
 		if (!file) return;
+		const previousFile = this.files[this.currentFileIndex];
+		const view = this.stackedCodeView;
+		if (view && previousFile && !this.currentFileIsCommit) {
+			const previousTop = view.getTopForItem(this.stackedItemId(previousFile.path));
+			if (previousTop !== void 0) {
+				const offset = Math.max(0, view.getScrollTop() - previousTop);
+				(this.stackedFileScrollOffsets ??= /* @__PURE__ */ new Map()).set(this.fileCacheKey(previousFile.path), offset);
+			}
+		}
 		this.currentFileIndex = index;
 		this.currentFileIsCommit = false;
 		if (this._commitViewEl) this._commitViewEl.style.display = "none";
@@ -14130,6 +14153,7 @@ var StackedViewMethods = class {
 				type: "item",
 				id: this.stackedItemId(file.path),
 				align: "start",
+				offset: -(this.stackedFileScrollOffsets?.get(this.fileCacheKey(file.path)) ?? 0),
 				behavior: "instant"
 			});
 			return;

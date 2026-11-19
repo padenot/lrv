@@ -353,6 +353,57 @@ test.describe('Review Workflow E2E', () => {
     expect(parseFloat(opacity)).toBeGreaterThan(0.99);
   });
 
+  for (const mode of ['file by file', 'stacked'] as const) {
+    test(`switching files restores scroll position in ${mode} view`, async ({ page }) => {
+      await stopServer();
+      for (const file of ['file2.txt', 'file3.txt']) {
+        const lines = Array.from({ length: 250 }, (_, index) => `${file} line ${index + 1}`);
+        fs.writeFileSync(path.join(testRepoPath!, file), lines.join('\n') + '\n');
+      }
+      await startServer();
+
+      const stacked = mode === 'stacked';
+      if (stacked) {
+        await openStackedView(page);
+      } else {
+        await openApp(page);
+      }
+
+      const scrollEditor = (top?: number) =>
+        page.evaluate((offset) => {
+          const editor = (window as any).__APP.editor.getModifiedEditor();
+          if (offset !== undefined) {
+            editor.setScrollTop(offset);
+          }
+          return editor.getScrollTop();
+        }, top);
+      const viewport = page.locator('.stacked-code-view');
+      const getScrollTop = () =>
+        stacked ? viewport.evaluate((element) => element.scrollTop) : scrollEditor();
+
+      await fileTreeRow(page, 'file2.txt').click();
+      if (stacked) {
+        await viewport.evaluate((element) => (element.scrollTop = 1000));
+      } else {
+        await expect(page.locator('#editor-container')).not.toHaveClass(/diff-loading/);
+        await expect(page.getByText('file2.txt line 1', { exact: true })).toBeVisible();
+        await scrollEditor(1000);
+      }
+      await expect.poll(getScrollTop).toBe(1000);
+
+      await fileTreeRow(page, 'file3.txt').click();
+      if (stacked) {
+        await expect.poll(getScrollTop).toBeGreaterThan(1000);
+      } else {
+        await expect(page.getByText('file3.txt line 1', { exact: true })).toBeVisible();
+        await expect.poll(getScrollTop).toBe(0);
+      }
+
+      await fileTreeRow(page, 'file2.txt').click();
+      await expect.poll(getScrollTop).toBe(1000);
+    });
+  }
+
   test('should display diff content in both panels', async ({ page }) => {
     await openApp(page);
 
