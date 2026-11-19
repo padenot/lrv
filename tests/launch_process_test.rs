@@ -49,6 +49,22 @@ async fn event(
     .expect("agent event timeout")
 }
 
+async fn provider_startup(server: &Server) -> (String, String) {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if let Ok(pid) = fs::read_to_string(server.root.join("pid")) {
+                if !pid.trim().is_empty() {
+                    let argv = fs::read_to_string(server.root.join("argv")).unwrap();
+                    return (pid, argv);
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .expect("fake provider wrote its startup files")
+}
+
 #[tokio::test]
 async fn fake_provider_launch_presence_failure_and_shutdown() {
     let root = std::env::temp_dir().join(format!(
@@ -65,9 +81,9 @@ async fn fake_provider_launch_presence_failure_and_shutdown() {
     fs::write(
         &script,
         r#"#!/bin/sh
+if [ -f "$LRV_TEST_ROOT/fail" ]; then exit 7; fi
 printf '%s\n' "$@" > "$LRV_TEST_ROOT/argv"
 echo $$ > "$LRV_TEST_ROOT/pid"
-if [ -f "$LRV_TEST_ROOT/fail" ]; then exit 7; fi
 while [ ! -f "$LRV_TEST_ROOT/attach" ]; do /bin/sleep 0.05; done
 lrv --listen --listen-timeout 1
 while [ ! -f "$LRV_TEST_ROOT/exit" ]; do /bin/sleep 0.05; done
@@ -168,7 +184,7 @@ while [ ! -f "$LRV_TEST_ROOT/exit" ]; do /bin/sleep 0.05; done
         v["attached"] == true && v["busy"] == true
     })
     .await;
-    let argv = fs::read_to_string(server.root.join("argv")).unwrap();
+    let (_, argv) = provider_startup(&server).await;
     let diff = argv
         .lines()
         .find_map(|line| line.strip_prefix("commit_idx 0: file "))
@@ -207,10 +223,9 @@ while [ ! -f "$LRV_TEST_ROOT/exit" ]; do /bin/sleep 0.05; done
     event(&mut sse, &mut pending, |v| v["attached"] == false).await;
     fs::remove_file(server.root.join("attach")).unwrap();
     fs::remove_file(server.root.join("exit")).unwrap();
+    fs::remove_file(server.root.join("pid")).unwrap();
     assert_eq!(launch().send().await.unwrap().status(), 202);
-    tokio::time::sleep(Duration::from_millis(200)).await;
-    let pid = fs::read_to_string(server.root.join("pid")).unwrap();
-    let argv = fs::read_to_string(server.root.join("argv")).unwrap();
+    let (pid, argv) = provider_startup(&server).await;
     let last_dir = PathBuf::from(
         argv.lines()
             .find_map(|l| l.strip_prefix("commit_idx 0: file "))
