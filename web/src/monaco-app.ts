@@ -122,7 +122,7 @@ export class MonacoApp {
   currentCommitIdx: number;
   commitLoadGeneration: number;
   commentDraftKey: string | null;
-  private commentDraftRestorePending = true;
+  commentDraftRestorePending = true;
   commentDraftWrite: Promise<void>;
   declare updateUI: () => void;
   declare renderReviewNotes: () => void;
@@ -135,7 +135,7 @@ export class MonacoApp {
   declare loadCommitView: () => void;
   declare showSettingsModal: () => void;
   declare showKeyboardHelp: () => void;
-  declare showSubmitConfirmation: () => Promise<void>;
+  declare showSubmitConfirmation: (lgtm?: boolean) => Promise<void>;
   declare userThemes: UserTheme[];
   declare isStacked: boolean;
   declare showStackedView: () => void;
@@ -658,6 +658,9 @@ export class MonacoApp {
 
     $('#submit-review')?.addEventListener('click', () => {
       void this.showSubmitConfirmation();
+    });
+    $('#submit-lgtm')?.addEventListener('click', () => {
+      void this.showSubmitConfirmation(true);
     });
     $('#publish-commit')?.addEventListener('click', () => {
       const id = this.revisionIdFor(this.currentCommitIdx);

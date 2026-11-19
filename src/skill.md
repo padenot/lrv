@@ -99,6 +99,8 @@ lrv --phab-mcp-comments /tmp/phab.md ...
 - Always print the URL(s) so the user can open them. From a background task,
   read them from its output once lrv has started.
 - Wait for the user to finish the review.
+- If the overall feedback is `LGTM. No comments.`, the reviewer approved the
+  diff and there are no fixes to apply.
 - Plan one fix per comment before touching any code. Never skip a comment.
 - Apply all fixes directly. No explanations or commentary.
 - A comment with `in_reply_to` responds to a review note (`author`, `body`,

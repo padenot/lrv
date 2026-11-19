@@ -231,7 +231,7 @@ export interface AppContext {
   showCommitLineCommentDialog(lineNum: number): void;
   applyThemeToUI(themeName: string): void;
   showSettingsModal(): void;
-  showSubmitConfirmation(): Promise<void>;
+  showSubmitConfirmation(lgtm?: boolean): Promise<void>;
   clearPersistedComments(): Promise<void>;
   showKeyboardHelp(): void;
   updateDecorations(): void;

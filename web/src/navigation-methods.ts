@@ -57,6 +57,9 @@ export class NavigationMethods {
       if (!action || !this.canRunShortcut(action)) {
         return;
       }
+      if (action === 'submitLgtm' && (e.defaultPrevented || e.repeat)) {
+        return;
+      }
 
       e.preventDefault();
 
@@ -89,6 +92,9 @@ export class NavigationMethods {
         case 'submitReview':
           // Goes through the button so that, with several destinations, the menu opens.
           document.getElementById('submit-review')?.click();
+          break;
+        case 'submitLgtm':
+          document.getElementById('submit-lgtm')?.click();
           break;
         case 'showHelp':
           this.showKeyboardHelp();
@@ -184,17 +190,13 @@ export class NavigationMethods {
       return false;
     }
 
-    // Layout-agnostic detection using KeyboardEvent.code for letters and '/?'
+    // Letter shortcuts use physical key positions.
     const isLetter = key.length === 1 && /[a-z]/i.test(key);
-    if (key === '?') {
-      // On US layouts, '?' is Shift + Slash
-      return e.shiftKey && e.code === 'Slash';
-    }
     if (isLetter) {
       const code = 'Key' + key.toUpperCase();
       return e.code === code;
     }
-    // Fall back to string key comparison for non-letters and named keys (e.g., ArrowUp)
+    // Use the character produced by the active layout for punctuation.
     return e.key === key;
   }
 

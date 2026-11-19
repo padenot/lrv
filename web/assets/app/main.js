@@ -11692,6 +11692,11 @@ const KEYBOARD_SHORTCUTS = [
 		description: "Finish review"
 	},
 	{
+		keys: ["Mod+Enter"],
+		action: "submitLgtm",
+		description: "LGTM"
+	},
+	{
 		keys: ["?"],
 		action: "showHelp",
 		description: "Show keyboard shortcuts"
@@ -11729,6 +11734,7 @@ var NavigationMethods = class {
 			if (this.currentWidget !== null) return;
 			const action = this.matchKeyboardShortcut(e);
 			if (!action || !this.canRunShortcut(action)) return;
+			if (action === "submitLgtm" && (e.defaultPrevented || e.repeat)) return;
 			e.preventDefault();
 			switch (action) {
 				case "nextFile":
@@ -11757,6 +11763,9 @@ var NavigationMethods = class {
 					break;
 				case "submitReview":
 					document.getElementById("submit-review")?.click();
+					break;
+				case "submitLgtm":
+					document.getElementById("submit-lgtm")?.click();
 					break;
 				case "showHelp":
 					this.showKeyboardHelp();
@@ -11815,9 +11824,7 @@ var NavigationMethods = class {
 			"(",
 			")"
 		].includes(key) && needsShift !== e.shiftKey) return false;
-		const isLetter = key.length === 1 && /[a-z]/i.test(key);
-		if (key === "?") return e.shiftKey && e.code === "Slash";
-		if (isLetter) {
+		if (key.length === 1 && /[a-z]/i.test(key)) {
 			const code = "Key" + key.toUpperCase();
 			return e.code === code;
 		}
@@ -13291,10 +13298,29 @@ var DialogMethods = class {
 			if (initial) initial.focus();
 		}, 0);
 	}
-	async showSubmitConfirmation() {
+	async showSubmitConfirmation(lgtm = false) {
 		const submissionComments = this.commentManager.getComments().filter((c) => !this.publishedCommentKeys.has(commentKey(c)));
 		const accepted = acceptedNoteEntries(this.reviewNoteManager.getNotes().filter((note) => !note.id || !this.publishedNoteIds.has(note.id)), this.context.own_revisions);
 		const comments = [...submissionComments, ...accepted];
+		const discussionCount = this.discussionManager.getOpenThreadCount();
+		if (lgtm) {
+			if (this.commentDraftKey && this.commentDraftRestorePending) {
+				window.alert("Choose whether to restore the saved review draft before using LGTM.");
+				return;
+			}
+			if (this.currentWidget || document.querySelector(".stacked-comment-form")) {
+				window.alert("Save or close the open comment form before using LGTM.");
+				return;
+			}
+			if (!comments.length && !discussionCount && !this.overallReviewComment.trim()) {
+				try {
+					await this.completeReview([], "LGTM. No comments.");
+				} catch (error) {
+					window.alert(`Failed to finish review: ${error instanceof Error ? error.message : error}`);
+				}
+				return;
+			}
+		}
 		const submitLabel = "Finish";
 		let submit = () => {};
 		const { overlay, modal, body, footer, close } = openModal({
@@ -13323,7 +13349,6 @@ var DialogMethods = class {
 			body.appendChild(noCommentsMsg);
 		}
 		if (accepted.length) body.appendChild(el("p", { text: `${accepted.length} accepted ${accepted.length === 1 ? "note" : "notes"} will be sent` }));
-		const discussionCount = this.discussionManager.getOpenThreadCount();
 		if (discussionCount) body.appendChild(el("p", {
 			className: "submit-discussion-warning",
 			text: `${discussionCount} ${discussionCount === 1 ? "discussion" : "discussions"} will be discarded. Convert them first to keep them.`
@@ -13369,35 +13394,8 @@ var DialogMethods = class {
 			submitBtn.disabled = true;
 			submitBtn.textContent = "Finishing…";
 			try {
-				const resp = await fetch("/api/complete", {
-					method: "POST",
-					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify({
-						comments,
-						overall_comment: this.overallReviewComment || void 0
-					})
-				});
-				if (!resp.ok) {
-					const detail = (await resp.text()).trim();
-					throw new Error(detail || `HTTP ${resp.status}`);
-				}
-				this.reviewSubmitted = true;
-				await this.clearPersistedComments();
-				this.commentManager.setComments([]);
-				this.overallReviewComment = "";
-				this.updateDecorations();
-				this.renderFileList();
-				if (this.currentFileIsCommit) this.loadCommitView();
+				await this.completeReview(comments, this.overallReviewComment, close);
 				submitBtn.textContent = "Finished";
-				const submitReviewBtn = document.getElementById("submit-review");
-				if (submitReviewBtn) {
-					submitReviewBtn.disabled = true;
-					submitReviewBtn.textContent = "Review finished";
-				}
-				setTimeout(() => {
-					close();
-					if (this.config.auto_close_tab) window.close();
-				}, 1e3);
 			} catch (error) {
 				errorBox.textContent = `Failed to finish review: ${error instanceof Error ? error.message : error}`;
 				errorBox.hidden = false;
@@ -13413,6 +13411,40 @@ var DialogMethods = class {
 			const f = footer.querySelector(".confirm-submit-btn");
 			if (f) f.focus();
 		}, 0);
+	}
+	async completeReview(comments, overallComment, close) {
+		const finish = document.querySelector("#submit-review");
+		const lgtm = document.querySelector("#submit-lgtm");
+		finish.disabled = lgtm.disabled = true;
+		try {
+			const resp = await fetch("/api/complete", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					comments,
+					overall_comment: overallComment || void 0
+				})
+			});
+			if (!resp.ok) {
+				const detail = (await resp.text()).trim();
+				throw new Error(detail || `HTTP ${resp.status}`);
+			}
+		} catch (error) {
+			finish.disabled = lgtm.disabled = false;
+			throw error;
+		}
+		this.reviewSubmitted = true;
+		finish.textContent = "Review finished";
+		await this.clearPersistedComments();
+		this.commentManager.setComments([]);
+		this.overallReviewComment = "";
+		this.updateDecorations();
+		this.renderFileList();
+		if (this.currentFileIsCommit) this.loadCommitView();
+		setTimeout(() => {
+			close?.();
+			if (this.config.auto_close_tab) window.close();
+		}, 1e3);
 	}
 	async renderSubmitComments(body, comments) {
 		const commentsByFile = {};
@@ -15130,6 +15162,9 @@ var MonacoApp = class {
 		this.setupConnectAgent();
 		$$1("#submit-review")?.addEventListener("click", () => {
 			this.showSubmitConfirmation();
+		});
+		$$1("#submit-lgtm")?.addEventListener("click", () => {
+			this.showSubmitConfirmation(true);
 		});
 		$$1("#publish-commit")?.addEventListener("click", () => {
 			const id = this.revisionIdFor(this.currentCommitIdx);

@@ -9,6 +9,7 @@ export type KeyboardAction =
   | 'openComment'
   | 'clearFocus'
   | 'submitReview'
+  | 'submitLgtm'
   | 'showHelp'
   | 'nextCommit'
   | 'previousCommit';
@@ -30,6 +31,7 @@ export const KEYBOARD_SHORTCUTS: KeyboardShortcut[] = [
   { keys: ['Enter'], action: 'openComment', description: 'Comment on focused line' },
   { keys: ['Escape'], action: 'clearFocus', description: 'Clear focus' },
   { keys: ['Mod+Shift+Enter'], action: 'submitReview', description: 'Finish review' },
+  { keys: ['Mod+Enter'], action: 'submitLgtm', description: 'LGTM' },
   { keys: ['?'], action: 'showHelp', description: 'Show keyboard shortcuts' },
   {
     keys: ['Alt+ArrowDown', 'Mod+Shift+ArrowRight', 'Mod+Shift+L'],

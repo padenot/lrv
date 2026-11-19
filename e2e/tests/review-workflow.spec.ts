@@ -530,8 +530,7 @@ test.describe('Review Workflow E2E', () => {
     // Click on the header to focus the page without triggering Monaco
     await page.locator('.header .wordmark').click();
 
-    // Press ? to show help (Shift+Slash to match keyboard code detection)
-    await page.keyboard.press('Shift+Slash');
+    await page.keyboard.press('?');
 
     // Help modal should appear
     await expect(page.locator('.submit-modal h2:has-text("Keyboard Shortcuts")')).toBeVisible();
@@ -544,6 +543,24 @@ test.describe('Review Workflow E2E', () => {
 
     // Modal should close
     await expect(page.locator('.submit-modal h2:has-text("Keyboard Shortcuts")')).not.toBeVisible();
+
+    const help = page.getByRole('dialog', { name: 'Keyboard Shortcuts' });
+    const header = page.locator('.header .wordmark');
+    // Finnish Shift+Minus types '?', and Shift+Slash types '_'.
+    await header.dispatchEvent('keydown', {
+      key: '_',
+      code: 'Slash',
+      shiftKey: true,
+      bubbles: true,
+    });
+    await expect(help).toBeHidden();
+    await header.dispatchEvent('keydown', {
+      key: '?',
+      code: 'Minus',
+      shiftKey: true,
+      bubbles: true,
+    });
+    await expect(help).toBeVisible();
   });
 
   test('should navigate between files with keyboard', async ({ page }) => {
@@ -603,6 +620,39 @@ test.describe('Review Workflow E2E', () => {
 
     // Wait for submission to complete
     await expect(page.locator('text=Review finished')).toBeVisible({ timeout: 3000 });
+  });
+
+  for (const trigger of ['button', 'shortcut'] as const) {
+    test(`LGTM finishes an empty review via the ${trigger}`, async ({ page }) => {
+      await openApp(page);
+      const request = page.waitForRequest('**/api/complete');
+      if (trigger === 'shortcut') {
+        await page.locator('.header .wordmark').click();
+        await page.keyboard.press('ControlOrMeta+Enter');
+      } else {
+        await page.getByRole('button', { name: 'LGTM', exact: true }).click();
+      }
+      expect((await request).postDataJSON()).toEqual({
+        comments: [],
+        overall_comment: 'LGTM. No comments.',
+      });
+      await expect(page.locator('#submit-review')).toHaveText('Review finished');
+      await expect(page.locator('.submit-review-modal')).toHaveCount(0);
+    });
+  }
+
+  test('LGTM opens Finish when there is a pending comment', async ({ page }) => {
+    await openApp(page);
+    await page.locator('.modified .line-numbers').first().click();
+    const comment = page.locator('.comment-textarea');
+    await comment.fill('Please fix this');
+    await comment.press('ControlOrMeta+Enter');
+    await expect(page.locator('#comment-count')).toHaveText('1');
+
+    await page.getByRole('button', { name: 'LGTM', exact: true }).click();
+    const finish = page.getByRole('dialog', { name: 'Finish review' });
+    await expect(finish).toContainText('Please fix this');
+    await expect(finish.getByRole('button', { name: 'Finish', exact: true })).toBeEnabled();
   });
 
   test('submit failures are shown in the dialog and can be retried', async ({ page }) => {

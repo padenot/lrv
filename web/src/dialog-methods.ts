@@ -35,6 +35,9 @@ export class DialogMethods {
   declare currentFileIndex: number;
   declare discussionManager: AppContext['discussionManager'];
   declare commentManager: AppContext['commentManager'];
+  declare commentDraftKey: string | null;
+  declare commentDraftRestorePending: boolean;
+  declare currentWidget: AppContext['currentWidget'];
   declare clearPersistedComments: () => Promise<void>;
   declare updateDecorations: () => void;
   declare renderFileList: () => void;
@@ -379,7 +382,7 @@ export class DialogMethods {
     }, 0);
   }
 
-  async showSubmitConfirmation() {
+  async showSubmitConfirmation(lgtm = false) {
     const submissionComments = this.commentManager
       .getComments()
       .filter((c) => !this.publishedCommentKeys.has(commentKey(c)));
@@ -390,6 +393,27 @@ export class DialogMethods {
       this.context.own_revisions,
     );
     const comments = [...submissionComments, ...accepted];
+    const discussionCount = this.discussionManager.getOpenThreadCount();
+    if (lgtm) {
+      if (this.commentDraftKey && this.commentDraftRestorePending) {
+        window.alert('Choose whether to restore the saved review draft before using LGTM.');
+        return;
+      }
+      if (this.currentWidget || document.querySelector('.stacked-comment-form')) {
+        window.alert('Save or close the open comment form before using LGTM.');
+        return;
+      }
+      if (!comments.length && !discussionCount && !this.overallReviewComment.trim()) {
+        try {
+          await this.completeReview([], 'LGTM. No comments.');
+        } catch (error) {
+          window.alert(
+            `Failed to finish review: ${error instanceof Error ? error.message : error}`,
+          );
+        }
+        return;
+      }
+    }
     const submitLabel = 'Finish';
     let submit: () => void | Promise<void> = () => {};
 
@@ -427,7 +451,6 @@ export class DialogMethods {
       );
     }
 
-    const discussionCount = this.discussionManager.getOpenThreadCount();
     if (discussionCount) {
       body.appendChild(
         el('p', {
@@ -504,44 +527,8 @@ export class DialogMethods {
       submitBtn.textContent = 'Finishing…';
 
       try {
-        const resp = await fetch('/api/complete', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            comments,
-            overall_comment: this.overallReviewComment || undefined,
-          }),
-        });
-        if (!resp.ok) {
-          const detail = (await resp.text()).trim();
-          throw new Error(detail || `HTTP ${resp.status}`);
-        }
-        this.reviewSubmitted = true;
-
-        await this.clearPersistedComments();
-        this.commentManager.setComments([]);
-        this.overallReviewComment = '';
-        this.updateDecorations();
-        this.renderFileList();
-        if (this.currentFileIsCommit) {
-          this.loadCommitView();
-        }
-
+        await this.completeReview(comments, this.overallReviewComment, close);
         submitBtn.textContent = 'Finished';
-        const submitReviewBtn = document.getElementById(
-          'submit-review',
-        ) as HTMLButtonElement | null;
-        if (submitReviewBtn) {
-          submitReviewBtn.disabled = true;
-          submitReviewBtn.textContent = 'Review finished';
-        }
-
-        setTimeout(() => {
-          close();
-          if (this.config.auto_close_tab) {
-            window.close();
-          }
-        }, 1000);
       } catch (error) {
         errorBox.textContent = `Failed to finish review: ${error instanceof Error ? error.message : error}`;
         errorBox.hidden = false;
@@ -565,6 +552,49 @@ export class DialogMethods {
         f.focus();
       }
     }, 0);
+  }
+
+  private async completeReview(
+    comments: ReviewComment[],
+    overallComment: string,
+    close?: () => void,
+  ) {
+    const finish = document.querySelector<HTMLButtonElement>('#submit-review')!;
+    const lgtm = document.querySelector<HTMLButtonElement>('#submit-lgtm')!;
+    finish.disabled = lgtm.disabled = true;
+
+    try {
+      const resp = await fetch('/api/complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ comments, overall_comment: overallComment || undefined }),
+      });
+      if (!resp.ok) {
+        const detail = (await resp.text()).trim();
+        throw new Error(detail || `HTTP ${resp.status}`);
+      }
+    } catch (error) {
+      finish.disabled = lgtm.disabled = false;
+      throw error;
+    }
+
+    this.reviewSubmitted = true;
+    finish.textContent = 'Review finished';
+    await this.clearPersistedComments();
+    this.commentManager.setComments([]);
+    this.overallReviewComment = '';
+    this.updateDecorations();
+    this.renderFileList();
+    if (this.currentFileIsCommit) {
+      this.loadCommitView();
+    }
+
+    setTimeout(() => {
+      close?.();
+      if (this.config.auto_close_tab) {
+        window.close();
+      }
+    }, 1000);
   }
 
   async renderSubmitComments(body: HTMLElement, comments: ReviewComment[]) {
