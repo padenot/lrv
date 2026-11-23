@@ -11747,8 +11747,8 @@ var NavigationMethods = class {
 	setupKeyboardShortcuts() {
 		document.addEventListener("keydown", (e) => {
 			if (document.querySelector(".submit-modal-overlay")) return;
-			const activeElement = document.activeElement || document.body;
-			if (activeElement && (activeElement.tagName === "TEXTAREA" || activeElement.tagName === "INPUT" || activeElement.isContentEditable)) return;
+			const target = e.composedPath()[0];
+			if (target instanceof HTMLElement && (target.matches("input, textarea") || target.isContentEditable)) return;
 			if (this.currentWidget !== null) return;
 			const action = this.matchKeyboardShortcut(e);
 			if (action === "findStackedDiff") {

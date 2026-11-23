@@ -37,13 +37,11 @@ export class NavigationMethods {
         return;
       }
 
-      // Never handle shortcuts while authoring text (inputs, textareas, contenteditable)
-      const activeElement = (document.activeElement || document.body) as HTMLElement;
+      // The composed path reaches text fields inside shadow DOM, such as stacked Find.
+      const target = e.composedPath()[0];
       if (
-        activeElement &&
-        (activeElement.tagName === 'TEXTAREA' ||
-          activeElement.tagName === 'INPUT' ||
-          activeElement.isContentEditable)
+        target instanceof HTMLElement &&
+        (target.matches('input, textarea') || target.isContentEditable)
       ) {
         return;
       }

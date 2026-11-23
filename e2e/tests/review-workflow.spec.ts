@@ -1449,7 +1449,8 @@ test.describe('Review Workflow E2E', () => {
     const find = view.getByPlaceholder('Search', { exact: true });
     const matchCount = view.locator('[data-matches]');
     await expect(find).toBeFocused();
-    await find.fill('stacked-search-added');
+    await find.pressSequentially('stacked-search-added');
+    await expect(find).toHaveValue('stacked-search-added');
     await expect(matchCount).toHaveText('1/1');
     await expect(view.getByText('stacked-search-added', { exact: true })).toBeInViewport();
     await find.clear();
