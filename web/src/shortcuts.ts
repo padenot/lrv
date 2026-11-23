@@ -11,6 +11,7 @@ export type KeyboardAction =
   | 'submitReview'
   | 'submitLgtm'
   | 'showHelp'
+  | 'findStackedDiff'
   | 'nextCommit'
   | 'previousCommit';
 
@@ -33,6 +34,7 @@ export const KEYBOARD_SHORTCUTS: KeyboardShortcut[] = [
   { keys: ['Mod+Shift+Enter'], action: 'submitReview', description: 'Finish review' },
   { keys: ['Mod+Enter'], action: 'submitLgtm', description: 'LGTM' },
   { keys: ['?'], action: 'showHelp', description: 'Show keyboard shortcuts' },
+  { keys: ['Mod+F'], action: 'findStackedDiff', description: 'Find in stacked diff' },
   {
     keys: ['Alt+ArrowDown', 'Mod+Shift+ArrowRight', 'Mod+Shift+L'],
     action: 'nextCommit',

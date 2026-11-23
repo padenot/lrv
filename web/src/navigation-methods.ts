@@ -21,6 +21,7 @@ export class NavigationMethods {
   declare loadFile: (index: number) => Promise<void>;
   declare isAddedFile: AppContext['isAddedFile'];
   declare showKeyboardHelp: () => void;
+  declare openStackedSearch: () => boolean;
   declare showCommentDialog: AppContext['showCommentDialog'];
   declare nextCommit: () => void;
   declare previousCommit: () => void;
@@ -54,6 +55,12 @@ export class NavigationMethods {
 
       // Match key event to shortcut
       const action = this.matchKeyboardShortcut(e);
+      if (action === 'findStackedDiff') {
+        if (!e.defaultPrevented && this.openStackedSearch()) {
+          e.preventDefault();
+        }
+        return;
+      }
       if (!action || !this.canRunShortcut(action)) {
         return;
       }

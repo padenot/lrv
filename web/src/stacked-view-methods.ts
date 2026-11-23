@@ -190,6 +190,14 @@ export class StackedViewMethods {
     }
   }
 
+  openStackedSearch(): boolean {
+    if (!this.isStacked || this.currentFileIsCommit || !this.stackedCodeView) {
+      return false;
+    }
+    this.stackedCodeView.openSearch({ mode: 'find', scope: 'all' });
+    return true;
+  }
+
   private stackedTopForFile(file: DiffFile) {
     if (file.is_binary) {
       return document.getElementById(this.stackedSectionId(file.path))?.offsetTop ?? null;
@@ -495,10 +503,9 @@ export class StackedViewMethods {
     if (!file.hunks.length) {
       return null;
     }
-    const parsed = parsePatchFiles(
-      this.toUnifiedPatch(file),
-      `lrv:${this.fileCacheKey(file.path)}@${this.commitLoadGeneration}`,
-    )[0]?.files[0];
+    const parsed = parsePatchFiles(this.toUnifiedPatch(file), {
+      cacheKeyPrefix: `lrv:${this.fileCacheKey(file.path)}@${this.commitLoadGeneration}`,
+    })[0]?.files[0];
     return parsed ?? null;
   }
 

@@ -1426,6 +1426,41 @@ test.describe('Review Workflow E2E', () => {
     });
   });
 
+  test('stacked search finds added and removed text in an off-screen file', async ({ page }) => {
+    if (!testRepoPath) {
+      throw new Error('Test repo not initialized');
+    }
+    fs.writeFileSync(path.join(testRepoPath, 'zz-filler.txt'), 'filler line\n'.repeat(500));
+    const searchFile = path.join(testRepoPath, 'zzz-search.txt');
+    fs.writeFileSync(searchFile, 'stacked-search-removed\n');
+    await execAsync(
+      `cd "${testRepoPath}" && git add zzz-search.txt && git commit -q -m "search fixture" && git add zz-filler.txt`,
+    );
+    fs.writeFileSync(searchFile, 'stacked-search-added\n');
+    await stopServer();
+    await startServer();
+
+    await openStackedView(page);
+    const view = page.locator('.stacked-code-view');
+    await expect(view.getByText('zzz-search.txt', { exact: true })).toHaveCount(0);
+
+    // The toolbar has focus after switching modes. Find should still open CodeView search.
+    await page.keyboard.press('ControlOrMeta+f');
+    const find = view.getByPlaceholder('Search', { exact: true });
+    const matchCount = view.locator('[data-matches]');
+    await expect(find).toBeFocused();
+    await find.fill('stacked-search-added');
+    await expect(matchCount).toHaveText('1/1');
+    await expect(view.getByText('stacked-search-added', { exact: true })).toBeInViewport();
+    await find.clear();
+    await expect(matchCount).toHaveText('0/0');
+    await find.fill('stacked-search-removed');
+    await expect(matchCount).toHaveText('1/1');
+    await expect(view.getByText('stacked-search-removed', { exact: true })).toBeInViewport();
+    await find.press('Escape');
+    await expect(find).toHaveCount(0);
+  });
+
   test('stacked mode should create a range comment from selected lines and a line number click', async ({
     page,
   }) => {

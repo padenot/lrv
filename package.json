@@ -18,7 +18,7 @@
     "lint:web": "eslint web/src e2e"
   },
   "dependencies": {
-    "@pierre/diffs": "^1.5.2",
+    "@pierre/diffs": "^1.7.1",
     "@pierre/trees": "^1.0.0-beta.6"
   }
 }

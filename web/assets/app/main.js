@@ -11715,6 +11715,11 @@ const KEYBOARD_SHORTCUTS = [
 		description: "Show keyboard shortcuts"
 	},
 	{
+		keys: ["Mod+F"],
+		action: "findStackedDiff",
+		description: "Find in stacked diff"
+	},
+	{
 		keys: [
 			"Alt+ArrowDown",
 			"Mod+Shift+ArrowRight",
@@ -11746,6 +11751,10 @@ var NavigationMethods = class {
 			if (activeElement && (activeElement.tagName === "TEXTAREA" || activeElement.tagName === "INPUT" || activeElement.isContentEditable)) return;
 			if (this.currentWidget !== null) return;
 			const action = this.matchKeyboardShortcut(e);
+			if (action === "findStackedDiff") {
+				if (!e.defaultPrevented && this.openStackedSearch()) e.preventDefault();
+				return;
+			}
 			if (!action || !this.canRunShortcut(action)) return;
 			if (action === "submitLgtm" && (e.defaultPrevented || e.repeat)) return;
 			e.preventDefault();
@@ -14042,10 +14051,10 @@ function themeTypeFor(themeName) {
 let diffsRuntimePromise = null;
 function loadDiffsRuntime() {
 	diffsRuntimePromise ??= Promise.all([
-		import("./chunks/stacked-diff-CXzcki7R.js").then((n) => n.n),
-		import("./chunks/stacked-diff-CXzcki7R.js").then((n) => n.i),
-		import("./chunks/stacked-diff-CXzcki7R.js").then((n) => n.r),
-		import("./chunks/stacked-diff-CXzcki7R.js").then((n) => n.t)
+		import("./chunks/stacked-diff-D2_0u14V.js").then((n) => n.wt),
+		import("./chunks/stacked-diff-D2_0u14V.js").then((n) => n.Et),
+		import("./chunks/stacked-diff-D2_0u14V.js").then((n) => n.Tt),
+		import("./chunks/stacked-diff-D2_0u14V.js").then((n) => n.St)
 	]).then(([codeView, patchParser, fileParser, workerPool]) => ({
 		CodeView: codeView.CodeView,
 		parsePatchFiles: patchParser.parsePatchFiles,
@@ -14114,6 +14123,14 @@ var StackedViewMethods = class {
 	toggleStackedView() {
 		if (this.isStacked) this.hideStackedView();
 		else this.showStackedView();
+	}
+	openStackedSearch() {
+		if (!this.isStacked || this.currentFileIsCommit || !this.stackedCodeView) return false;
+		this.stackedCodeView.openSearch({
+			mode: "find",
+			scope: "all"
+		});
+		return true;
 	}
 	stackedTopForFile(file) {
 		if (file.is_binary) return document.getElementById(this.stackedSectionId(file.path))?.offsetTop ?? null;
@@ -14322,7 +14339,7 @@ var StackedViewMethods = class {
 	}
 	toPatchDiffsMetadata(file, parsePatchFiles) {
 		if (!file.hunks.length) return null;
-		return parsePatchFiles(this.toUnifiedPatch(file), `lrv:${this.fileCacheKey(file.path)}@${this.commitLoadGeneration}`)[0]?.files[0] ?? null;
+		return parsePatchFiles(this.toUnifiedPatch(file), { cacheKeyPrefix: `lrv:${this.fileCacheKey(file.path)}@${this.commitLoadGeneration}` })[0]?.files[0] ?? null;
 	}
 	buildHeaderMetadata(file) {
 		const { additions, deletions } = this.fileDelta(file);

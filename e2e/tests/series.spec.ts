@@ -729,11 +729,7 @@ test.describe('Series: stacked-mode comments stay scoped to their own commit', (
     expect(
       await page.evaluate(() => (window as any).__APP.fileCache['0:shared.txt'].new),
     ).toContain('line2 modified once');
-    await page.evaluate(async () => {
-      const app = (window as any).__APP;
-      app.currentFileIsCommit = false;
-      await app.renderStackedView();
-    });
+    await fileTreeRow(page, 'shared.txt').click();
     await expect(page.locator('.stacked-code-view')).toContainText('line2 modified twice');
   });
 
