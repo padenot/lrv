@@ -36,6 +36,83 @@ struct RevisionSearchData {
 struct RevisionData {
     id: u32,
     fields: RevisionFields,
+    #[serde(default)]
+    attachments: RevisionAttachments,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct RevisionAttachments {
+    #[serde(default)]
+    reviewers: ReviewersAttachment,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct ReviewersAttachment {
+    #[serde(default)]
+    reviewers: Vec<RevisionReviewer>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RevisionReviewer {
+    #[serde(rename = "reviewerPHID")]
+    reviewer_phid: String,
+    status: String,
+}
+
+impl RevisionReviewer {
+    fn pending(&self) -> bool {
+        matches!(
+            self.status.as_str(),
+            "added" | "blocking" | "accepted-older" | "rejected-older" | "commented"
+        )
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MyReview {
+    Waiting,
+    Done,
+    #[default]
+    None,
+}
+
+/// A direct verdict takes precedence over responsibility inherited through projects.
+/// Returns the viewer's review state and whether it comes through a project reviewer.
+fn my_review(revision: &RevisionData, viewer: &str, responsible: bool) -> (MyReview, bool) {
+    if revision.fields.author_phid.as_deref() == Some(viewer) {
+        return (MyReview::None, false);
+    }
+    let reviewers = &revision.attachments.reviewers.reviewers;
+    let direct = reviewers.iter().find(|r| r.reviewer_phid == viewer);
+    if direct.is_some_and(|r| matches!(r.status.as_str(), "accepted" | "rejected")) {
+        return (MyReview::Done, false);
+    }
+    let needs_review = revision
+        .fields
+        .status
+        .as_ref()
+        .is_some_and(|s| !s.closed && s.value.as_deref() == Some("needs-review"));
+    if !needs_review {
+        return (MyReview::None, false);
+    }
+    if let Some(direct) = direct {
+        return if direct.pending() {
+            (MyReview::Waiting, false)
+        } else {
+            (MyReview::None, false)
+        };
+    }
+    // responsiblePHIDs resolves membership server-side. Only pending project reviewers
+    // can make this an outstanding group review; accepted groups do not need another vote.
+    let pending_group = reviewers
+        .iter()
+        .any(|r| r.reviewer_phid.starts_with("PHID-PROJ-") && r.pending());
+    if responsible && pending_group {
+        return (MyReview::Waiting, true);
+    }
+    (MyReview::None, false)
 }
 
 #[derive(Debug, Deserialize)]
@@ -444,6 +521,10 @@ pub struct ActiveDiff {
     /// The revision's status value (`accepted`, `needs-review`, ...) and display name.
     pub status: Option<String>,
     pub status_name: Option<String>,
+    pub my_review: MyReview,
+    pub via_group: bool,
+    /// Number of pending reviewer entries, including project reviewers.
+    pub reviewers_pending: usize,
     pub diff_id: u64,
     /// The Git blobs of the files the diff changes.
     pub blobs: DiffBlobs,
@@ -686,19 +767,25 @@ impl PhabricatorClient {
     pub async fn fetch_active_diffs(
         &self,
         ids: &[u32],
+        viewer: &str,
     ) -> Result<HashMap<u32, Result<ActiveDiff>>> {
         if ids.is_empty() {
             return Ok(HashMap::new());
         }
-        let revisions: RevisionSearchData = self
-            .conduit(
-                "differential.revision.search",
-                ids.iter()
-                    .enumerate()
-                    .map(|(i, id)| (format!("constraints[ids][{i}]"), id.to_string()))
-                    .collect(),
-            )
-            .await?;
+        let ids_params: Vec<_> = ids
+            .iter()
+            .enumerate()
+            .map(|(i, id)| (format!("constraints[ids][{i}]"), id.to_string()))
+            .collect();
+        let mut params = ids_params.clone();
+        params.push(("attachments[reviewers]".into(), "1".into()));
+        let mut responsible_params = ids_params;
+        responsible_params.push(("constraints[responsiblePHIDs][0]".into(), viewer.into()));
+        let (revisions, responsible) = tokio::try_join!(
+            self.conduit::<RevisionSearchData>("differential.revision.search", params),
+            self.conduit::<RevisionSearchData>("differential.revision.search", responsible_params),
+        )?;
+        let responsible: HashSet<_> = responsible.data.iter().map(|r| r.id).collect();
         let mut revisions: HashMap<_, _> = revisions
             .data
             .into_iter()
@@ -759,7 +846,13 @@ impl PhabricatorClient {
                     let diff_id = *diff_ids
                         .get(diff_phid)
                         .context("Phabricator diff not found")?;
-                    Self::parse_active_diff(revision, diff_id, &queried)
+                    Self::parse_active_diff(
+                        revision,
+                        diff_id,
+                        &queried,
+                        viewer,
+                        responsible.contains(&id),
+                    )
                 })();
                 (id, active)
             })
@@ -770,12 +863,27 @@ impl PhabricatorClient {
         revision: RevisionData,
         diff_id: u64,
         queried: &serde_json::Value,
+        viewer: &str,
+        responsible: bool,
     ) -> Result<ActiveDiff> {
         let diff = queried
             .get(diff_id.to_string())
             .context("Phabricator diff missing from querydiffs")?;
 
+        let (my_review, via_group) = my_review(&revision, viewer, responsible);
         let status = revision.fields.status.as_ref();
+        let reviewers_pending =
+            if status.is_some_and(|s| !s.closed && s.value.as_deref() == Some("needs-review")) {
+                revision
+                    .attachments
+                    .reviewers
+                    .reviewers
+                    .iter()
+                    .filter(|r| r.pending())
+                    .count()
+            } else {
+                0
+            };
         Ok(ActiveDiff {
             title: revision.fields.title.unwrap_or_default(),
             uri: revision.fields.uri.unwrap_or_default(),
@@ -784,6 +892,9 @@ impl PhabricatorClient {
             closed: status.is_some_and(|s| s.closed),
             status: status.and_then(|s| s.value.clone()),
             status_name: status.and_then(|s| s.name.clone()),
+            my_review,
+            via_group,
+            reviewers_pending,
             diff_id,
             blobs: remote_blobs(diff),
         })
@@ -895,6 +1006,10 @@ pub struct RevisionStatusInfo {
     pub closed: bool,
     pub status: Option<String>,
     pub status_name: Option<String>,
+    pub my_review: MyReview,
+    pub via_group: bool,
+    /// Number of pending reviewer entries, including project reviewers.
+    pub reviewers_pending: usize,
     pub publishable: bool,
     pub reason: Option<String>,
     pub published: bool,
@@ -969,6 +1084,9 @@ impl Publisher {
                     closed: false,
                     status: None,
                     status_name: None,
+                    my_review: MyReview::None,
+                    via_group: false,
+                    reviewers_pending: 0,
                     publishable: true,
                     reason: None,
                     published: false,
@@ -1052,6 +1170,9 @@ impl Publisher {
                         closed: false,
                         status: None,
                         status_name: None,
+                        my_review: MyReview::None,
+                        via_group: false,
+                        reviewers_pending: 0,
                         publishable: false,
                         published: false,
                         outdated: false,
@@ -1079,9 +1200,7 @@ impl Publisher {
                     .filter(|revision| revision.reason.is_none())
                     .map(|revision| revision.id[1..].parse().expect("revision id"))
                     .collect();
-                let (viewer, active_diffs) =
-                    tokio::join!(client.whoami(), client.fetch_active_diffs(&ids));
-                let viewer = match viewer {
+                let viewer = match client.whoami().await {
                     Ok(viewer) => viewer,
                     Err(e) => {
                         return Validation {
@@ -1092,7 +1211,7 @@ impl Publisher {
                         }
                     }
                 };
-                let mut active_diffs = active_diffs;
+                let mut active_diffs = client.fetch_active_diffs(&ids, &viewer.phid).await;
                 for revision in &mut revisions {
                     if revision.reason.is_some() {
                         continue;
@@ -1120,6 +1239,9 @@ impl Publisher {
                             revision.closed = active.closed;
                             revision.status = active.status;
                             revision.status_name = active.status_name;
+                            revision.my_review = active.my_review;
+                            revision.via_group = active.via_group;
+                            revision.reviewers_pending = active.reviewers_pending;
                             revision.diff_id = active.diff_id;
                             revision.publishable = revision.reason.is_none();
                         }
@@ -1305,7 +1427,7 @@ mod tests {
     use super::diff_blobs;
     use super::{
         build_revision_publish, check_diff_matches, detect_revision, foreign_outdated,
-        parse_revision_id, remote_blobs, resolve_phab_targets, ActiveDiff, PhabTarget,
+        parse_revision_id, remote_blobs, resolve_phab_targets, ActiveDiff, MyReview, PhabTarget,
         RevisionStatusInfo, Validation,
     };
     use crate::diff::parse_diff;
@@ -1333,6 +1455,9 @@ mod tests {
             closed: false,
             status: None,
             status_name: None,
+            my_review: MyReview::None,
+            via_group: false,
+            reviewers_pending: 0,
             publishable: !outdated,
             reason: outdated.then(|| "Diff mismatch".into()),
             published: false,
@@ -1340,6 +1465,131 @@ mod tests {
             diff_id: 1,
             ownership_known: true,
         }
+    }
+
+    fn review_revision(phid: &str, status: &str) -> super::RevisionData {
+        serde_json::from_value(serde_json::json!({
+            "id": 1,
+            "fields": {"authorPHID": "other", "status": {"value": "needs-review", "closed": false}},
+            "attachments": {"reviewers": {"reviewers": [
+                {"reviewerPHID": phid, "status": status, "isBlocking": false}
+            ]}}
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn classifies_direct_review_statuses() {
+        for status in [
+            "added",
+            "blocking",
+            "accepted-older",
+            "rejected-older",
+            "commented",
+            "accepted",
+            "rejected",
+            "resigned",
+        ] {
+            let revision = review_revision("PHID-USER-me", status);
+            let expected = match status {
+                "accepted" | "rejected" => MyReview::Done,
+                "resigned" => MyReview::None,
+                _ => MyReview::Waiting,
+            };
+            // Direct requests work independently of the responsibility query result.
+            for responsible in [false, true] {
+                assert_eq!(
+                    super::my_review(&revision, "PHID-USER-me", responsible),
+                    (expected, false),
+                    "{status}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn classifies_group_responsibility() {
+        for status in ["added", "blocking", "accepted-older", "accepted"] {
+            let revision = review_revision("PHID-PROJ-group", status);
+            assert_eq!(
+                super::my_review(&revision, "PHID-USER-me", false),
+                (MyReview::None, false)
+            );
+            let expected = if status == "accepted" {
+                (MyReview::None, false)
+            } else {
+                (MyReview::Waiting, true)
+            };
+            assert_eq!(
+                super::my_review(&revision, "PHID-USER-me", true),
+                expected,
+                "{status}"
+            );
+        }
+        let revision = review_revision("PHID-USER-other", "added");
+        assert_eq!(
+            super::my_review(&revision, "PHID-USER-me", false),
+            (MyReview::None, false)
+        );
+    }
+
+    #[test]
+    fn own_closed_and_non_reviewable_revisions_do_not_wait() {
+        let mut revision = review_revision("PHID-USER-me", "added");
+        revision.fields.author_phid = Some("PHID-USER-me".into());
+        assert_eq!(
+            super::my_review(&revision, "PHID-USER-me", true),
+            (MyReview::None, false)
+        );
+        revision.fields.author_phid = Some("other".into());
+        for state in [
+            "closed",
+            "abandoned",
+            "accepted",
+            "needs-revision",
+            "changes-planned",
+            "draft",
+        ] {
+            let status = revision.fields.status.as_mut().unwrap();
+            status.value = Some(state.into());
+            status.closed = matches!(state, "closed" | "abandoned");
+            assert_eq!(
+                super::my_review(&revision, "PHID-USER-me", true),
+                (MyReview::None, false),
+                "{state}"
+            );
+        }
+        revision.fields.status.as_mut().unwrap().value = Some("needs-review".into());
+        revision.attachments.reviewers.reviewers.clear();
+        assert_eq!(
+            super::my_review(&revision, "PHID-USER-me", false),
+            (MyReview::None, false)
+        );
+    }
+
+    #[test]
+    fn direct_verdict_overrides_pending_group_and_counts_pending_reviewers() {
+        let revision = serde_json::from_value(serde_json::json!({
+            "id": 1,
+            "fields": {"authorPHID": "other", "status": {"value": "needs-review"}},
+            "attachments": {"reviewers": {"reviewers": [
+                {"reviewerPHID": "PHID-USER-me", "status": "accepted", "isBlocking": false},
+                {"reviewerPHID": "PHID-PROJ-group", "status": "added", "isBlocking": true},
+                {"reviewerPHID": "PHID-USER-other", "status": "accepted-older", "isBlocking": false}
+            ]}}
+        }))
+        .unwrap();
+        let active = super::PhabricatorClient::parse_active_diff(
+            revision,
+            1,
+            &serde_json::json!({"1": {"changes": []}}),
+            "PHID-USER-me",
+            true,
+        )
+        .unwrap();
+        assert_eq!(active.my_review, MyReview::Done);
+        assert!(!active.via_group);
+        assert_eq!(active.reviewers_pending, 2);
     }
 
     #[test]
@@ -1485,6 +1735,7 @@ mod tests {
             Path(method): Path<String>,
             Form(params): Form<HashMap<String, String>>,
         ) -> Json<serde_json::Value> {
+            let responsible = params.contains_key("constraints[responsiblePHIDs][0]");
             calls.lock().await.push((method.clone(), params));
             let revision = |id| {
                 serde_json::json!({
@@ -1495,7 +1746,11 @@ mod tests {
                         "diffPHID": format!("PHID-DIFF-{id}"),
                         "authorPHID": "PHID-USER-author",
                         "status": {"value": "needs-review", "name": "Needs Review", "closed": false}
-                    }
+                    },
+                    "attachments": {"reviewers": {"reviewers": [{
+                        "reviewerPHID": if id == 1 { "PHID-USER-reviewer" } else { "PHID-PROJ-group" },
+                        "status": "added", "isBlocking": id == 1
+                    }]}}
                 })
             };
             let result = match method.as_str() {
@@ -1503,7 +1758,7 @@ mod tests {
                     serde_json::json!({"phid": "PHID-USER-reviewer", "userName": "reviewer"})
                 }
                 "differential.revision.search" => serde_json::json!({
-                    "data": if missing { vec![revision(1)] } else { vec![revision(2), revision(1)] }
+                    "data": if responsible { vec![revision(2)] } else if missing { vec![revision(1)] } else { vec![revision(2), revision(1)] }
                 }),
                 "differential.diff.search" => serde_json::json!({"data": [
                     {"id": 12, "phid": "PHID-DIFF-2"},
@@ -1546,6 +1801,9 @@ mod tests {
             );
             assert!(validation.revisions[0].publishable);
             assert_eq!(validation.revisions[0].diff_id, 11);
+            assert_eq!(validation.revisions[0].my_review, MyReview::Waiting);
+            assert!(!validation.revisions[0].via_group);
+            assert_eq!(validation.revisions[0].reviewers_pending, 1);
             if missing {
                 assert!(!validation.revisions[1].publishable);
                 assert_eq!(
@@ -1555,24 +1813,48 @@ mod tests {
             } else {
                 assert!(validation.revisions[1].publishable);
                 assert_eq!(validation.revisions[1].diff_id, 12);
+                assert_eq!(validation.revisions[1].my_review, MyReview::Waiting);
+                assert!(validation.revisions[1].via_group);
             }
             let calls = calls.lock().await;
-            assert_eq!(calls.len(), 4);
+            assert_eq!(calls.len(), 5);
             for method in [
                 "user.whoami",
                 "differential.revision.search",
                 "differential.diff.search",
                 "differential.querydiffs",
             ] {
-                assert_eq!(calls.iter().filter(|(name, _)| name == method).count(), 1);
+                assert_eq!(
+                    calls.iter().filter(|(name, _)| name == method).count(),
+                    if method == "differential.revision.search" {
+                        2
+                    } else {
+                        1
+                    }
+                );
             }
             let params = &calls
                 .iter()
-                .find(|(name, _)| name == "differential.revision.search")
+                .find(|(name, params)| {
+                    name == "differential.revision.search"
+                        && params.contains_key("attachments[reviewers]")
+                })
                 .unwrap()
                 .1;
             assert_eq!(params["constraints[ids][0]"], "1");
             assert_eq!(params["constraints[ids][1]"], "2");
+            assert_eq!(params["attachments[reviewers]"], "1");
+            let responsible_params = &calls
+                .iter()
+                .find(|(_, params)| params.contains_key("constraints[responsiblePHIDs][0]"))
+                .unwrap()
+                .1;
+            assert_eq!(
+                responsible_params["constraints[responsiblePHIDs][0]"],
+                "PHID-USER-reviewer"
+            );
+            assert_eq!(responsible_params["constraints[ids][0]"], "1");
+            assert_eq!(responsible_params["constraints[ids][1]"], "2");
             server.abort();
         }
     }
@@ -1736,6 +2018,9 @@ mod tests {
             closed: false,
             status: None,
             status_name: None,
+            my_review: MyReview::None,
+            via_group: false,
+            reviewers_pending: 0,
             diff_id: 9,
             blobs: remote_blobs(&serde_json::json!({"changes": [
                 {"currentPath": "a.rs", "oldPath": "a.rs", "type": "2",

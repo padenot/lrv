@@ -2194,6 +2194,11 @@ body {
 }
 
 .series-commit-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  min-width: 0;
+  white-space: nowrap;
   font-size: 10px;
   color: var(--text-secondary);
   margin-top: 2px;
@@ -2212,6 +2217,9 @@ body {
 }
 
 .series-author {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: var(--text-secondary);
   font-style: italic;
 }
@@ -2427,10 +2435,82 @@ body:not(.agent-attached) .discuss-hint {
   display: none;
 }
 
-.series-revision-badge {
+.series-review-summary {
+  padding: 8px 12px;
   color: var(--text-secondary);
-  white-space: nowrap;
   font-size: 11px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.series-waiting-jump {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--warning-color);
+  font-weight: 600;
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.series-waiting-jump:disabled {
+  color: var(--text-secondary);
+  cursor: default;
+  text-decoration: none;
+}
+
+.series-commit.revision-closed {
+  opacity: 0.55;
+}
+
+/* Waiting on the viewer's review: the only amber thing in the strip. */
+.series-review-icon {
+  flex-shrink: 0;
+  align-self: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--warning-color);
+  background: color-mix(in srgb, var(--warning-color) 16%, transparent);
+}
+
+.series-review-icon svg {
+  width: 10px;
+  height: 10px;
+}
+
+.series-review-icon path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linejoin: round;
+}
+
+.series-review-icon circle {
+  fill: currentColor;
+}
+
+.series-revision-id {
+  font-family: var(--font-mono);
+}
+
+.series-revision-status {
+  --revision-color: var(--text-secondary);
+  margin-left: auto;
+  color: var(--revision-color);
+  white-space: nowrap;
+}
+
+/* The eye sits right beside the status, so it takes the status's push to the right edge. */
+.series-review-icon:has(+ .series-revision-status) {
+  margin-left: auto;
+}
+
+.series-review-icon + .series-revision-status {
+  margin-left: 0;
 }
 
 #publish-commit.verifying {
@@ -2475,11 +2555,13 @@ body:not(.agent-attached) .discuss-hint {
   display: none;
 }
 
-#commit-revision.revision-accepted {
+#commit-revision.revision-accepted,
+.series-revision-status.revision-accepted {
   --revision-color: var(--success-color);
 }
 
-#commit-revision.revision-needs-review {
+#commit-revision.revision-needs-review,
+.series-revision-status.revision-needs-review {
   --revision-color: #2f81f7;
 }
 

@@ -58,6 +58,9 @@ export type PhabRevisionStatus = {
   closed: boolean;
   status?: string | null;
   status_name?: string | null;
+  my_review: 'waiting' | 'done' | 'none';
+  via_group: boolean;
+  reviewers_pending: number;
   publishable: boolean;
   reason?: string;
   published: boolean;

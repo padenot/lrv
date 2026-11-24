@@ -1,3 +1,4 @@
+import { REVISION_STATE_CLASSES, reviewWaitingLabel } from './phabricator-status';
 import { acceptedBody } from './review-notes';
 import { el } from './dom';
 import { openModal } from './modal';
@@ -21,14 +22,6 @@ function externalLinkIcon(): SVGSVGElement {
   svg.appendChild(path);
   return svg;
 }
-
-const REVISION_STATE_CLASSES: Record<string, string> = {
-  accepted: 'revision-accepted',
-  'needs-review': 'revision-needs-review',
-  'needs-revision': 'revision-waiting',
-  'changes-planned': 'revision-waiting',
-  draft: 'revision-waiting',
-};
 
 export class PublishDialogMethods {
   declare reviewNoteManager: AppContext['reviewNoteManager'];
@@ -115,6 +108,10 @@ export class PublishDialogMethods {
       chip.replaceChildren(label);
       if (revision?.status_name) {
         chip.append(` · ${revision.status_name}`);
+      }
+      const waiting = revision && reviewWaitingLabel(revision);
+      if (waiting) {
+        chip.append(` · ${waiting}`);
       }
     }
     // The revision id is shown by the chip beside the button; screen readers still get it.

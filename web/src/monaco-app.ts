@@ -128,6 +128,7 @@ export class MonacoApp {
   declare renderReviewNotes: () => void;
   declare renderFileList: () => void;
   declare renderSeriesNav: () => void;
+  declare nextWaitingCommit: () => void;
   declare loadCommit: (idx: number) => Promise<void>;
   declare nextCommit: () => void;
   declare previousCommit: () => void;
