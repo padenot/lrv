@@ -1,6 +1,7 @@
 import type {
   CodeView,
   CodeViewLineSelection,
+  CodeViewOptions,
 } from '../../node_modules/@pierre/diffs/dist/components/CodeView.js';
 import type { OnDiffLineClickProps } from '../../node_modules/@pierre/diffs/dist/managers/InteractionManager.js';
 import type {
@@ -88,6 +89,7 @@ export class StackedViewMethods {
   declare agentAttached: boolean;
   declare reviewNoteManager: AppContext['reviewNoteManager'];
   declare isStacked: boolean;
+  declare isInline: boolean;
   declare currentCommitIdx: AppContext['currentCommitIdx'];
   declare commitLoadGeneration: AppContext['commitLoadGeneration'];
   declare seriesInfo: AppContext['seriesInfo'];
@@ -109,6 +111,8 @@ export class StackedViewMethods {
   declare resetFileView: AppContext['resetFileView'];
 
   private stackedCodeView: CodeView<StackedAnnotation> | null;
+  // CodeView.setOptions replaces every option, so keep the full set to change one.
+  private stackedViewOptions: CodeViewOptions<StackedAnnotation, undefined> | null;
   private stackedItems: Map<string, CodeViewDiffItem<StackedAnnotation>>;
   private stackedFileMetadata: Map<string, FileDiffMetadata>;
   private stackedDraft: StackedDraft | null;
@@ -132,10 +136,6 @@ export class StackedViewMethods {
       this.renderStackedView();
     }
     this.updateStackedToggleLabel();
-    const toggleView = document.getElementById('toggle-view');
-    if (toggleView) {
-      toggleView.style.display = 'none';
-    }
     this.persistStackedPref(true);
   }
 
@@ -151,10 +151,6 @@ export class StackedViewMethods {
       stacked.style.display = 'none';
     }
     this.updateStackedToggleLabel();
-    const toggleView = document.getElementById('toggle-view');
-    if (toggleView) {
-      toggleView.style.display = '';
-    }
     this.persistStackedPref(false);
     if (!this.currentFileIsCommit && this.files.length > 0) {
       void this.loadFile(this.currentFileIndex);
@@ -273,6 +269,7 @@ export class StackedViewMethods {
     this.stackedScrollUnsubscribe = null;
     this.stackedCodeView?.cleanUp();
     this.stackedCodeView = null;
+    this.stackedViewOptions = null;
     this.stackedItems = new Map();
     this.stackedFileMetadata = new Map();
     this.stackedHydratedFiles = new Set();
@@ -347,43 +344,41 @@ export class StackedViewMethods {
         tokenizeMaxLineLength: 1000,
       },
     });
-    const view = new CodeView<StackedAnnotation>(
-      {
-        diffStyle: 'split',
-        overflow: this.config.word_wrap ? 'wrap' : 'scroll',
-        theme: DIFFS_THEME,
-        themeType: themeTypeFor(this.config.color_scheme),
-        lineHoverHighlight: 'both',
-        hunkSeparators: 'line-info-basic',
-        collapsedContextThreshold: 1,
-        expansionLineCount: 30,
-        stickyHeaders: true,
-        enableLineSelection: true,
-        renderHeaderMetadata: (fileDiff) =>
-          this.buildHeaderMetadata(this.fileForPath(fileDiff.name)),
-        onLineNumberClick: (props, context) =>
-          this.showStackedDraft(this.pathFromCodeViewContext(context), props),
-        onSelectedLinesChange: (selection) => this.rememberStackedSelection(selection),
-        onLineSelected: (range, context) =>
-          this.showStackedDraftFromSelection(this.pathFromCodeViewContext(context), range),
-        renderAnnotation: (annotation) =>
-          this.renderStackedAnnotation(annotation as DiffLineAnnotation<StackedAnnotation>),
-        // Expanding unmodified lines needs the full file contents, so load
-        // them for every file the virtualizer renders.
-        onPostRender: (_node, _instance, phase, context) => {
-          if (phase !== 'unmount') {
-            const path = this.pathFromCodeViewContext(context);
-            void this.hydrateStackedFile(
-              this.files.find((file) => file.path === path),
-              parseDiffFromFile,
-            );
-          }
-        },
-        unsafeCSS: this.stackedDiffsCss(),
+    const options: CodeViewOptions<StackedAnnotation, undefined> = {
+      diffStyle: this.stackedDiffStyle(),
+      overflow: this.config.word_wrap ? 'wrap' : 'scroll',
+      theme: DIFFS_THEME,
+      themeType: themeTypeFor(this.config.color_scheme),
+      lineHoverHighlight: 'both',
+      hunkSeparators: 'line-info-basic',
+      collapsedContextThreshold: 1,
+      expansionLineCount: 30,
+      stickyHeaders: true,
+      enableLineSelection: true,
+      renderHeaderMetadata: (fileDiff) => this.buildHeaderMetadata(this.fileForPath(fileDiff.name)),
+      onLineNumberClick: (props, context) =>
+        this.showStackedDraft(this.pathFromCodeViewContext(context), props),
+      onSelectedLinesChange: (selection) => this.rememberStackedSelection(selection),
+      onLineSelected: (range, context) =>
+        this.showStackedDraftFromSelection(this.pathFromCodeViewContext(context), range),
+      renderAnnotation: (annotation) =>
+        this.renderStackedAnnotation(annotation as DiffLineAnnotation<StackedAnnotation>),
+      // Expanding unmodified lines needs the full file contents, so load
+      // them for every file the virtualizer renders.
+      onPostRender: (_node, _instance, phase, context) => {
+        if (phase !== 'unmount') {
+          const path = this.pathFromCodeViewContext(context);
+          void this.hydrateStackedFile(
+            this.files.find((file) => file.path === path),
+            parseDiffFromFile,
+          );
+        }
       },
-      workerPool,
-    );
+      unsafeCSS: this.stackedDiffsCss(),
+    };
+    const view = new CodeView<StackedAnnotation>(options, workerPool);
     this.stackedCodeView = view;
+    this.stackedViewOptions = options;
     view.setup(codeViewRoot);
     view.setItems(items);
     view.render(true);
@@ -393,6 +388,18 @@ export class StackedViewMethods {
     this.stackedScrollUnsubscribe = view.subscribeToScroll((scrollTop) => {
       this.syncCurrentFileFromStackedScroll(scrollTop);
     });
+  }
+
+  updateStackedDiffStyle() {
+    if (!this.stackedCodeView || !this.stackedViewOptions) {
+      return;
+    }
+    this.stackedViewOptions = { ...this.stackedViewOptions, diffStyle: this.stackedDiffStyle() };
+    this.stackedCodeView.setOptions(this.stackedViewOptions);
+  }
+
+  private stackedDiffStyle() {
+    return this.isInline ? 'unified' : 'split';
   }
 
   private buildCodeViewItem(

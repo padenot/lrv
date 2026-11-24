@@ -19,6 +19,7 @@ export class NavigationMethods {
   declare focusedLineDecorationsNew: AppContext['focusedLineDecorationsNew'];
   declare focusedLineDecorationsOld: AppContext['focusedLineDecorationsOld'];
   declare loadFile: (index: number) => Promise<void>;
+  declare updateStackedDiffStyle: () => void;
   declare isAddedFile: AppContext['isAddedFile'];
   declare showKeyboardHelp: () => void;
   declare openStackedSearch: () => boolean;
@@ -131,7 +132,11 @@ export class NavigationMethods {
   toggleView() {
     this.isInline = !this.isInline;
     this.updateViewToggleLabel();
-    this.loadFile(this.currentFileIndex);
+    if (this.isStacked) {
+      this.updateStackedDiffStyle();
+    } else {
+      this.loadFile(this.currentFileIndex);
+    }
   }
 
   updateViewToggleLabel() {

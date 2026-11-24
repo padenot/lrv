@@ -11808,7 +11808,8 @@ var NavigationMethods = class {
 	toggleView() {
 		this.isInline = !this.isInline;
 		this.updateViewToggleLabel();
-		this.loadFile(this.currentFileIndex);
+		if (this.isStacked) this.updateStackedDiffStyle();
+		else this.loadFile(this.currentFileIndex);
 	}
 	updateViewToggleLabel() {
 		const btn = document.getElementById("toggle-view");
@@ -13295,6 +13296,7 @@ var DialogMethods = class {
 				})).ok) {
 					this.config = newConfig;
 					this.isInline = !this.config.split_view;
+					this.updateViewToggleLabel();
 					monaco.editor.setTheme(this.config.color_scheme);
 					this.applyThemeToUI(this.config.color_scheme);
 					saveBtn.textContent = "Saved!";
@@ -14068,6 +14070,7 @@ function createDiffsWorker() {
 }
 var StackedViewMethods = class {
 	stackedCodeView;
+	stackedViewOptions;
 	stackedItems;
 	stackedFileMetadata;
 	stackedDraft;
@@ -14088,8 +14091,6 @@ var StackedViewMethods = class {
 			this.renderStackedView();
 		}
 		this.updateStackedToggleLabel();
-		const toggleView = document.getElementById("toggle-view");
-		if (toggleView) toggleView.style.display = "none";
 		this.persistStackedPref(true);
 	}
 	hideStackedView() {
@@ -14100,8 +14101,6 @@ var StackedViewMethods = class {
 		if (editor) editor.style.display = "";
 		if (stacked) stacked.style.display = "none";
 		this.updateStackedToggleLabel();
-		const toggleView = document.getElementById("toggle-view");
-		if (toggleView) toggleView.style.display = "";
 		this.persistStackedPref(false);
 		if (!this.currentFileIsCommit && this.files.length > 0) this.loadFile(this.currentFileIndex);
 	}
@@ -14189,6 +14188,7 @@ var StackedViewMethods = class {
 		this.stackedScrollUnsubscribe = null;
 		this.stackedCodeView?.cleanUp();
 		this.stackedCodeView = null;
+		this.stackedViewOptions = null;
 		this.stackedItems = /* @__PURE__ */ new Map();
 		this.stackedFileMetadata = /* @__PURE__ */ new Map();
 		this.stackedHydratedFiles = /* @__PURE__ */ new Set();
@@ -14243,8 +14243,8 @@ var StackedViewMethods = class {
 				tokenizeMaxLineLength: 1e3
 			}
 		});
-		const view = new CodeView({
-			diffStyle: "split",
+		const options = {
+			diffStyle: this.stackedDiffStyle(),
 			overflow: this.config.word_wrap ? "wrap" : "scroll",
 			theme: DIFFS_THEME,
 			themeType: themeTypeFor(this.config.color_scheme),
@@ -14266,8 +14266,10 @@ var StackedViewMethods = class {
 				}
 			},
 			unsafeCSS: this.stackedDiffsCss()
-		}, workerPool);
+		};
+		const view = new CodeView(options, workerPool);
 		this.stackedCodeView = view;
+		this.stackedViewOptions = options;
 		view.setup(codeViewRoot);
 		view.setItems(items);
 		view.render(true);
@@ -14275,6 +14277,17 @@ var StackedViewMethods = class {
 		this.stackedScrollUnsubscribe = view.subscribeToScroll((scrollTop) => {
 			this.syncCurrentFileFromStackedScroll(scrollTop);
 		});
+	}
+	updateStackedDiffStyle() {
+		if (!this.stackedCodeView || !this.stackedViewOptions) return;
+		this.stackedViewOptions = {
+			...this.stackedViewOptions,
+			diffStyle: this.stackedDiffStyle()
+		};
+		this.stackedCodeView.setOptions(this.stackedViewOptions);
+	}
+	stackedDiffStyle() {
+		return this.isInline ? "unified" : "split";
 	}
 	buildCodeViewItem(file, parsePatchFiles) {
 		if (file.is_binary) return null;
