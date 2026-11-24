@@ -67,6 +67,8 @@ export type PhabRevisionStatus = {
 };
 
 export type PhabStatus = { user: string; error?: string; revisions: PhabRevisionStatus[] };
+export type PhabPublishResponse = { url: string; revision?: PhabRevisionStatus };
+
 export type PublishState = {
   action: ReviewAction;
   overall: string;

@@ -2021,7 +2021,10 @@ async fn publish_phabricator(
         )
         .await
     {
-        Ok(url) => (StatusCode::OK, serde_json::json!({"url": url}).to_string()),
+        Ok(info) => (
+            StatusCode::OK,
+            serde_json::json!({"url": info.url, "revision": info}).to_string(),
+        ),
         Err(e) => {
             let message = format!("{e:#}");
             let status = if message == "Revision already published" {

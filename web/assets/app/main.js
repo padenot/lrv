@@ -13844,12 +13844,17 @@ var PublishDialogMethods = class {
 						})
 					});
 					if (!response.ok) throw new Error((await response.text()).trim() || `HTTP ${response.status}`);
-					revision.published = true;
+					const { revision: updated } = await response.json();
+					if (updated) {
+						const existing = this.phabRevisionStatus?.revisions.find((r) => r.id === updated.id);
+						if (existing) Object.assign(existing, updated);
+					} else revision.published = true;
 					comments.forEach((c) => this.publishedCommentKeys.add(commentKey(c)));
 					publishableNotes(revision.id).forEach((note) => this.publishedNoteIds.add(note.id));
 					this.publishedRevisionIds.add(revision.id);
 					this.renderReviewNotes();
 					this.renderSeriesNav();
+					this.updatePublishButton();
 					close();
 				} catch (error) {
 					tabState.error = `Failed to publish review: ${error instanceof Error ? error.message : error}`;

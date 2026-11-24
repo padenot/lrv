@@ -5,7 +5,13 @@ import { openModal } from './modal';
 import { fetchJSON } from './api';
 import { commentKey } from './dialog-methods';
 import { type ReviewComment } from './comments';
-import type { AppContext, PhabStatus, PublishState, ReviewAction } from './types/app';
+import type {
+  AppContext,
+  PhabStatus,
+  PhabPublishResponse,
+  PublishState,
+  ReviewAction,
+} from './types/app';
 
 // Phabricator status values: green when accepted, blue when it needs review, grey while
 // waiting on the author.
@@ -340,12 +346,21 @@ export class PublishDialogMethods {
           if (!response.ok) {
             throw new Error((await response.text()).trim() || `HTTP ${response.status}`);
           }
-          revision.published = true;
+          const { revision: updated } = (await response.json()) as PhabPublishResponse;
+          if (updated) {
+            const existing = this.phabRevisionStatus?.revisions.find((r) => r.id === updated.id);
+            if (existing) {
+              Object.assign(existing, updated);
+            }
+          } else {
+            revision.published = true;
+          }
           comments.forEach((c) => this.publishedCommentKeys.add(commentKey(c)));
           publishableNotes(revision.id).forEach((note) => this.publishedNoteIds.add(note.id!));
           this.publishedRevisionIds.add(revision.id);
           this.renderReviewNotes();
           this.renderSeriesNav();
+          this.updatePublishButton();
           close();
         } catch (error) {
           tabState.error = `Failed to publish review: ${error instanceof Error ? error.message : error}`;

@@ -734,6 +734,64 @@ pub fn check_diff_matches(revision: &str, local: &DiffBlobs, active: &ActiveDiff
     )
 }
 
+#[derive(Clone)]
+struct ReviewState {
+    closed: bool,
+    status: Option<String>,
+    status_name: Option<String>,
+    my_review: MyReview,
+    via_group: bool,
+    reviewers_pending: usize,
+}
+
+fn review_state(revision: &RevisionData, viewer: &str, responsible: bool) -> ReviewState {
+    let (my_review, via_group) = my_review(revision, viewer, responsible);
+    let status = revision.fields.status.as_ref();
+    let reviewers_pending =
+        if status.is_some_and(|s| !s.closed && s.value.as_deref() == Some("needs-review")) {
+            revision
+                .attachments
+                .reviewers
+                .reviewers
+                .iter()
+                .filter(|r| r.pending())
+                .count()
+        } else {
+            0
+        };
+    ReviewState {
+        // Phabricator marks abandoned revisions closed too.
+        closed: status.is_some_and(|s| s.closed),
+        status: status.and_then(|s| s.value.clone()),
+        status_name: status.and_then(|s| s.name.clone()),
+        my_review,
+        via_group,
+        reviewers_pending,
+    }
+}
+
+impl ReviewState {
+    fn apply_to(&self, revision: &mut RevisionStatusInfo) {
+        revision.closed = self.closed;
+        revision.status = self.status.clone();
+        revision.status_name = self.status_name.clone();
+        revision.my_review = self.my_review;
+        revision.via_group = self.via_group;
+        revision.reviewers_pending = self.reviewers_pending;
+    }
+
+    fn from_status(revision: &RevisionStatusInfo) -> Self {
+        Self {
+            closed: revision.closed,
+            status: revision.status.clone(),
+            status_name: revision.status_name.clone(),
+            my_review: revision.my_review,
+            via_group: revision.via_group,
+            reviewers_pending: revision.reviewers_pending,
+        }
+    }
+}
+
 impl PhabricatorClient {
     async fn conduit<T: serde::de::DeserializeOwned>(
         &self,
@@ -763,14 +821,13 @@ impl PhabricatorClient {
         })
     }
 
-    /// The revisions and the files of their latest diffs, with per-revision failures preserved.
-    pub async fn fetch_active_diffs(
+    async fn fetch_review_states(
         &self,
         ids: &[u32],
         viewer: &str,
-    ) -> Result<HashMap<u32, Result<ActiveDiff>>> {
+    ) -> Result<(HashMap<u32, RevisionData>, HashSet<u32>)> {
         if ids.is_empty() {
-            return Ok(HashMap::new());
+            return Ok((HashMap::new(), HashSet::new()));
         }
         let ids_params: Vec<_> = ids
             .iter()
@@ -786,11 +843,21 @@ impl PhabricatorClient {
             self.conduit::<RevisionSearchData>("differential.revision.search", responsible_params),
         )?;
         let responsible: HashSet<_> = responsible.data.iter().map(|r| r.id).collect();
-        let mut revisions: HashMap<_, _> = revisions
+        let revisions: HashMap<_, _> = revisions
             .data
             .into_iter()
             .map(|revision| (revision.id, revision))
             .collect();
+        Ok((revisions, responsible))
+    }
+
+    /// The revisions and the files of their latest diffs, with per-revision failures preserved.
+    pub async fn fetch_active_diffs(
+        &self,
+        ids: &[u32],
+        viewer: &str,
+    ) -> Result<HashMap<u32, Result<ActiveDiff>>> {
+        let (mut revisions, responsible) = self.fetch_review_states(ids, viewer).await?;
         let diff_phids: HashSet<_> = revisions
             .values()
             .filter_map(|revision| revision.fields.diff_phid.clone())
@@ -870,31 +937,17 @@ impl PhabricatorClient {
             .get(diff_id.to_string())
             .context("Phabricator diff missing from querydiffs")?;
 
-        let (my_review, via_group) = my_review(&revision, viewer, responsible);
-        let status = revision.fields.status.as_ref();
-        let reviewers_pending =
-            if status.is_some_and(|s| !s.closed && s.value.as_deref() == Some("needs-review")) {
-                revision
-                    .attachments
-                    .reviewers
-                    .reviewers
-                    .iter()
-                    .filter(|r| r.pending())
-                    .count()
-            } else {
-                0
-            };
+        let state = review_state(&revision, viewer, responsible);
         Ok(ActiveDiff {
             title: revision.fields.title.unwrap_or_default(),
             uri: revision.fields.uri.unwrap_or_default(),
             author_phid: revision.fields.author_phid,
-            // Phabricator marks abandoned revisions closed too.
-            closed: status.is_some_and(|s| s.closed),
-            status: status.and_then(|s| s.value.clone()),
-            status_name: status.and_then(|s| s.name.clone()),
-            my_review,
-            via_group,
-            reviewers_pending,
+            closed: state.closed,
+            status: state.status,
+            status_name: state.status_name,
+            my_review: state.my_review,
+            via_group: state.via_group,
+            reviewers_pending: state.reviewers_pending,
             diff_id,
             blobs: remote_blobs(diff),
         })
@@ -1023,6 +1076,7 @@ pub struct RevisionStatusInfo {
 
 pub struct Validation {
     pub user: String,
+    viewer_phid: String,
     pub error: Option<String>,
     pub revisions: Vec<RevisionStatusInfo>,
     client: Option<PhabricatorClient>,
@@ -1063,6 +1117,7 @@ pub struct Publisher {
     blobs: Vec<DiffBlobs>,
     validation: tokio::sync::OnceCell<Validation>,
     attempts: tokio::sync::Mutex<HashMap<String, (RevisionPublish, PublishProgress)>>,
+    refreshed: tokio::sync::Mutex<HashMap<String, ReviewState>>,
 }
 
 impl Publisher {
@@ -1073,6 +1128,7 @@ impl Publisher {
             .validation
             .set(Validation {
                 user: "reviewer".into(),
+                viewer_phid: "PHID-USER-reviewer".into(),
                 error: None,
                 client: None,
                 revisions: vec![RevisionStatusInfo {
@@ -1116,6 +1172,7 @@ impl Publisher {
             blobs: diffs.iter().map(diff_blobs).collect(),
             validation: Default::default(),
             attempts: Default::default(),
+            refreshed: Default::default(),
         }
     }
 
@@ -1189,6 +1246,7 @@ impl Publisher {
                     Err(e) => {
                         return Validation {
                             user: String::new(),
+                            viewer_phid: String::new(),
                             error: Some(format!("{e:#}")),
                             revisions,
                             client: None,
@@ -1205,6 +1263,7 @@ impl Publisher {
                     Err(e) => {
                         return Validation {
                             user: String::new(),
+                            viewer_phid: String::new(),
                             error: Some(format!("{e:#}")),
                             revisions,
                             client: None,
@@ -1250,6 +1309,7 @@ impl Publisher {
                 }
                 Validation {
                     user: viewer.username,
+                    viewer_phid: viewer.phid,
                     error: None,
                     revisions,
                     client: Some(client),
@@ -1261,11 +1321,15 @@ impl Publisher {
     pub async fn statuses(&self) -> Vec<RevisionStatusInfo> {
         let validation = self.validate().await;
         let attempts = self.attempts.lock().await;
+        let refreshed = self.refreshed.lock().await;
         validation
             .revisions
             .iter()
             .cloned()
             .map(|mut r| {
+                if let Some(state) = refreshed.get(&r.id) {
+                    state.apply_to(&mut r);
+                }
                 r.published = attempts.get(&r.id).is_some_and(|(_, p)| p.published);
                 r
             })
@@ -1291,7 +1355,7 @@ impl Publisher {
         comments: &[Comment],
         overall: Option<&str>,
         action: ReviewAction,
-    ) -> Result<String> {
+    ) -> Result<RevisionStatusInfo> {
         let validation = self.validate().await;
         if let Some(error) = &validation.error {
             anyhow::bail!("{error}");
@@ -1332,13 +1396,46 @@ impl Publisher {
             }
             *last = revision.clone();
         }
-        validation
+        let client = validation
             .client
             .as_ref()
-            .context("No Phabricator client")?
-            .publish_revision(id[1..].parse()?, target.diff_id, &revision, progress)
+            .context("No Phabricator client")?;
+        let revision_id = id[1..].parse()?;
+        client
+            .publish_revision(revision_id, target.diff_id, &revision, progress)
             .await?;
-        Ok(target.url.clone())
+        drop(attempts);
+
+        let refreshed = async {
+            let (mut revisions, responsible) = client
+                .fetch_review_states(&[revision_id], &validation.viewer_phid)
+                .await?;
+            let revision = revisions
+                .remove(&revision_id)
+                .with_context(|| format!("No Phabricator revision found for {id}"))?;
+            Ok::<_, anyhow::Error>(review_state(
+                &revision,
+                &validation.viewer_phid,
+                responsible.contains(&revision_id),
+            ))
+        }
+        .await;
+        let state = match refreshed {
+            Ok(state) => state,
+            Err(error) => {
+                eprintln!("Failed to refresh {id} after publishing: {error:#}");
+                let mut state = ReviewState::from_status(target);
+                if matches!(action, ReviewAction::Accept | ReviewAction::RequestChanges) {
+                    state.my_review = MyReview::Done;
+                }
+                state
+            }
+        };
+        let mut info = target.clone();
+        state.apply_to(&mut info);
+        info.published = true;
+        self.refreshed.lock().await.insert(id.into(), state);
+        Ok(info)
     }
 }
 
@@ -1603,6 +1700,7 @@ mod tests {
         unknown.ownership_known = false;
         let mut validation = Validation {
             user: "reviewer".into(),
+            viewer_phid: "PHID-USER-reviewer".into(),
             error: None,
             revisions: vec![own, foreign, unknown],
             client: None,
@@ -1622,6 +1720,7 @@ mod tests {
         other_reason.publishable = false;
         let validation = Validation {
             user: "reviewer".into(),
+            viewer_phid: "PHID-USER-reviewer".into(),
             error: None,
             revisions: vec![
                 revision_status("D1", true, true),
@@ -1642,6 +1741,7 @@ mod tests {
     fn foreign_outdated_is_empty_when_authentication_failed() {
         let validation = Validation {
             user: String::new(),
+            viewer_phid: String::new(),
             error: Some("Authentication failed".into()),
             revisions: vec![revision_status("D1", false, true)],
             client: None,
@@ -1916,7 +2016,8 @@ mod tests {
             publisher
                 .publish_revision("D123", &comments, Some("overall"), ReviewAction::Comment)
                 .await
-                .unwrap(),
+                .unwrap()
+                .url,
             "https://phab.example/D123"
         );
         assert_eq!(
@@ -1932,13 +2033,142 @@ mod tests {
             vec!["https://phab.example/D123"]
         );
         let calls = calls.lock().await;
-        assert_eq!(calls.len(), 3);
-        assert_eq!(calls[0].1["filePath"], "a.rs");
-        assert_eq!(calls[0].1["isNewFile"], "0");
-        assert_eq!(calls[0].1["lineLength"], "3");
-        assert_eq!(calls[1].1["message"], "overall");
-        assert_eq!(calls[1].1["attach_inlines"], "1");
+        let inlines: Vec<_> = calls
+            .iter()
+            .filter(|(m, _)| m == "differential.createinline")
+            .collect();
+        let comments: Vec<_> = calls
+            .iter()
+            .filter(|(m, _)| m == "differential.createcomment")
+            .collect();
+        assert_eq!(inlines.len(), 1);
+        assert_eq!(comments.len(), 2);
+        assert_eq!(inlines[0].1["filePath"], "a.rs");
+        assert_eq!(inlines[0].1["isNewFile"], "0");
+        assert_eq!(inlines[0].1["lineLength"], "3");
+        assert_eq!(comments[0].1["message"], "overall");
+        assert_eq!(comments[0].1["attach_inlines"], "1");
         server.abort();
+    }
+
+    async fn publish_refresh_case(
+        refresh: &str,
+        action: ReviewAction,
+    ) -> (RevisionStatusInfo, RevisionStatusInfo) {
+        use axum::{
+            extract::{Path, State},
+            routing::post,
+            Form, Json, Router,
+        };
+
+        async fn conduit(
+            State(refresh): State<String>,
+            Path(method): Path<String>,
+            Form(params): Form<HashMap<String, String>>,
+        ) -> Json<serde_json::Value> {
+            let result = if method == "differential.revision.search" {
+                assert_eq!(params["constraints[ids][0]"], "123");
+                if refresh == "error" {
+                    return Json(
+                        serde_json::json!({"error_code": "ERR", "error_info": "refresh failed"}),
+                    );
+                }
+                let responsible = params.contains_key("constraints[responsiblePHIDs][0]");
+                if responsible {
+                    assert_eq!(
+                        params["constraints[responsiblePHIDs][0]"],
+                        "PHID-USER-reviewer"
+                    );
+                }
+                serde_json::json!({"data": if responsible || refresh == "missing" {
+                    vec![]
+                } else {
+                    vec![serde_json::json!({
+                        "id": 123,
+                        "fields": {"status": {"value": "accepted", "name": "Accepted", "closed": true}},
+                        "attachments": {"reviewers": {"reviewers": [
+                            {"reviewerPHID": "PHID-USER-reviewer", "status": "accepted"}
+                        ]}}
+                    })]
+                }})
+            } else {
+                assert_eq!(method, "differential.createcomment");
+                serde_json::json!({})
+            };
+            Json(serde_json::json!({"result": result, "error_code": null}))
+        }
+        let app = Router::new()
+            .route("/api/{method}", post(conduit))
+            .with_state(refresh.to_string());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        let mut publisher = super::Publisher::published_for_test();
+        let mut validation = publisher.validation.take().unwrap();
+        validation.client = Some(super::PhabricatorClient::new(base, "test-token".into()).unwrap());
+        let revision = &mut validation.revisions[0];
+        revision.status = Some("needs-review".into());
+        revision.status_name = Some("Needs Review".into());
+        revision.my_review = MyReview::Waiting;
+        revision.via_group = true;
+        revision.reviewers_pending = 2;
+        publisher.validation.set(validation).ok().unwrap();
+        publisher.attempts.lock().await.clear();
+        let info = publisher
+            .publish_revision("D123", &[], Some("review"), action)
+            .await
+            .unwrap();
+        let status = publisher.statuses().await.remove(0);
+        server.abort();
+        (info, status)
+    }
+
+    #[tokio::test]
+    async fn publishing_refreshes_review_state() {
+        let (info, status) = publish_refresh_case("success", ReviewAction::Accept).await;
+        for revision in [info, status] {
+            assert_eq!(revision.status.as_deref(), Some("accepted"));
+            assert_eq!(revision.status_name.as_deref(), Some("Accepted"));
+            assert_eq!(revision.my_review, MyReview::Done);
+            assert!(!revision.via_group);
+            assert_eq!(revision.reviewers_pending, 0);
+            assert!(revision.closed);
+            assert!(revision.published);
+            assert!(revision.publishable);
+            assert!(revision.reason.is_none());
+            assert!(!revision.outdated);
+        }
+    }
+
+    #[tokio::test]
+    async fn publishing_refresh_failure_uses_optimistic_review_state() {
+        for refresh in ["error", "missing"] {
+            for action in [
+                ReviewAction::Accept,
+                ReviewAction::RequestChanges,
+                ReviewAction::Comment,
+            ] {
+                let (info, status) = publish_refresh_case(refresh, action).await;
+                for revision in [info, status] {
+                    assert_eq!(
+                        revision.my_review,
+                        if action == ReviewAction::Comment {
+                            MyReview::Waiting
+                        } else {
+                            MyReview::Done
+                        }
+                    );
+                    assert_eq!(revision.status.as_deref(), Some("needs-review"));
+                    assert_eq!(revision.status_name.as_deref(), Some("Needs Review"));
+                    assert!(revision.via_group);
+                    assert_eq!(revision.reviewers_pending, 2);
+                    assert!(!revision.closed);
+                    assert!(revision.published);
+                }
+            }
+        }
     }
 
     #[tokio::test]
