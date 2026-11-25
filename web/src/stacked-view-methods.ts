@@ -26,7 +26,7 @@ import {
 } from './comments';
 import { fetchJSON } from './api';
 import { prefersReducedMotion } from './font';
-import type { FocusedLine } from './diff-utils';
+import { FOCUS_MARGIN_LINES, type FocusedLine } from './diff-utils';
 import {
   identifierAt,
   SEARCHFOX_FLASH_MS,
@@ -362,6 +362,8 @@ export class StackedViewMethods {
     if (!view || !file) {
       return;
     }
+    // Rows are one line tall; before the row renders, assume a typical line height.
+    const lineHeight = this.findStackedRow(file.path, focus.line, focus.side)?.offsetHeight || 20;
     view.requestScroll(
       {
         type: 'line',
@@ -369,6 +371,8 @@ export class StackedViewMethods {
         lineNumber: focus.line,
         side: this.toAnnotationSide(focus.side),
         align,
+        // With 'nearest', pierre keeps this much room above and below the line.
+        offset: align === 'nearest' ? FOCUS_MARGIN_LINES * lineHeight : 0,
         behavior: prefersReducedMotion() ? 'instant' : 'smooth',
       },
       // The scroll may have rendered the line after the mark above; re-mark once it has settled.

@@ -12139,10 +12139,10 @@ var NavigationMethods = class {
 		}];
 		if (side === "old") {
 			this.focusedLineDecorationsOld = originalEditor.deltaDecorations([], dec);
-			if (reveal) originalEditor.revealLineInCenterIfOutsideViewport(monacoLine, scrollType);
+			if (reveal) revealWithMargin(originalEditor, monacoLine, scrollType);
 		} else {
 			this.focusedLineDecorationsNew = modifiedEditor.deltaDecorations([], dec);
-			if (reveal) modifiedEditor.revealLineInCenterIfOutsideViewport(monacoLine, scrollType);
+			if (reveal) revealWithMargin(modifiedEditor, monacoLine, scrollType);
 		}
 	}
 	moveLine(delta) {
@@ -12175,6 +12175,14 @@ var NavigationMethods = class {
 		else this.showCommentDialog(file.path, target.line, target.line, target.side);
 	}
 };
+/** Shows `line` with `FOCUS_MARGIN_LINES` of room around it, so the comment form Enter opens
+* below it is on screen; centres it when it is off screen. */
+function revealWithMargin(target, line, scrollType) {
+	target.revealLineInCenterIfOutsideViewport(line, scrollType);
+	const lineCount = target.getModel()?.getLineCount() ?? line;
+	target.revealLine(Math.min(line + 5, lineCount), scrollType);
+	target.revealLine(Math.max(line - 5, 1), scrollType);
+}
 //#endregion
 //#region web/src/commit-bar-methods.ts
 var CommitBarMethods = class {
@@ -14496,12 +14504,14 @@ var StackedViewMethods = class {
 		const view = this.stackedCodeView;
 		const file = this.files[this.currentFileIndex];
 		if (!view || !file) return;
+		const lineHeight = this.findStackedRow(file.path, focus.line, focus.side)?.offsetHeight || 20;
 		view.requestScroll({
 			type: "line",
 			id: this.stackedItemId(file.path),
 			lineNumber: focus.line,
 			side: this.toAnnotationSide(focus.side),
 			align,
+			offset: align === "nearest" ? 5 * lineHeight : 0,
 			behavior: prefersReducedMotion() ? "instant" : "smooth"
 		}, () => this.applyStackedFocus());
 	}

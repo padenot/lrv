@@ -38,6 +38,10 @@ export function computeHunkRanges(hunks: DiffHunk[]): { hunkRanges: HunkRange[] 
   return { hunkRanges };
 }
 
+/** Lines kept visible below (and above) the focused line, so the comment form Enter opens
+ * under it is on screen. */
+export const FOCUS_MARGIN_LINES = 5;
+
 /** A line keyboard focus rests on. */
 export type FocusedLine = { side: Side; line: number };
 

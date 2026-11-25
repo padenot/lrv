@@ -1,7 +1,13 @@
 import { IS_MAC } from './platform';
 import { KEYBOARD_SHORTCUTS, shortcutKeys, type KeyboardAction } from './shortcuts';
 import { prefersReducedMotion } from './font';
-import { hunkStartFocus, stepFocus, stepHunk, type FocusedLine } from './diff-utils';
+import {
+  FOCUS_MARGIN_LINES,
+  hunkStartFocus,
+  stepFocus,
+  stepHunk,
+  type FocusedLine,
+} from './diff-utils';
 import type { AppContext, DiffFile, HunkRange, Side } from './types/app';
 import type { editor } from 'monaco-editor';
 
@@ -400,12 +406,12 @@ export class NavigationMethods {
     if (side === 'old') {
       this.focusedLineDecorationsOld = originalEditor.deltaDecorations([], dec);
       if (reveal) {
-        originalEditor.revealLineInCenterIfOutsideViewport(monacoLine, scrollType);
+        revealWithMargin(originalEditor, monacoLine, scrollType);
       }
     } else {
       this.focusedLineDecorationsNew = modifiedEditor.deltaDecorations([], dec);
       if (reveal) {
-        modifiedEditor.revealLineInCenterIfOutsideViewport(monacoLine, scrollType);
+        revealWithMargin(modifiedEditor, monacoLine, scrollType);
       }
     }
   }
@@ -459,4 +465,18 @@ export class NavigationMethods {
       this.showCommentDialog(file.path, target.line, target.line, target.side);
     }
   }
+}
+
+/** Shows `line` with `FOCUS_MARGIN_LINES` of room around it, so the comment form Enter opens
+ * below it is on screen; centres it when it is off screen. */
+function revealWithMargin(
+  target: editor.IStandaloneCodeEditor,
+  line: number,
+  scrollType: editor.ScrollType,
+) {
+  target.revealLineInCenterIfOutsideViewport(line, scrollType);
+  const lineCount = target.getModel()?.getLineCount() ?? line;
+  // revealLine scrolls only as far as needed to show the given line.
+  target.revealLine(Math.min(line + FOCUS_MARGIN_LINES, lineCount), scrollType);
+  target.revealLine(Math.max(line - FOCUS_MARGIN_LINES, 1), scrollType);
 }

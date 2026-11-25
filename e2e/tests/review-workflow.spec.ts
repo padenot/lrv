@@ -2248,6 +2248,69 @@ test.describe('Review Workflow E2E', () => {
       await expectStackedFocus(page, 23, 'new');
     });
 
+    test('j keeps room below the focused line for the comment form, in both views', async ({
+      page,
+    }) => {
+      if (!testRepoPath) {
+        throw new Error('Test repo not initialized');
+      }
+      const added = Array.from({ length: 80 }, (_, i) => `added ${i + 1}`);
+      fs.writeFileSync(path.join(testRepoPath, 'a-long.txt'), added.join('\n') + '\n');
+      await execAsync(`cd "${testRepoPath}" && git add -N a-long.txt`);
+      await stopServer();
+      await startServer();
+      await page.setViewportSize({ width: 1200, height: 600 });
+
+      // Lines between the focused line and the bottom of the visible code.
+      const roomBelow = {
+        stacked: () =>
+          page.evaluate(() => {
+            const row = document
+              .querySelector('.stacked-code-view diffs-container')
+              ?.shadowRoot?.querySelector<HTMLElement>('[data-stacked-focus]');
+            const view = document.querySelector<HTMLElement>('.stacked-code-view');
+            if (!row || !view) {
+              return -1;
+            }
+            const rect = row.getBoundingClientRect();
+            return (view.getBoundingClientRect().bottom - rect.bottom) / rect.height;
+          }),
+        monaco: () =>
+          page.evaluate(() => {
+            const editor = monaco.editor.getDiffEditors()[0]!.getModifiedEditor();
+            const app = window.__APP as unknown as { currentFocusedLine: { line: number } };
+            const last = editor.getVisibleRanges().at(-1)!.endLineNumber;
+            return last - app.currentFocusedLine.line;
+          }),
+      };
+
+      for (const view of ['stacked', 'monaco'] as const) {
+        if (view === 'stacked') {
+          await openStackedView(page);
+        } else {
+          await page.locator('#toggle-stacked').click();
+          await expect(page.locator('#toggle-stacked')).not.toHaveText('Mode: Stacked');
+          await expect
+            .poll(() =>
+              page.evaluate(() =>
+                monaco.editor
+                  .getDiffEditors()[0]
+                  ?.getModifiedEditor()
+                  .getValue()
+                  .startsWith('added 1'),
+              ),
+            )
+            .toBe(true);
+        }
+        await page.locator('.header .wordmark').click();
+        for (let i = 0; i < 45; i++) {
+          await page.keyboard.press('j');
+        }
+        // The focus is far past the first screen, yet the next lines stay in view.
+        await expect.poll(roomBelow[view]).toBeGreaterThanOrEqual(4);
+      }
+    });
+
     test('Shift+J past the last hunk focuses the next file', async ({ page }) => {
       await openHunksFixture(page);
       await page.locator('.header .wordmark').click();
