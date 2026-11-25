@@ -222,63 +222,43 @@ fn nearest(lines: &[String], line: usize, matches: impl Fn(&str) -> bool) -> Opt
         .min_by_key(|n| n.abs_diff(line))
 }
 
-/// The line of searchfox's copy nearest to `line` whose text is `text`, and the UTF-16 column
-/// on it. Failing that, matches with surrounding whitespace trimmed and shifts the column by the
-/// difference in leading whitespace.
+/// The line of searchfox's copy nearest to `line` whose text is `text`, and the byte column on
+/// it of UTF-16 column `col` of `text`. Failing an exact match, matches with surrounding
+/// whitespace trimmed and shifts the column by the difference in leading whitespace.
 fn locate(lines: &[String], line: usize, text: &str, col: usize) -> Option<(usize, usize)> {
+    let col = byte_offset(text, col)?;
     if let Some(n) = nearest(lines, line, |l| l == text) {
         return Some((n, col));
     }
     let trimmed = text.trim();
     let n = nearest(lines, line, |l| l.trim() == trimmed)?;
-    let col = (col + leading_utf16(&lines[n - 1])).checked_sub(leading_utf16(text))?;
+    let col = col.checked_sub(leading(text))? + leading(&lines[n - 1]);
     Some((n, col))
 }
 
-fn leading_utf16(text: &str) -> usize {
-    text[..text.len() - text.trim_start().len()]
-        .encode_utf16()
-        .count()
+fn leading(text: &str) -> usize {
+    text.len() - text.trim_start().len()
 }
 
-/// The span `start..end` of `line`, as (UTF-16 start, UTF-16 end, text), read both as UTF-16
-/// code units and as UTF-8 byte offsets. The unit for non-ASCII lines isn't settled, so
-/// `covering` keeps the reading whose text is the word. The two agree on ASCII lines.
-fn readings(line: &str, start: usize, end: usize) -> Vec<(usize, usize, String)> {
-    let mut out = Vec::new();
-    let units: Vec<u16> = line.encode_utf16().collect();
-    if let Some(text) = units
-        .get(start..end)
-        .and_then(|units| String::from_utf16(units).ok())
-    {
-        out.push((start, end, text));
-    }
-    if let (Some(before), Some(text)) = (line.get(..start), line.get(start..end)) {
-        let utf16_start = before.encode_utf16().count();
-        out.push((
-            utf16_start,
-            utf16_start + text.encode_utf16().count(),
-            text.to_owned(),
-        ));
-    }
-    out
-}
-
-/// The tokens whose span covers UTF-16 column `col` of `line`, preferring those whose text is
-/// `word`.
-fn covering<'a>(line: &str, tokens: &'a [Token], col: usize, word: &str) -> Vec<&'a Token> {
-    let (mut exact, mut loose) = (Vec::new(), Vec::new());
-    for token in tokens {
-        let spans: Vec<_> = readings(line, token.start, token.end)
-            .into_iter()
-            .filter(|(start, end, _)| *start <= col && col < *end)
-            .collect();
-        if spans.iter().any(|(_, _, text)| text == word) {
-            exact.push(token);
-        } else if !spans.is_empty() {
-            loose.push(token);
+/// The byte offset of UTF-16 offset `col` in `text`.
+fn byte_offset(text: &str, col: usize) -> Option<usize> {
+    let mut units = 0;
+    for (byte, c) in text.char_indices() {
+        if units >= col {
+            return (units == col).then_some(byte);
         }
+        units += c.len_utf16();
     }
+    (units == col).then_some(text.len())
+}
+
+/// The tokens whose span covers byte column `col` of `line` (analysis columns are bytes),
+/// preferring those whose text is `word`.
+fn covering<'a>(line: &str, tokens: &'a [Token], col: usize, word: &str) -> Vec<&'a Token> {
+    let (exact, loose): (Vec<_>, Vec<_>) = tokens
+        .iter()
+        .filter(|t| t.start <= col && col < t.end)
+        .partition(|t| line.get(t.start..t.end) == Some(word));
     if exact.is_empty() {
         loose
     } else {
@@ -316,7 +296,7 @@ mod tests {
     use super::*;
 
     fn lines(text: &[&str]) -> Vec<String> {
-        text.iter().map(|l| format!("{l}\n")).collect()
+        text.iter().map(|l| l.to_string()).collect()
     }
 
     #[test]
@@ -385,18 +365,19 @@ mod tests {
     }
 
     #[test]
-    fn covering_handles_non_ascii_before_token() {
-        // "é" is one UTF-16 unit but two UTF-8 bytes, so the token is at 8 in UTF-16 and 9 in bytes.
+    fn non_ascii_columns_map_to_bytes() {
+        // "é" is one UTF-16 unit but two bytes: "Foo" is at UTF-16 8 and byte 9.
         let line = "/* é */ Foo();";
-        let by_bytes =
+        let head = lines(&[line]);
+        assert_eq!(locate(&head, 1, line, 8), Some((1, 9)));
+        let tokens =
             parse_analysis(r#"{"loc":"00001:9-12","source":1,"pretty":"p","sym":"_ZFoo"}"#)
                 .unwrap();
-        let by_units =
-            parse_analysis(r#"{"loc":"00001:8-11","source":1,"pretty":"p","sym":"_ZFoo"}"#)
-                .unwrap();
-        assert_eq!(covering(line, &by_bytes[&1], 8, "Foo").len(), 1);
-        assert_eq!(covering(line, &by_units[&1], 8, "Foo").len(), 1);
-        assert!(covering(line, &by_bytes[&1], 7, "Foo").is_empty());
+        assert_eq!(covering(line, &tokens[&1], 9, "Foo").len(), 1);
+        assert!(covering(line, &tokens[&1], 8, "Foo").is_empty());
+        // Columns inside a surrogate pair don't exist.
+        assert_eq!(byte_offset("😀a", 1), None);
+        assert_eq!(byte_offset("😀a", 2), Some(4));
     }
 
     #[test]
