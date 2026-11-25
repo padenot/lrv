@@ -10,7 +10,7 @@ import { openModal } from './modal';
 import { fetchJSON } from './api';
 import { resolveAppConfig } from './config';
 import { IS_MAC } from './platform';
-import { KEYBOARD_SHORTCUTS, SEARCHFOX_SHORTCUTS } from './shortcuts';
+import { KEYBOARD_SHORTCUTS, SEARCHFOX_SHORTCUTS, shortcutKeys } from './shortcuts';
 import type { AppContext } from './types/app';
 import { appendLinkifiedText } from './linkify';
 
@@ -75,12 +75,16 @@ export class DialogMethods {
       ? [...KEYBOARD_SHORTCUTS, ...SEARCHFOX_SHORTCUTS]
       : KEYBOARD_SHORTCUTS;
     shortcuts.forEach((shortcut) => {
+      const keys = shortcutKeys(shortcut, this.isStacked);
+      if (keys.length === 0) {
+        return;
+      }
       const row = el('tr');
 
       const keysCell = el('td');
       const keyComboDiv = el('div', { className: 'key-combo' });
 
-      shortcut.keys.forEach((combo, idx) => {
+      keys.forEach((combo, idx) => {
         if (idx > 0) {
           keyComboDiv.appendChild(el('span', { className: 'key-or', text: 'or' }));
         }

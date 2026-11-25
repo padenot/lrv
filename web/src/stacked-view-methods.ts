@@ -25,6 +25,8 @@ import {
   type ReviewComment,
 } from './comments';
 import { fetchJSON } from './api';
+import { prefersReducedMotion } from './font';
+import type { FocusedLine } from './diff-utils';
 import {
   identifierAt,
   SEARCHFOX_FLASH_MS,
@@ -113,6 +115,11 @@ export async function getStackedWorkerPool(): Promise<WorkerPoolManager> {
   return getOrCreateWorkerPoolSingleton(DIFFS_POOL_SETUP);
 }
 
+/** Deleted lines, in unified or in the deletions column of split, are on the old side. */
+function isDeletionRow(row: HTMLElement): boolean {
+  return row.dataset.lineType === 'change-deletion' || row.closest('[data-deletions]') !== null;
+}
+
 export class StackedViewMethods {
   declare files: AppContext['files'];
   declare commentManager: AppContext['commentManager'];
@@ -130,6 +137,7 @@ export class StackedViewMethods {
   declare renderFileList: () => void;
   declare currentFileIndex: number;
   declare currentFileIsCommit: boolean;
+  declare currentFocusedLine: AppContext['currentFocusedLine'];
   declare buildDiscussionNode: (discussion: Discussion) => HTMLElement;
   declare deleteDiscussion: AppContext['deleteDiscussion'];
   declare summarizeDiscussion: AppContext['summarizeDiscussion'];
@@ -246,6 +254,7 @@ export class StackedViewMethods {
     if (!file) {
       return;
     }
+    this.clearStackedFocus();
     const previousFile = this.files[this.currentFileIndex];
     const view = this.stackedCodeView;
     if (view && previousFile && !this.currentFileIsCommit) {
@@ -333,6 +342,68 @@ export class StackedViewMethods {
     }
   }
 
+  /** The rendered row of a line on one side, found in the file's pierre shadow root. */
+  private findStackedRow(path: string, line: number, side: Side): HTMLElement | undefined {
+    const host = document.querySelector<HTMLElement>(
+      `.stacked-code-view [data-path="${CSS.escape(path)}"]`,
+    );
+    return Array.from(
+      host?.shadowRoot?.querySelectorAll<HTMLElement>(`[data-line="${line}"]`) ?? [],
+    ).find((row) => isDeletionRow(row) === (side === 'old'));
+  }
+
+  /** Focuses a changed line of the current file and scrolls it to `align`. */
+  showStackedFocus(focus: FocusedLine, align: 'nearest' | 'center') {
+    this.clearStackedFocusMarks();
+    this.currentFocusedLine = focus;
+    this.applyStackedFocus();
+    const view = this.stackedCodeView;
+    const file = this.files[this.currentFileIndex];
+    if (!view || !file) {
+      return;
+    }
+    view.requestScroll(
+      {
+        type: 'line',
+        id: this.stackedItemId(file.path),
+        lineNumber: focus.line,
+        side: this.toAnnotationSide(focus.side),
+        align,
+        behavior: prefersReducedMotion() ? 'instant' : 'smooth',
+      },
+      // The scroll may have rendered the line after the mark above; re-mark once it has settled.
+      () => this.applyStackedFocus(),
+    );
+  }
+
+  clearStackedFocus() {
+    this.clearStackedFocusMarks();
+    this.currentFocusedLine = null;
+  }
+
+  /** Marks the focused row. Pierre replaces rows on re-render, so this runs after each one. */
+  private applyStackedFocus() {
+    const focus = this.currentFocusedLine;
+    const file = this.files[this.currentFileIndex];
+    if (!focus || !file || this.currentFileIsCommit) {
+      return;
+    }
+    this.findStackedRow(file.path, focus.line, focus.side)?.toggleAttribute(
+      'data-stacked-focus',
+      true,
+    );
+  }
+
+  private clearStackedFocusMarks() {
+    document
+      .querySelectorAll<HTMLElement>('.stacked-code-view [data-path]')
+      .forEach((host) =>
+        host.shadowRoot
+          ?.querySelectorAll('[data-stacked-focus]')
+          .forEach((row) => row.removeAttribute('data-stacked-focus')),
+      );
+  }
+
   /** Marks the flashing line's row; pierre replaces rows when it re-renders, so this runs again
    * after each render, continuing the fade where it was. */
   private applyStackedFlash() {
@@ -345,15 +416,7 @@ export class StackedViewMethods {
       this.stackedFlash = null;
       return;
     }
-    const host = document.querySelector<HTMLElement>(
-      `.stacked-code-view [data-path="${CSS.escape(flash.path)}"]`,
-    );
-    const row = Array.from(
-      host?.shadowRoot?.querySelectorAll<HTMLElement>(`[data-line="${flash.line}"]`) ?? [],
-    ).find(
-      (candidate) =>
-        candidate.dataset.lineType !== 'change-deletion' && !candidate.closest('[data-deletions]'),
-    );
+    const row = this.findStackedRow(flash.path, flash.line, 'new');
     if (!row || row.hasAttribute('data-searchfox-flash')) {
       return;
     }
@@ -375,6 +438,7 @@ export class StackedViewMethods {
     this.stackedItems = new Map();
     this.stackedInstances = new Map();
     this.stackedFlash = null;
+    this.currentFocusedLine = null;
     this.stackedFileMetadata = new Map();
     this.stackedHydrations = new Map();
     this.stackedLastRangeSelection = null;
@@ -467,9 +531,11 @@ export class StackedViewMethods {
           this.stackedInstances?.delete(path);
         } else {
           (this.stackedInstances ??= new Map()).set(path, instance);
-          this.applyStackedFlash();
-          // Pierre's file element doesn't say which file it shows; click handling reads it here.
+          // Pierre's file element doesn't say which file it shows; click handling and the
+          // marks below read it here.
           node.dataset.path = path;
+          this.applyStackedFlash();
+          this.applyStackedFocus();
           void this.hydrateStackedFile(
             this.files.find((file) => file.path === path),
             parseDiffFromFile,
@@ -663,10 +729,14 @@ export class StackedViewMethods {
     if (!file) {
       return;
     }
-    const side = this.fromAnnotationSide(props.annotationSide);
+    this.openStackedDraft(file, props.lineNumber, this.fromAnnotationSide(props.annotationSide));
+  }
+
+  /** Opens the comment form on a line; a line-number click and the Enter key both come here. */
+  openStackedDraft(file: string, lineNumber: number, side: Side) {
     this.stackedDraft = {
       file,
-      line: this.stackedSelectedLine(file, props.lineNumber, side),
+      line: this.stackedSelectedLine(file, lineNumber, side),
       side,
     };
     this.renderStackedComments();
@@ -1089,6 +1159,7 @@ export class StackedViewMethods {
       bestIdx = index;
     });
     if (bestIdx !== this.currentFileIndex) {
+      this.clearStackedFocus();
       this.currentFileIndex = bestIdx;
       this.currentFileIsCommit = false;
       this.renderFileList();
@@ -1219,10 +1290,7 @@ export class StackedViewMethods {
     if (!identifier) {
       return null;
     }
-    // Deleted lines, in unified or in the deletions column of split, are on the old side.
-    const deleted =
-      line.getAttribute('data-line-type') === 'change-deletion' ||
-      line.closest('[data-deletions]') !== null;
+    const deleted = isDeletionRow(line);
     const file = this.fileForPath(fileElement.dataset.path!);
     return {
       path: deleted ? (file.old_path ?? file.path) : file.path,
@@ -1263,6 +1331,10 @@ export class StackedViewMethods {
       }
       [data-line-annotation] { padding: 8px 12px; }
       [data-interactive-line-numbers] { cursor: pointer; }
+      [data-stacked-focus] {
+        background-color: color-mix(in srgb, var(--accent-color) 14%, transparent);
+        box-shadow: inset 2px 0 0 var(--accent-color);
+      }
       [data-searchfox-flash] { animation: searchfox-flash ${SEARCHFOX_FLASH_MS}ms ease-out; }
       @keyframes searchfox-flash {
         from { background-color: color-mix(in srgb, var(--accent-color) 35%, transparent); }

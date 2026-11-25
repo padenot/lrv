@@ -2192,6 +2192,141 @@ test.describe('Review Workflow E2E', () => {
     await expect.poll(() => codeView.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
   });
 
+  // a-hunks.txt has two hunks: a line added at the top (new line 1) and line 20 deleted.
+  // The first hunk's range is new 1-4, the second's new 18-23 plus the deletion on old 20.
+  async function openHunksFixture(page: Page) {
+    if (!testRepoPath) {
+      throw new Error('Test repo not initialized');
+    }
+    const base = Array.from({ length: 30 }, (_, i) => `line ${i + 1}`);
+    fs.writeFileSync(path.join(testRepoPath, 'a-hunks.txt'), base.join('\n') + '\n');
+    await execAsync(`cd "${testRepoPath}" && git add a-hunks.txt && git commit -q -m hunks`);
+    const edited = ['top added', ...base.filter((_, i) => i !== 19)];
+    fs.writeFileSync(path.join(testRepoPath, 'a-hunks.txt'), edited.join('\n') + '\n');
+    await stopServer();
+    await startServer();
+    await openStackedView(page);
+  }
+
+  function focusedStackedRow(page: Page) {
+    return page.locator('.stacked-code-view diffs-container [data-stacked-focus]');
+  }
+
+  async function expectStackedFocus(page: Page, line: number, side: 'new' | 'old') {
+    const row = focusedStackedRow(page);
+    await expect(row).toHaveCount(1);
+    await expect(row).toHaveAttribute('data-line', String(line));
+    const deleted = await row.evaluate(
+      (element) =>
+        (element as HTMLElement).dataset.lineType === 'change-deletion' ||
+        element.closest('[data-deletions]') !== null,
+    );
+    expect(deleted).toBe(side === 'old');
+  }
+
+  test.describe('stacked keyboard focus', () => {
+    test('j, k and Shift+J move the focus through the hunks', async ({ page }) => {
+      await openHunksFixture(page);
+      await page.locator('.header .wordmark').click();
+
+      await page.keyboard.press('j');
+      await expectStackedFocus(page, 1, 'new');
+      await page.keyboard.press('j');
+      await expectStackedFocus(page, 2, 'new');
+      await page.keyboard.press('k');
+      await expectStackedFocus(page, 1, 'new');
+
+      await page.keyboard.press('Shift+J');
+      await expectStackedFocus(page, 18, 'new');
+      for (let i = 0; i < 5; i++) {
+        await page.keyboard.press('j');
+      }
+      await expectStackedFocus(page, 23, 'new');
+      await page.keyboard.press('j');
+      await expectStackedFocus(page, 20, 'old');
+      await page.keyboard.press('k');
+      await expectStackedFocus(page, 23, 'new');
+    });
+
+    test('Shift+J past the last hunk focuses the next file', async ({ page }) => {
+      await openHunksFixture(page);
+      await page.locator('.header .wordmark').click();
+
+      await page.keyboard.press('Shift+J');
+      await page.keyboard.press('Shift+J');
+      await expectStackedFocus(page, 20, 'old');
+      await page.keyboard.press('Shift+J');
+      await expect.poll(() => page.evaluate(() => (window as any).__APP.currentFileIndex)).toBe(1);
+      await expectStackedFocus(page, 1, 'new');
+    });
+
+    test('Enter comments on the focused line; Escape clears the focus', async ({ page }) => {
+      await openHunksFixture(page);
+      await page.locator('.header .wordmark').click();
+
+      await page.keyboard.press('Shift+J');
+      await expectStackedFocus(page, 18, 'new');
+      await page.keyboard.press('Enter');
+      const form = page.locator('.stacked-comment-form');
+      await expect(form).toBeVisible({ timeout: 3000 });
+      await form.locator('.stacked-comment-ta').fill('Focused comment');
+      await form.locator('.stacked-comment-save').click();
+      await expect(page.locator('.stacked-comment-box')).toContainText('new line 18');
+
+      await page.keyboard.press('Escape');
+      await expect(focusedStackedRow(page)).toHaveCount(0);
+      await page.keyboard.press('j');
+      await expectStackedFocus(page, 18, 'new');
+    });
+
+    test('the focus mark is reapplied after the view rebuilds its rows', async ({ page }) => {
+      await openHunksFixture(page);
+      await page.locator('.header .wordmark').click();
+
+      await page.keyboard.press('Shift+J');
+      await expectStackedFocus(page, 18, 'new');
+      const before = await page.evaluateHandle(() => {
+        for (const host of document.querySelectorAll('.stacked-code-view [data-path]')) {
+          const row = host.shadowRoot?.querySelector('[data-stacked-focus]');
+          if (row) {
+            return row;
+          }
+        }
+        return null;
+      });
+      // Toggling the layout rebuilds every row.
+      await page.keyboard.press('s');
+      await expect.poll(() => before.evaluate((row) => row.isConnected)).toBe(false);
+      await expectStackedFocus(page, 18, 'new');
+    });
+
+    test('the stacked help lists j, not the arrow, for the next changed line', async ({ page }) => {
+      await openStackedView(page);
+      await page.locator('.header .wordmark').click();
+      await page.keyboard.press('?');
+
+      const row = page.locator('.shortcuts-table tr', { hasText: 'Next changed line' });
+      await expect(row.locator('.key-combo')).toHaveText('j');
+      await expect(
+        page.locator('.shortcuts-table tr', { hasText: 'Find in stacked diff' }),
+      ).toHaveCount(1);
+    });
+
+    test('the editor help still lists both keys for the next changed line', async ({ page }) => {
+      await openApp(page);
+      await page.locator('.monaco-editor').first().waitFor({ timeout: 5000 });
+      await page.locator('.header .wordmark').click();
+      await page.keyboard.press('?');
+
+      const row = page.locator('.shortcuts-table tr', { hasText: 'Next changed line' });
+      await expect(row.locator('.key-combo')).toContainText('↓');
+      await expect(row.locator('.key-combo')).toContainText('j');
+      await expect(
+        page.locator('.shortcuts-table tr', { hasText: 'Find in stacked diff' }),
+      ).toHaveCount(0);
+    });
+  });
+
   test('should display provided title in header', async ({ page }) => {
     // Restart server with a custom title
     await stopServer();

@@ -8,6 +8,7 @@ import {
   syncCommentDraftToServer,
 } from '../web/src/comment-draft-storage';
 import { identifierAt } from '../web/src/searchfox';
+import { stepFocus, stepHunk } from '../web/src/diff-utils';
 
 test('identifierAt finds the identifier covering a click, including at its edges', () => {
   const text = 'AudioNode::Disconnect(x) + $y';
@@ -162,4 +163,38 @@ test('SQLite mirror receives the edited note body', async () => {
   } finally {
     globalThis.fetch = previous;
   }
+});
+
+test('stepFocus walks each hunk range, then crosses into the neighbouring range', () => {
+  const hunks = [
+    { side: 'new' as const, start: 2, end: 4 },
+    { side: 'old' as const, start: 7, end: 8 },
+  ];
+  assert.deepEqual(stepFocus(hunks, 0, null, 1), { hunkIndex: 0, focus: { side: 'new', line: 2 } });
+  assert.deepEqual(stepFocus(hunks, 0, { side: 'new', line: 3 }, 1), {
+    hunkIndex: 0,
+    focus: { side: 'new', line: 4 },
+  });
+  assert.deepEqual(stepFocus(hunks, 0, { side: 'new', line: 4 }, 1), {
+    hunkIndex: 1,
+    focus: { side: 'old', line: 7 },
+  });
+  assert.deepEqual(stepFocus(hunks, 1, { side: 'old', line: 7 }, -1), {
+    hunkIndex: 0,
+    focus: { side: 'new', line: 4 },
+  });
+  assert.equal(stepFocus(hunks, 1, { side: 'old', line: 8 }, 1), null);
+  assert.equal(stepFocus(hunks, 0, { side: 'new', line: 2 }, -1), null);
+  assert.equal(stepFocus([], 0, null, 1), null);
+});
+
+test('stepHunk lands on the adjacent range start and stops at the file edges', () => {
+  const hunks = [
+    { side: 'new' as const, start: 2, end: 4 },
+    { side: 'old' as const, start: 7, end: 8 },
+  ];
+  assert.deepEqual(stepHunk(hunks, 0, 1), { hunkIndex: 1, focus: { side: 'old', line: 7 } });
+  assert.equal(stepHunk(hunks, 1, 1), null);
+  assert.equal(stepHunk(hunks, 0, -1), null);
+  assert.equal(stepHunk([], 0, 1), null);
 });

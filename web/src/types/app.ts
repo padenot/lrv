@@ -7,8 +7,9 @@ import type { SearchfoxTarget } from '../searchfox';
 export type Side = 'old' | 'new';
 
 export type DiffLine = {
-  old_line?: number;
-  new_line?: number;
+  // Null on the side a line doesn't exist on (added lines have no old line).
+  old_line?: number | null;
+  new_line?: number | null;
   type?: string;
   content?: string;
 };

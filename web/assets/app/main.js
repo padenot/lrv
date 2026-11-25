@@ -1561,13 +1561,13 @@ const MONACO_HIDE_UNCHANGED = {
 function computeHunkRanges(hunks) {
 	const hunkRanges = [];
 	hunks.forEach((hunk) => {
-		const newLines = hunk.lines.filter((l) => l.new_line !== void 0).map((l) => l.new_line);
+		const newLines = hunk.lines.filter((l) => typeof l.new_line === "number").map((l) => l.new_line);
 		if (newLines.length > 0) hunkRanges.push({
 			side: "new",
 			start: Math.min(...newLines),
 			end: Math.max(...newLines)
 		});
-		const deletedOldLines = hunk.lines.filter((l) => l.old_line !== void 0 && l.type === "delete").map((l) => l.old_line);
+		const deletedOldLines = hunk.lines.filter((l) => typeof l.old_line === "number" && l.type === "delete").map((l) => l.old_line);
 		if (deletedOldLines.length > 0) hunkRanges.push({
 			side: "old",
 			start: Math.min(...deletedOldLines),
@@ -1575,6 +1575,57 @@ function computeHunkRanges(hunks) {
 		});
 	});
 	return { hunkRanges };
+}
+function hunkStartFocus(hunk) {
+	return {
+		side: hunk.side,
+		line: hunk.start
+	};
+}
+/**
+* Where j/k move the focus: one line within the current hunk range, then into the
+* neighbouring range (its end going backwards). Without a focused line, the start of
+* the current range. Null past the file's first or last range.
+*/
+function stepFocus(hunks, hunkIndex, focus, delta) {
+	const hunk = hunks[hunkIndex];
+	if (!hunk) return null;
+	if (!focus) return {
+		hunkIndex,
+		focus: hunkStartFocus(hunk)
+	};
+	let { side, line } = focus;
+	if (side !== hunk.side || line < hunk.start || line > hunk.end) {
+		side = hunk.side;
+		line = hunk.start;
+	}
+	const next = line + delta;
+	if (next >= hunk.start && next <= hunk.end) return {
+		hunkIndex,
+		focus: {
+			side,
+			line: next
+		}
+	};
+	const adjacentIndex = hunkIndex + delta;
+	const adjacent = hunks[adjacentIndex];
+	if (!adjacent) return null;
+	return {
+		hunkIndex: adjacentIndex,
+		focus: delta > 0 ? hunkStartFocus(adjacent) : {
+			side: adjacent.side,
+			line: adjacent.end
+		}
+	};
+}
+/** Shift+J/K: the start of the adjacent range. Null past the file's first or last range. */
+function stepHunk(hunks, hunkIndex, delta) {
+	const adjacentIndex = hunkIndex + delta;
+	const adjacent = hunks[adjacentIndex];
+	return adjacent ? {
+		hunkIndex: adjacentIndex,
+		focus: hunkStartFocus(adjacent)
+	} : null;
 }
 //#endregion
 //#region web/src/file-data-methods.ts
@@ -11754,6 +11805,10 @@ var FileLoadingMethods = class {
 };
 //#endregion
 //#region web/src/shortcuts.ts
+/** The keys that trigger `shortcut` in the given view. */
+function shortcutKeys(shortcut, stacked) {
+	return stacked && shortcut.stackedKeys ? shortcut.stackedKeys : shortcut.keys;
+}
 const KEYBOARD_SHORTCUTS = [
 	{
 		keys: ["Mod+ArrowDown", "Mod+J"],
@@ -11777,11 +11832,13 @@ const KEYBOARD_SHORTCUTS = [
 	},
 	{
 		keys: ["ArrowDown", "j"],
+		stackedKeys: ["j"],
 		action: "lineDown",
 		description: "Next changed line"
 	},
 	{
 		keys: ["ArrowUp", "k"],
+		stackedKeys: ["k"],
 		action: "lineUp",
 		description: "Previous changed line"
 	},
@@ -11816,7 +11873,8 @@ const KEYBOARD_SHORTCUTS = [
 		description: "Show keyboard shortcuts"
 	},
 	{
-		keys: ["Mod+F"],
+		keys: [],
+		stackedKeys: ["Mod+F"],
 		action: "findStackedDiff",
 		description: "Find in stacked diff"
 	},
@@ -11868,6 +11926,11 @@ var NavigationMethods = class {
 	getCurrentFile() {
 		return this.files[this.currentFileIndex];
 	}
+	/** The file's changed ranges. The stacked view never loads a file, so they may not exist yet. */
+	hunksOf(file) {
+		this.initFileHunks(file);
+		return this.fileHunks[file.path];
+	}
 	setupKeyboardShortcuts() {
 		document.addEventListener("keydown", (e) => {
 			if (document.querySelector(".submit-modal-overlay")) return;
@@ -11881,6 +11944,7 @@ var NavigationMethods = class {
 			}
 			if (!action || !this.canRunShortcut(action)) return;
 			if (action === "submitLgtm" && (e.defaultPrevented || e.repeat)) return;
+			if (action === "clearFocus" && (e.defaultPrevented || document.querySelector(".context-menu"))) return;
 			e.preventDefault();
 			switch (action) {
 				case "nextFile":
@@ -11917,7 +11981,8 @@ var NavigationMethods = class {
 					this.showKeyboardHelp();
 					break;
 				case "clearFocus":
-					this.clearFocusedHunk();
+					if (this.isStacked) this.clearStackedFocus();
+					else this.clearFocusedHunk();
 					break;
 				case "nextCommit":
 					this.nextCommit();
@@ -11927,7 +11992,11 @@ var NavigationMethods = class {
 		});
 	}
 	canRunShortcut(action) {
-		return !(action === "lineDown" || action === "lineUp" || action === "openComment" || action === "clearFocus") || !this.isStacked && !!this.editor;
+		return !(action === "lineDown" || action === "lineUp" || action === "openComment" || action === "clearFocus") || this.hasCodeView();
+	}
+	hasCodeView() {
+		if (this.isStacked) return !this.currentFileIsCommit && this.files.length > 0;
+		return !!this.editor;
 	}
 	toggleView() {
 		this.isInline = !this.isInline;
@@ -11943,7 +12012,7 @@ var NavigationMethods = class {
 	}
 	matchKeyboardShortcut(e) {
 		const modKey = IS_MAC ? e.metaKey : e.ctrlKey;
-		for (const shortcut of KEYBOARD_SHORTCUTS) for (const keyCombo of shortcut.keys) if (this.matchesKeyCombo(e, keyCombo, modKey)) return shortcut.action;
+		for (const shortcut of KEYBOARD_SHORTCUTS) for (const keyCombo of shortcutKeys(shortcut, this.isStacked)) if (this.matchesKeyCombo(e, keyCombo, modKey)) return shortcut.action;
 		return null;
 	}
 	matchesKeyCombo(e, combo, modKey) {
@@ -11978,40 +12047,42 @@ var NavigationMethods = class {
 		return e.key === key;
 	}
 	nextFile() {
-		if (this.currentFileIndex < this.files.length - 1) this.loadFile(this.currentFileIndex + 1);
+		if (this.currentFileIndex < this.files.length - 1) this.openFile(this.currentFileIndex + 1);
 	}
 	previousFile() {
-		if (this.currentFileIndex > 0) this.loadFile(this.currentFileIndex - 1);
+		if (this.currentFileIndex > 0) this.openFile(this.currentFileIndex - 1);
+	}
+	/** Opens a file from the keyboard. Loading a file focuses its current hunk; so does this. */
+	openFile(index) {
+		if (!this.isStacked) {
+			this.loadFile(index);
+			return;
+		}
+		this.scrollToFileInStacked(index).then(() => {
+			if (!this.isStacked || this.currentFileIndex !== index) return;
+			const file = this.files[index];
+			const hunk = this.hunksOf(file)[this.currentHunkIndex[file.path] ?? 0];
+			if (hunk) this.showStackedFocus(hunkStartFocus(hunk), "nearest");
+		});
 	}
 	nextHunk() {
-		const file = this.getCurrentFile();
-		const hunks = this.fileHunks[file.path];
-		if (!hunks || hunks.length === 0) {
-			this.nextFile();
-			return;
-		}
-		const currentIdx = this.currentHunkIndex[file.path] ?? 0;
-		if (currentIdx >= hunks.length - 1) this.nextFile();
-		else {
-			const nextIdx = currentIdx + 1;
-			this.currentHunkIndex[file.path] = nextIdx;
-			this.jumpToHunk(nextIdx);
-		}
+		this.jumpHunk(1);
 	}
 	previousHunk() {
+		this.jumpHunk(-1);
+	}
+	/** Shift+J/K: the adjacent hunk, or the adjacent file past the file's first or last hunk. */
+	jumpHunk(delta) {
 		const file = this.getCurrentFile();
-		const hunks = this.fileHunks[file.path];
-		if (!hunks || hunks.length === 0) {
-			this.previousFile();
+		const step = stepHunk(this.hunksOf(file), this.currentHunkIndex[file.path] ?? 0, delta);
+		if (!step) {
+			if (delta > 0) this.nextFile();
+			else this.previousFile();
 			return;
 		}
-		const currentIdx = this.currentHunkIndex[file.path] ?? 0;
-		if (currentIdx <= 0) this.previousFile();
-		else {
-			const prevIdx = currentIdx - 1;
-			this.currentHunkIndex[file.path] = prevIdx;
-			this.jumpToHunk(prevIdx);
-		}
+		this.currentHunkIndex[file.path] = step.hunkIndex;
+		if (this.isStacked) this.showStackedFocus(step.focus, "center");
+		else this.jumpToHunk(step.hunkIndex);
 	}
 	jumpToHunk(hunkIndex) {
 		if (!this.editor) return;
@@ -12075,42 +12146,18 @@ var NavigationMethods = class {
 		}
 	}
 	moveLine(delta) {
-		if (!this.editor) return;
 		const file = this.getCurrentFile();
-		const hunks = this.fileHunks[file.path];
-		if (!hunks || hunks.length === 0) return;
-		let idx = this.currentHunkIndex[file.path] ?? 0;
-		const hr = hunks[idx];
-		if (!this.currentFocusedLine) {
-			const side = hr.side === "old" ? "old" : "new";
-			this.setFocusedLine(side, hr.start, true);
+		const hunkIndex = this.currentHunkIndex[file.path] ?? 0;
+		const step = stepFocus(this.hunksOf(file), hunkIndex, this.currentFocusedLine, delta);
+		if (!step) return;
+		this.currentHunkIndex[file.path] = step.hunkIndex;
+		const hunkChanged = step.hunkIndex !== hunkIndex;
+		if (this.isStacked) {
+			this.showStackedFocus(step.focus, hunkChanged ? "center" : "nearest");
 			return;
 		}
-		let { side, line } = this.currentFocusedLine;
-		if (side !== hr.side || line < hr.start || line > hr.end) {
-			side = hr.side === "old" ? "old" : "new";
-			line = hr.start;
-		}
-		let nextLine = line + delta;
-		if (nextLine >= hr.start && nextLine <= hr.end) {
-			this.setFocusedLine(side, nextLine, true);
-			return;
-		}
-		if (delta > 0 && idx < hunks.length - 1) {
-			idx += 1;
-			this.currentHunkIndex[file.path] = idx;
-			const nhr = hunks[idx];
-			const ns = nhr.side === "old" ? "old" : "new";
-			this.jumpToHunk(idx);
-			this.setFocusedLine(ns, nhr.start, true);
-		} else if (delta < 0 && idx > 0) {
-			idx -= 1;
-			this.currentHunkIndex[file.path] = idx;
-			const phr = hunks[idx];
-			const ps = phr.side === "old" ? "old" : "new";
-			this.jumpToHunk(idx);
-			this.setFocusedLine(ps, phr.end, true);
-		}
+		if (hunkChanged) this.jumpToHunk(step.hunkIndex);
+		this.setFocusedLine(step.focus.side, step.focus.line, true);
 	}
 	clearFocusedHunk() {
 		if (!this.editor) return;
@@ -12120,18 +12167,12 @@ var NavigationMethods = class {
 		this.focusedHunkDecorationsOld = originalEditor.deltaDecorations(this.focusedHunkDecorationsOld, []);
 	}
 	openCommentOnCurrentFocus() {
-		if (!this.editor) return;
 		const file = this.getCurrentFile();
-		const hunks = this.fileHunks[file.path];
-		if (!hunks || hunks.length === 0) return;
-		if (this.currentFocusedLine) {
-			const { side, line } = this.currentFocusedLine;
-			this.showCommentDialog(file.path, line, line, side);
-			return;
-		}
-		const hunkRange = hunks[this.currentHunkIndex[file.path] ?? 0];
-		const side = hunkRange.side === "old" ? "old" : "new";
-		this.showCommentDialog(file.path, hunkRange.start, hunkRange.start, side);
+		const hunk = this.hunksOf(file)[this.currentHunkIndex[file.path] ?? 0];
+		const target = this.currentFocusedLine ?? (hunk ? hunkStartFocus(hunk) : null);
+		if (!target) return;
+		if (this.isStacked) this.openStackedDraft(file.path, target.line, target.side);
+		else this.showCommentDialog(file.path, target.line, target.line, target.side);
 	}
 };
 //#endregion
@@ -13237,10 +13278,12 @@ var DialogMethods = class {
 		const tbody = el("tbody");
 		const table = el("table", { className: "shortcuts-table" }, [thead, tbody]);
 		(this.config.searchfox ? [...KEYBOARD_SHORTCUTS, ...SEARCHFOX_SHORTCUTS] : KEYBOARD_SHORTCUTS).forEach((shortcut) => {
+			const keys = shortcutKeys(shortcut, this.isStacked);
+			if (keys.length === 0) return;
 			const row = el("tr");
 			const keysCell = el("td");
 			const keyComboDiv = el("div", { className: "key-combo" });
-			shortcut.keys.forEach((combo, idx) => {
+			keys.forEach((combo, idx) => {
 				if (idx > 0) keyComboDiv.appendChild(el("span", {
 					className: "key-or",
 					text: "or"
@@ -14287,6 +14330,10 @@ async function getStackedWorkerPool() {
 	const { getOrCreateWorkerPoolSingleton } = await loadDiffsRuntime();
 	return getOrCreateWorkerPoolSingleton(DIFFS_POOL_SETUP);
 }
+/** Deleted lines, in unified or in the deletions column of split, are on the old side. */
+function isDeletionRow(row) {
+	return row.dataset.lineType === "change-deletion" || row.closest("[data-deletions]") !== null;
+}
 var StackedViewMethods = class {
 	stackedCodeView;
 	stackedViewOptions;
@@ -14360,6 +14407,7 @@ var StackedViewMethods = class {
 		if (!this.isStacked) return;
 		const file = this.files[index];
 		if (!file) return;
+		this.clearStackedFocus();
 		const previousFile = this.files[this.currentFileIndex];
 		const view = this.stackedCodeView;
 		if (view && previousFile && !this.currentFileIsCommit) {
@@ -14435,6 +14483,42 @@ var StackedViewMethods = class {
 			this.applyStackedFlash();
 		}
 	}
+	/** The rendered row of a line on one side, found in the file's pierre shadow root. */
+	findStackedRow(path, line, side) {
+		const host = document.querySelector(`.stacked-code-view [data-path="${CSS.escape(path)}"]`);
+		return Array.from(host?.shadowRoot?.querySelectorAll(`[data-line="${line}"]`) ?? []).find((row) => isDeletionRow(row) === (side === "old"));
+	}
+	/** Focuses a changed line of the current file and scrolls it to `align`. */
+	showStackedFocus(focus, align) {
+		this.clearStackedFocusMarks();
+		this.currentFocusedLine = focus;
+		this.applyStackedFocus();
+		const view = this.stackedCodeView;
+		const file = this.files[this.currentFileIndex];
+		if (!view || !file) return;
+		view.requestScroll({
+			type: "line",
+			id: this.stackedItemId(file.path),
+			lineNumber: focus.line,
+			side: this.toAnnotationSide(focus.side),
+			align,
+			behavior: prefersReducedMotion() ? "instant" : "smooth"
+		}, () => this.applyStackedFocus());
+	}
+	clearStackedFocus() {
+		this.clearStackedFocusMarks();
+		this.currentFocusedLine = null;
+	}
+	/** Marks the focused row. Pierre replaces rows on re-render, so this runs after each one. */
+	applyStackedFocus() {
+		const focus = this.currentFocusedLine;
+		const file = this.files[this.currentFileIndex];
+		if (!focus || !file || this.currentFileIsCommit) return;
+		this.findStackedRow(file.path, focus.line, focus.side)?.toggleAttribute("data-stacked-focus", true);
+	}
+	clearStackedFocusMarks() {
+		document.querySelectorAll(".stacked-code-view [data-path]").forEach((host) => host.shadowRoot?.querySelectorAll("[data-stacked-focus]").forEach((row) => row.removeAttribute("data-stacked-focus")));
+	}
 	/** Marks the flashing line's row; pierre replaces rows when it re-renders, so this runs again
 	* after each render, continuing the fade where it was. */
 	applyStackedFlash() {
@@ -14445,8 +14529,7 @@ var StackedViewMethods = class {
 			this.stackedFlash = null;
 			return;
 		}
-		const host = document.querySelector(`.stacked-code-view [data-path="${CSS.escape(flash.path)}"]`);
-		const row = Array.from(host?.shadowRoot?.querySelectorAll(`[data-line="${flash.line}"]`) ?? []).find((candidate) => candidate.dataset.lineType !== "change-deletion" && !candidate.closest("[data-deletions]"));
+		const row = this.findStackedRow(flash.path, flash.line, "new");
 		if (!row || row.hasAttribute("data-searchfox-flash")) return;
 		row.toggleAttribute("data-searchfox-flash", true);
 		row.style.animationDelay = `-${elapsed}ms`;
@@ -14465,6 +14548,7 @@ var StackedViewMethods = class {
 		this.stackedItems = /* @__PURE__ */ new Map();
 		this.stackedInstances = /* @__PURE__ */ new Map();
 		this.stackedFlash = null;
+		this.currentFocusedLine = null;
 		this.stackedFileMetadata = /* @__PURE__ */ new Map();
 		this.stackedHydrations = /* @__PURE__ */ new Map();
 		this.stackedLastRangeSelection = null;
@@ -14529,8 +14613,9 @@ var StackedViewMethods = class {
 				if (phase === "unmount") this.stackedInstances?.delete(path);
 				else {
 					(this.stackedInstances ??= /* @__PURE__ */ new Map()).set(path, instance);
-					this.applyStackedFlash();
 					node.dataset.path = path;
+					this.applyStackedFlash();
+					this.applyStackedFocus();
 					this.hydrateStackedFile(this.files.find((file) => file.path === path), parseDiffFromFile);
 				}
 			},
@@ -14662,10 +14747,13 @@ var StackedViewMethods = class {
 	}
 	showStackedDraft(file, props) {
 		if (!file) return;
-		const side = this.fromAnnotationSide(props.annotationSide);
+		this.openStackedDraft(file, props.lineNumber, this.fromAnnotationSide(props.annotationSide));
+	}
+	/** Opens the comment form on a line; a line-number click and the Enter key both come here. */
+	openStackedDraft(file, lineNumber, side) {
 		this.stackedDraft = {
 			file,
-			line: this.stackedSelectedLine(file, props.lineNumber, side),
+			line: this.stackedSelectedLine(file, lineNumber, side),
 			side
 		};
 		this.renderStackedComments();
@@ -15003,6 +15091,7 @@ var StackedViewMethods = class {
 			bestIdx = index;
 		});
 		if (bestIdx !== this.currentFileIndex) {
+			this.clearStackedFocus();
 			this.currentFileIndex = bestIdx;
 			this.currentFileIsCommit = false;
 			this.renderFileList();
@@ -15086,7 +15175,7 @@ var StackedViewMethods = class {
 		const text = line.textContent ?? "";
 		const identifier = identifierAt(text, col);
 		if (!identifier) return null;
-		const deleted = line.getAttribute("data-line-type") === "change-deletion" || line.closest("[data-deletions]") !== null;
+		const deleted = isDeletionRow(line);
 		const file = this.fileForPath(fileElement.dataset.path);
 		return {
 			path: deleted ? file.old_path ?? file.path : file.path,
@@ -15124,6 +15213,10 @@ var StackedViewMethods = class {
       }
       [data-line-annotation] { padding: 8px 12px; }
       [data-interactive-line-numbers] { cursor: pointer; }
+      [data-stacked-focus] {
+        background-color: color-mix(in srgb, var(--accent-color) 14%, transparent);
+        box-shadow: inset 2px 0 0 var(--accent-color);
+      }
       [data-searchfox-flash] { animation: searchfox-flash ${SEARCHFOX_FLASH_MS}ms ease-out; }
       @keyframes searchfox-flash {
         from { background-color: color-mix(in srgb, var(--accent-color) 35%, transparent); }

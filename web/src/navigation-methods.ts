@@ -1,7 +1,8 @@
 import { IS_MAC } from './platform';
-import { KEYBOARD_SHORTCUTS, type KeyboardAction } from './shortcuts';
+import { KEYBOARD_SHORTCUTS, shortcutKeys, type KeyboardAction } from './shortcuts';
 import { prefersReducedMotion } from './font';
-import type { AppContext, Side } from './types/app';
+import { hunkStartFocus, stepFocus, stepHunk, type FocusedLine } from './diff-utils';
+import type { AppContext, DiffFile, HunkRange, Side } from './types/app';
 import type { editor } from 'monaco-editor';
 
 export class NavigationMethods {
@@ -9,9 +10,11 @@ export class NavigationMethods {
   declare isStacked: boolean;
   declare isInline: boolean;
   declare currentFileIndex: number;
+  declare currentFileIsCommit: boolean;
   declare files: AppContext['files'];
   declare fileHunks: AppContext['fileHunks'];
   declare currentHunkIndex: AppContext['currentHunkIndex'];
+  declare initFileHunks: AppContext['initFileHunks'];
   declare editor: AppContext['editor'];
   declare currentFocusedLine: AppContext['currentFocusedLine'];
   declare focusedHunkDecorationsNew: AppContext['focusedHunkDecorationsNew'];
@@ -19,6 +22,10 @@ export class NavigationMethods {
   declare focusedLineDecorationsNew: AppContext['focusedLineDecorationsNew'];
   declare focusedLineDecorationsOld: AppContext['focusedLineDecorationsOld'];
   declare loadFile: (index: number) => Promise<void>;
+  declare scrollToFileInStacked: AppContext['scrollToFileInStacked'];
+  declare showStackedFocus: (focus: FocusedLine, align: 'nearest' | 'center') => void;
+  declare clearStackedFocus: () => void;
+  declare openStackedDraft: (file: string, lineNumber: number, side: Side) => void;
   declare updateStackedDiffStyle: () => void;
   declare isAddedFile: AppContext['isAddedFile'];
   declare showKeyboardHelp: () => void;
@@ -29,6 +36,12 @@ export class NavigationMethods {
 
   private getCurrentFile() {
     return this.files[this.currentFileIndex]!;
+  }
+
+  /** The file's changed ranges. The stacked view never loads a file, so they may not exist yet. */
+  private hunksOf(file: DiffFile): HunkRange[] {
+    this.initFileHunks(file);
+    return this.fileHunks[file.path]!;
   }
 
   setupKeyboardShortcuts() {
@@ -64,6 +77,14 @@ export class NavigationMethods {
         return;
       }
       if (action === 'submitLgtm' && (e.defaultPrevented || e.repeat)) {
+        return;
+      }
+      // Escape closes an open menu, and a text field's own handler (stacked Find) takes it
+      // first; only a bare Escape clears the focus.
+      if (
+        action === 'clearFocus' &&
+        (e.defaultPrevented || document.querySelector('.context-menu'))
+      ) {
         return;
       }
 
@@ -106,7 +127,11 @@ export class NavigationMethods {
           this.showKeyboardHelp();
           break;
         case 'clearFocus':
-          this.clearFocusedHunk();
+          if (this.isStacked) {
+            this.clearStackedFocus();
+          } else {
+            this.clearFocusedHunk();
+          }
           break;
         case 'nextCommit':
           this.nextCommit();
@@ -118,15 +143,22 @@ export class NavigationMethods {
     });
   }
 
-  // Editor-only shortcuts do nothing in the stacked view, where the Monaco editor is
-  // hidden or absent. Leave their keys to the browser (e.g. scrolling) there.
+  // Focus shortcuts need a visible code view. Where there is none, their keys stay with
+  // the browser (e.g. scrolling).
   private canRunShortcut(action: KeyboardAction) {
-    const needsEditor =
+    const needsCodeView =
       action === 'lineDown' ||
       action === 'lineUp' ||
       action === 'openComment' ||
       action === 'clearFocus';
-    return !needsEditor || (!this.isStacked && !!this.editor);
+    return !needsCodeView || this.hasCodeView();
+  }
+
+  private hasCodeView() {
+    if (this.isStacked) {
+      return !this.currentFileIsCommit && this.files.length > 0;
+    }
+    return !!this.editor;
   }
 
   toggleView() {
@@ -152,7 +184,7 @@ export class NavigationMethods {
     const modKey = IS_MAC ? e.metaKey : e.ctrlKey;
 
     for (const shortcut of KEYBOARD_SHORTCUTS) {
-      for (const keyCombo of shortcut.keys) {
+      for (const keyCombo of shortcutKeys(shortcut, this.isStacked)) {
         if (this.matchesKeyCombo(e, keyCombo, modKey)) {
           return shortcut.action;
         }
@@ -212,49 +244,62 @@ export class NavigationMethods {
 
   nextFile() {
     if (this.currentFileIndex < this.files.length - 1) {
-      this.loadFile(this.currentFileIndex + 1);
+      this.openFile(this.currentFileIndex + 1);
     }
   }
 
   previousFile() {
     if (this.currentFileIndex > 0) {
-      this.loadFile(this.currentFileIndex - 1);
+      this.openFile(this.currentFileIndex - 1);
     }
+  }
+
+  /** Opens a file from the keyboard. Loading a file focuses its current hunk; so does this. */
+  private openFile(index: number) {
+    if (!this.isStacked) {
+      this.loadFile(index);
+      return;
+    }
+    void this.scrollToFileInStacked(index).then(() => {
+      if (!this.isStacked || this.currentFileIndex !== index) {
+        return;
+      }
+      const file = this.files[index]!;
+      const hunks = this.hunksOf(file);
+      const hunk = hunks[this.currentHunkIndex[file.path] ?? 0];
+      // The file's top is already in view; centring a line near it would move the file header
+      // out of view and make the scroll sync pick the previous file.
+      if (hunk) {
+        this.showStackedFocus(hunkStartFocus(hunk), 'nearest');
+      }
+    });
   }
 
   nextHunk() {
-    const file = this.getCurrentFile();
-    const hunks = this.fileHunks[file.path];
-    if (!hunks || hunks.length === 0) {
-      this.nextFile();
-      return;
-    }
-
-    const currentIdx = this.currentHunkIndex[file.path] ?? 0;
-    if (currentIdx >= hunks.length - 1) {
-      this.nextFile();
-    } else {
-      const nextIdx = currentIdx + 1;
-      this.currentHunkIndex[file.path] = nextIdx;
-      this.jumpToHunk(nextIdx);
-    }
+    this.jumpHunk(1);
   }
 
   previousHunk() {
+    this.jumpHunk(-1);
+  }
+
+  /** Shift+J/K: the adjacent hunk, or the adjacent file past the file's first or last hunk. */
+  private jumpHunk(delta: 1 | -1) {
     const file = this.getCurrentFile();
-    const hunks = this.fileHunks[file.path];
-    if (!hunks || hunks.length === 0) {
-      this.previousFile();
+    const step = stepHunk(this.hunksOf(file), this.currentHunkIndex[file.path] ?? 0, delta);
+    if (!step) {
+      if (delta > 0) {
+        this.nextFile();
+      } else {
+        this.previousFile();
+      }
       return;
     }
-
-    const currentIdx = this.currentHunkIndex[file.path] ?? 0;
-    if (currentIdx <= 0) {
-      this.previousFile();
+    this.currentHunkIndex[file.path] = step.hunkIndex;
+    if (this.isStacked) {
+      this.showStackedFocus(step.focus, 'center');
     } else {
-      const prevIdx = currentIdx - 1;
-      this.currentHunkIndex[file.path] = prevIdx;
-      this.jumpToHunk(prevIdx);
+      this.jumpToHunk(step.hunkIndex);
     }
   }
 
@@ -365,54 +410,23 @@ export class NavigationMethods {
     }
   }
 
-  moveLine(delta: number) {
-    if (!this.editor) {
-      return;
-    }
+  moveLine(delta: 1 | -1) {
     const file = this.getCurrentFile();
-    const hunks = this.fileHunks[file.path];
-    if (!hunks || hunks.length === 0) {
+    const hunkIndex = this.currentHunkIndex[file.path] ?? 0;
+    const step = stepFocus(this.hunksOf(file), hunkIndex, this.currentFocusedLine, delta);
+    if (!step) {
       return;
     }
-    // Initialize focus if needed: start of current hunk
-    let idx = this.currentHunkIndex[file.path] ?? 0;
-    const hr = hunks[idx]!;
-    if (!this.currentFocusedLine) {
-      const side = hr.side === 'old' ? 'old' : 'new';
-      this.setFocusedLine(side, hr.start, true);
+    this.currentHunkIndex[file.path] = step.hunkIndex;
+    const hunkChanged = step.hunkIndex !== hunkIndex;
+    if (this.isStacked) {
+      this.showStackedFocus(step.focus, hunkChanged ? 'center' : 'nearest');
       return;
     }
-
-    let { side, line } = this.currentFocusedLine;
-    // Verify current focus lies within current hunk; adjust if not
-    if (side !== hr.side || line < hr.start || line > hr.end) {
-      side = hr.side === 'old' ? 'old' : 'new';
-      line = hr.start;
+    if (hunkChanged) {
+      this.jumpToHunk(step.hunkIndex);
     }
-
-    // Step within hunk
-    let nextLine = line + delta;
-    if (nextLine >= hr.start && nextLine <= hr.end) {
-      this.setFocusedLine(side, nextLine, true);
-      return;
-    }
-
-    // Move to neighbor hunk
-    if (delta > 0 && idx < hunks.length - 1) {
-      idx += 1;
-      this.currentHunkIndex[file.path] = idx;
-      const nhr = hunks[idx]!;
-      const ns = nhr.side === 'old' ? 'old' : 'new';
-      this.jumpToHunk(idx);
-      this.setFocusedLine(ns, nhr.start, true);
-    } else if (delta < 0 && idx > 0) {
-      idx -= 1;
-      this.currentHunkIndex[file.path] = idx;
-      const phr = hunks[idx]!;
-      const ps = phr.side === 'old' ? 'old' : 'new';
-      this.jumpToHunk(idx);
-      this.setFocusedLine(ps, phr.end, true);
-    }
+    this.setFocusedLine(step.focus.side, step.focus.line, true);
   }
 
   clearFocusedHunk() {
@@ -432,26 +446,17 @@ export class NavigationMethods {
   }
 
   openCommentOnCurrentFocus() {
-    if (!this.editor) {
-      return;
-    }
-
     const file = this.getCurrentFile();
-    const hunks = this.fileHunks[file.path];
-    if (!hunks || hunks.length === 0) {
+    const hunk = this.hunksOf(file)[this.currentHunkIndex[file.path] ?? 0];
+    // Without a focused line, comment on the first line of the current hunk.
+    const target = this.currentFocusedLine ?? (hunk ? hunkStartFocus(hunk) : null);
+    if (!target) {
       return;
     }
-
-    if (this.currentFocusedLine) {
-      const { side, line } = this.currentFocusedLine;
-      this.showCommentDialog(file.path, line, line, side);
-      return;
+    if (this.isStacked) {
+      this.openStackedDraft(file.path, target.line, target.side);
+    } else {
+      this.showCommentDialog(file.path, target.line, target.line, target.side);
     }
-
-    // Fallback to current hunk start if no line is focused
-    const currentIdx = this.currentHunkIndex[file.path] ?? 0;
-    const hunkRange = hunks[currentIdx]!;
-    const side = hunkRange.side === 'old' ? 'old' : 'new';
-    this.showCommentDialog(file.path, hunkRange.start, hunkRange.start, side);
   }
 }
