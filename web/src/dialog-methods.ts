@@ -91,7 +91,7 @@ export class DialogMethods {
         parts.forEach((part, partIdx) => {
           if (partIdx > 0) {
             const plus = el('span', { text: '+' });
-            plus.style.margin = '0 2px';
+            plus.style.margin = '0 1px';
             plus.style.color = '#888';
             keyComboDiv.appendChild(plus);
           }
@@ -100,6 +100,8 @@ export class DialogMethods {
           const displayKey = part
             .replace('ArrowDown', '↓')
             .replace('ArrowUp', '↑')
+            .replace('ArrowLeft', '←')
+            .replace('ArrowRight', '→')
             .replace('Enter', '⏎');
           key.textContent = displayKey;
           keyComboDiv.appendChild(key);

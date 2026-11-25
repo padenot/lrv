@@ -1719,13 +1719,24 @@ body {
 .shortcuts-table th,
 .shortcuts-table td {
   border-bottom: 1px solid var(--border-color);
-  padding: 8px 10px;
+  padding: 3px 10px;
   vertical-align: middle;
+}
+/* Key combos stay on one line; the action column takes the rest. */
+.shortcuts-table td:first-child {
+  width: 1%;
+  white-space: nowrap;
+}
+.help-modal {
+  width: min(1100px, 94vw);
+}
+.help-modal .submit-modal-body {
+  max-height: calc(94vh - 60px);
 }
 .key-combo {
   display: inline-flex;
-  gap: 6px;
-  flex-wrap: wrap;
+  gap: 4px;
+  flex-wrap: nowrap;
   align-items: center;
 }
 .key-combo .key {

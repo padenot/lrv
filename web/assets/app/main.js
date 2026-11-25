@@ -13248,12 +13248,12 @@ var DialogMethods = class {
 				combo.replace("Mod", IS_MAC ? "Cmd" : "Ctrl").split("+").forEach((part, partIdx) => {
 					if (partIdx > 0) {
 						const plus = el("span", { text: "+" });
-						plus.style.margin = "0 2px";
+						plus.style.margin = "0 1px";
 						plus.style.color = "#888";
 						keyComboDiv.appendChild(plus);
 					}
 					const key = el("span", { className: "key" });
-					key.textContent = part.replace("ArrowDown", "↓").replace("ArrowUp", "↑").replace("Enter", "⏎");
+					key.textContent = part.replace("ArrowDown", "↓").replace("ArrowUp", "↑").replace("ArrowLeft", "←").replace("ArrowRight", "→").replace("Enter", "⏎");
 					keyComboDiv.appendChild(key);
 				});
 			});
