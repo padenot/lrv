@@ -1,4 +1,4 @@
-import { clearEl, el } from './dom';
+import { el } from './dom';
 import { openModal } from './modal';
 import { detectLanguageFromPathAndContent } from './language';
 import {
@@ -80,7 +80,6 @@ export class SearchfoxMethods {
     if (!this.config.searchfox || !tree) {
       return;
     }
-    let panel: SearchfoxPanel | null = null;
     setSearchfoxBusy(true);
     try {
       const resolved = await resolveSearchfox(target);
@@ -88,13 +87,8 @@ export class SearchfoxMethods {
         window.open(searchfoxSearchUrl(tree, resolved.query), '_blank', 'noopener');
         return;
       }
-      if (mode === 'uses') {
-        panel = this.openSearchfoxPanel(resolved, tree);
-        this.setSearchfoxStatus(panel.body, 'Searching searchfox.org…', 'busy');
-      }
       const results = await searchSearchfox(resolved.query);
       if (results.groups.length === 0) {
-        panel?.close();
         showSearchfoxToast(`No searchfox results for ${resolved.pretty ?? target.word}`);
         return;
       }
@@ -106,11 +100,16 @@ export class SearchfoxMethods {
           return;
         }
       }
-      panel ??= this.openSearchfoxPanel(resolved, tree);
+      const panel = this.openSearchfoxPanel(resolved, tree);
       this.renderSearchfoxResults(panel.body, tree, results, panel.close);
     } catch (error) {
-      panel ??= this.openSearchfoxPanel({ query: target.word, pretty: null, symbols: [] }, tree);
-      this.setSearchfoxStatus(panel.body, (error as Error).message, 'error');
+      const panel = this.openSearchfoxPanel(
+        { query: target.word, pretty: null, symbols: [] },
+        tree,
+      );
+      panel.body.appendChild(
+        el('p', { className: 'searchfox-status searchfox-error', text: (error as Error).message }),
+      );
     } finally {
       setSearchfoxBusy(false);
     }
@@ -134,23 +133,12 @@ export class SearchfoxMethods {
     return { body, close };
   }
 
-  private setSearchfoxStatus(body: HTMLDivElement, message: string, kind?: 'busy' | 'error') {
-    clearEl(body).appendChild(
-      el(
-        'p',
-        { className: kind === 'error' ? 'searchfox-status searchfox-error' : 'searchfox-status' },
-        [kind === 'busy' ? el('span', { className: 'searchfox-spinner' }) : null, message],
-      ),
-    );
-  }
-
   private renderSearchfoxResults(
     body: HTMLDivElement,
     tree: string,
     results: SearchfoxResults,
     close: () => void,
   ) {
-    clearEl(body);
     for (const group of results.groups) {
       body.appendChild(this.searchfoxGroupNode(tree, group, close));
     }
