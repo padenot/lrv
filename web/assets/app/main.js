@@ -12102,7 +12102,9 @@ var NavigationMethods = class {
 		if (this.currentFileIndex > 0) this.openFile(this.currentFileIndex - 1);
 	}
 	/** Opens a file from the keyboard. Loading a file focuses its current hunk; so does this. */
-	openFile(index) {
+	/** Opens a file from the keyboard and focuses its current hunk, as loading a file does, or
+	* (stacked view) its first or last changed line when j/k cross into it. */
+	openFile(index, at = "current") {
 		if (!this.isStacked) {
 			this.loadFile(index);
 			return;
@@ -12110,8 +12112,17 @@ var NavigationMethods = class {
 		this.scrollToFileInStacked(index).then(() => {
 			if (!this.isStacked || this.currentFileIndex !== index) return;
 			const file = this.files[index];
-			const hunk = this.hunksOf(file)[this.currentHunkIndex[file.path] ?? 0];
-			if (hunk) this.showStackedFocus(hunkStartFocus(hunk), "nearest");
+			const hunks = this.hunksOf(file);
+			if (at !== "current") this.currentHunkIndex[file.path] = at === "first" ? 0 : Math.max(hunks.length - 1, 0);
+			const hunk = hunks[this.currentHunkIndex[file.path] ?? 0];
+			if (!hunk) {
+				this.clearStackedFocus();
+				return;
+			}
+			this.showStackedFocus(at === "last" ? {
+				side: hunk.side,
+				line: hunk.end
+			} : hunkStartFocus(hunk), "nearest");
 		});
 	}
 	nextHunk() {
@@ -12198,7 +12209,11 @@ var NavigationMethods = class {
 		const file = this.getCurrentFile();
 		const hunkIndex = this.currentHunkIndex[file.path] ?? 0;
 		const step = stepFocus(this.hunksOf(file), hunkIndex, this.currentFocusedLine, delta);
-		if (!step) return;
+		if (!step) {
+			const next = this.currentFileIndex + delta;
+			if (this.isStacked && next >= 0 && next < this.files.length) this.openFile(next, delta > 0 ? "first" : "last");
+			return;
+		}
 		this.currentHunkIndex[file.path] = step.hunkIndex;
 		const hunkChanged = step.hunkIndex !== hunkIndex;
 		if (this.isStacked) {

@@ -2382,6 +2382,25 @@ test.describe('Review Workflow E2E', () => {
       }
     });
 
+    test("j past a file's last changed line focuses the next file; k comes back", async ({
+      page,
+    }) => {
+      await openHunksFixture(page);
+      await page.locator('.header .wordmark').click();
+      const fileIndex = () => page.evaluate(() => (window as any).__APP.currentFileIndex);
+
+      // a-hunks.txt's last changed line is the deletion of old line 20.
+      await page.keyboard.press('Shift+J');
+      await page.keyboard.press('Shift+J');
+      await expectStackedFocus(page, 20, 'old');
+      await page.keyboard.press('j');
+      await expect.poll(fileIndex).toBe(1);
+      await expectStackedFocus(page, 1, 'new');
+      await page.keyboard.press('k');
+      await expect.poll(fileIndex).toBe(0);
+      await expectStackedFocus(page, 20, 'old');
+    });
+
     test('Shift+J past the last hunk focuses the next file', async ({ page }) => {
       await openHunksFixture(page);
       await page.locator('.header .wordmark').click();

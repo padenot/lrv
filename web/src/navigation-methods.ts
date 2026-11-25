@@ -270,7 +270,9 @@ export class NavigationMethods {
   }
 
   /** Opens a file from the keyboard. Loading a file focuses its current hunk; so does this. */
-  private openFile(index: number) {
+  /** Opens a file from the keyboard and focuses its current hunk, as loading a file does, or
+   * (stacked view) its first or last changed line when j/k cross into it. */
+  private openFile(index: number, at: 'current' | 'first' | 'last' = 'current') {
     if (!this.isStacked) {
       this.loadFile(index);
       return;
@@ -281,12 +283,21 @@ export class NavigationMethods {
       }
       const file = this.files[index]!;
       const hunks = this.hunksOf(file);
+      if (at !== 'current') {
+        this.currentHunkIndex[file.path] = at === 'first' ? 0 : Math.max(hunks.length - 1, 0);
+      }
       const hunk = hunks[this.currentHunkIndex[file.path] ?? 0];
+      if (!hunk) {
+        // Nothing to focus (e.g. a binary file); j/k move on from here.
+        this.clearStackedFocus();
+        return;
+      }
       // The file's top is already in view; centring a line near it would move the file header
       // out of view and make the scroll sync pick the previous file.
-      if (hunk) {
-        this.showStackedFocus(hunkStartFocus(hunk), 'nearest');
-      }
+      this.showStackedFocus(
+        at === 'last' ? { side: hunk.side, line: hunk.end } : hunkStartFocus(hunk),
+        'nearest',
+      );
     });
   }
 
@@ -430,6 +441,11 @@ export class NavigationMethods {
     const hunkIndex = this.currentHunkIndex[file.path] ?? 0;
     const step = stepFocus(this.hunksOf(file), hunkIndex, this.currentFocusedLine, delta);
     if (!step) {
+      // Past a file's first or last line, the stacked view continues into the neighbouring file.
+      const next = this.currentFileIndex + delta;
+      if (this.isStacked && next >= 0 && next < this.files.length) {
+        this.openFile(next, delta > 0 ? 'first' : 'last');
+      }
       return;
     }
     this.currentHunkIndex[file.path] = step.hunkIndex;
