@@ -11279,6 +11279,50 @@ function prefersReducedMotion() {
 	return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 //#endregion
+//#region web/src/platform.ts
+const IS_MAC = navigator.platform.toUpperCase().indexOf("MAC") >= 0;
+const MOD_KEY_LABEL = IS_MAC ? "⌘" : "Ctrl";
+//#endregion
+//#region web/src/searchfox.ts
+function resolveSearchfox(target) {
+	return fetchJSON("/api/searchfox/resolve", {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify(target)
+	});
+}
+function searchSearchfox(query) {
+	return fetchJSON(`/api/searchfox/search?q=${encodeURIComponent(query)}`);
+}
+function searchfoxSourceUrl(tree, path, line) {
+	return `https://searchfox.org/${tree}/source/${path}${line ? `#${line}` : ""}`;
+}
+function searchfoxSearchUrl(tree, query) {
+	return `https://searchfox.org/${tree}/search?q=${encodeURIComponent(query)}`;
+}
+/** Mod+click: definition; Mod+Alt+click: uses; add Shift to open
+* searchfox.org in a new tab. Returns null when Mod isn't held. */
+function searchfoxClick(event) {
+	if (!(IS_MAC ? event.metaKey : event.ctrlKey)) return null;
+	return {
+		mode: event.altKey ? "uses" : "definition",
+		newTab: event.shiftKey
+	};
+}
+const IDENTIFIER_CHAR = /[\p{L}\p{N}_$]/u;
+/** The identifier of `text` covering offset `col`, or null. */
+function identifierAt(text, col) {
+	let start = col;
+	while (start > 0 && IDENTIFIER_CHAR.test(text.charAt(start - 1))) start--;
+	let end = col;
+	while (end < text.length && IDENTIFIER_CHAR.test(text.charAt(end))) end++;
+	if (start === end || /\p{N}/u.test(text.charAt(start))) return null;
+	return {
+		word: text.slice(start, end),
+		start
+	};
+}
+//#endregion
 //#region web/src/file-loading-methods.ts
 let _loadSerial = 0;
 var FileLoadingMethods = class {
@@ -11570,12 +11614,12 @@ var FileLoadingMethods = class {
 		const originalEditor = diffEditor.getOriginalEditor();
 		modifiedEditor.updateOptions({ lineNumbers: "on" });
 		originalEditor.updateOptions({ lineNumbers: renderSideBySide ? "on" : "off" });
-		this.setupEditorClickHandlers(file.path, modifiedEditor, originalEditor);
+		this.setupEditorClickHandlers(file.path, file.old_path ?? file.path, modifiedEditor, originalEditor);
 		this.updateDecorations();
 		this.renderReviewNotes();
 		if (!viewState) this.applyInitialHunkFocus(file.path);
 	}
-	setupEditorClickHandlers(filePath, modifiedEditor, originalEditor) {
+	setupEditorClickHandlers(filePath, originalPath, modifiedEditor, originalEditor) {
 		this.editorClickDisposables?.forEach((disposable) => disposable.dispose());
 		this.editorClickDisposables = [];
 		this.lastModifiedRangeSelection = this.editorRangeSelection(modifiedEditor.getSelection());
@@ -11593,7 +11637,52 @@ var FileLoadingMethods = class {
 			if (this.isCommentGutterTarget(e) && e.target.position) this.beginEditorGutterGesture(filePath, modifiedEditor, e.target.position.lineNumber, "new");
 		}), originalEditor.onMouseDown((e) => {
 			if (this.isCommentGutterTarget(e) && e.target.position) this.beginEditorGutterGesture(filePath, originalEditor, e.target.position.lineNumber, "old");
+		}), modifiedEditor.onMouseDown((e) => this.searchfoxMouseDown(e, modifiedEditor, filePath)), originalEditor.onMouseDown((e) => this.searchfoxMouseDown(e, originalEditor, originalPath)));
+		if (this.config.searchfox) this.editorClickDisposables.push(...this.searchfoxContextActions(modifiedEditor, filePath), ...this.searchfoxContextActions(originalEditor, originalPath));
+	}
+	searchfoxContextActions(targetEditor, path) {
+		return [{
+			id: "searchfox.definition",
+			label: "Searchfox: Go to Definition",
+			mode: "definition"
+		}, {
+			id: "searchfox.uses",
+			label: "Searchfox: Find Uses",
+			mode: "uses"
+		}].map(({ id, label, mode }) => targetEditor.addAction({
+			id,
+			label,
+			contextMenuGroupId: "navigation",
+			run: () => {
+				const position = targetEditor.getPosition();
+				const target = position && this.searchfoxTargetAt(targetEditor, path, position);
+				if (target) this.searchfoxLookup(target, mode, false);
+			}
 		}));
+	}
+	searchfoxMouseDown(e, targetEditor, path) {
+		const click = searchfoxClick(e.event.browserEvent);
+		if (!click || !this.config.searchfox || e.target.type !== monaco.editor.MouseTargetType.CONTENT_TEXT || !e.target.position) return;
+		const target = this.searchfoxTargetAt(targetEditor, path, e.target.position);
+		if (!target) return;
+		e.event.preventDefault();
+		e.event.stopPropagation();
+		this.searchfoxLookup(target, click.mode, click.newTab);
+	}
+	searchfoxTargetAt(targetEditor, path, position) {
+		const model = targetEditor.getModel();
+		if (!model) return null;
+		const text = model.getLineContent(position.lineNumber);
+		const col = position.column - 1;
+		const identifier = identifierAt(text, col);
+		if (!identifier) return null;
+		return {
+			path,
+			line: position.lineNumber,
+			col,
+			word: identifier.word,
+			text
+		};
 	}
 	beginEditorGutterGesture(filePath, targetEditor, downLine, side) {
 		const serial = _loadSerial;
@@ -11649,10 +11738,6 @@ var FileLoadingMethods = class {
 		}
 	}
 };
-//#endregion
-//#region web/src/platform.ts
-const IS_MAC = navigator.platform.toUpperCase().indexOf("MAC") >= 0;
-const MOD_KEY_LABEL = IS_MAC ? "⌘" : "Ctrl";
 //#endregion
 //#region web/src/shortcuts.ts
 const KEYBOARD_SHORTCUTS = [
@@ -11738,6 +11823,25 @@ const KEYBOARD_SHORTCUTS = [
 		],
 		action: "previousCommit",
 		description: "Previous commit (series mode)"
+	}
+];
+/** Searchfox mouse gestures, listed in the help only when the searchfox setting is on. */
+const SEARCHFOX_SHORTCUTS = [
+	{
+		keys: ["Mod+click"],
+		description: "Searchfox: go to definition"
+	},
+	{
+		keys: ["Mod+Alt+click"],
+		description: "Searchfox: find uses"
+	},
+	{
+		keys: ["Mod+Shift+click"],
+		description: "Searchfox: definition in a new tab"
+	},
+	{
+		keys: ["Mod+Alt+Shift+click"],
+		description: "Searchfox: uses in a new tab"
 	}
 ];
 //#endregion
@@ -13114,7 +13218,7 @@ var DialogMethods = class {
 		const thead = el("thead", {}, [el("tr", {}, [el("th", { text: "Shortcut" }), el("th", { text: "Action" })])]);
 		const tbody = el("tbody");
 		const table = el("table", { className: "shortcuts-table" }, [thead, tbody]);
-		KEYBOARD_SHORTCUTS.forEach((shortcut) => {
+		(this.config.searchfox ? [...KEYBOARD_SHORTCUTS, ...SEARCHFOX_SHORTCUTS] : KEYBOARD_SHORTCUTS).forEach((shortcut) => {
 			const row = el("tr");
 			const keysCell = el("td");
 			const keyComboDiv = el("div", { className: "key-combo" });
@@ -14882,8 +14986,136 @@ var StackedViewMethods = class {
 //#endregion
 //#region web/src/searchfox-methods.ts
 var SearchfoxMethods = class {
-	async searchfoxLookup(_target, _mode, _newTab) {}
+	async searchfoxLookup(target, mode, newTab) {
+		const tree = this.context.searchfox_tree;
+		if (!this.config.searchfox || !tree) return;
+		let panel = null;
+		try {
+			const resolved = await resolveSearchfox(target);
+			if (newTab) {
+				window.open(searchfoxSearchUrl(tree, resolved.query), "_blank", "noopener");
+				return;
+			}
+			if (mode === "uses") {
+				panel = this.openSearchfoxPanel(resolved, tree);
+				this.setSearchfoxStatus(panel.body, "Searching searchfox.org…");
+			}
+			const results = await searchSearchfox(resolved.query);
+			if (mode === "definition") {
+				const definitions = searchfoxDefinitions(results);
+				if (definitions.length === 1) {
+					const hit = definitions[0];
+					this.goToSearchfoxHit(tree, hit.path, hit.lno);
+					return;
+				}
+			}
+			panel ??= this.openSearchfoxPanel(resolved, tree);
+			this.renderSearchfoxResults(panel.body, tree, results, panel.close);
+		} catch (error) {
+			panel ??= this.openSearchfoxPanel({
+				query: target.word,
+				pretty: null,
+				symbols: []
+			}, tree);
+			this.setSearchfoxStatus(panel.body, error.message, true);
+		}
+	}
+	openSearchfoxPanel(resolved, tree) {
+		const link = el("a", {
+			text: "Open on searchfox",
+			attrs: {
+				href: searchfoxSearchUrl(tree, resolved.query),
+				target: "_blank",
+				rel: "noopener"
+			}
+		});
+		const { body, close } = openModal({
+			title: resolved.pretty ?? resolved.query,
+			modalClass: "searchfox-modal",
+			footerContent: [link]
+		});
+		return {
+			body,
+			close
+		};
+	}
+	setSearchfoxStatus(body, message, error = false) {
+		clearEl(body).appendChild(el("p", {
+			className: error ? "searchfox-status searchfox-error" : "searchfox-status",
+			text: message
+		}));
+	}
+	renderSearchfoxResults(body, tree, results, close) {
+		clearEl(body);
+		if (results.groups.length === 0) {
+			this.setSearchfoxStatus(body, "No results.");
+			return;
+		}
+		for (const group of results.groups) body.appendChild(this.searchfoxGroupNode(tree, group, close));
+	}
+	searchfoxGroupNode(tree, group, close) {
+		const heading = el("h3", {
+			className: "searchfox-category",
+			text: group.category
+		});
+		if (group.kind !== "normal") heading.appendChild(el("span", {
+			className: "searchfox-kind",
+			text: group.kind
+		}));
+		const section = el("section", { className: "searchfox-group" }, [heading]);
+		for (const file of group.files) {
+			const inReview = this.files.some((reviewed) => reviewed.path === file.path);
+			section.appendChild(el("div", { className: "searchfox-file" }, [el("span", {
+				className: "searchfox-path",
+				text: file.path
+			}), inReview ? el("span", {
+				className: "searchfox-in-review",
+				text: "in review",
+				attrs: { title: "Part of this review" }
+			}) : null]));
+			for (const line of file.lines) {
+				const code = el("code", { className: "searchfox-code" });
+				if (line.bounds) {
+					const [start, end] = line.bounds;
+					code.append(line.line.slice(0, start), el("mark", { text: line.line.slice(start, end) }), line.line.slice(end));
+				} else code.textContent = line.line;
+				const row = el("button", {
+					className: "searchfox-line",
+					attrs: { type: "button" }
+				}, [
+					el("span", {
+						className: "searchfox-lno",
+						text: line.lno
+					}),
+					code,
+					line.context ? el("span", {
+						className: "searchfox-context",
+						text: line.context
+					}) : null
+				]);
+				row.addEventListener("click", () => {
+					close();
+					this.goToSearchfoxHit(tree, file.path, line.lno);
+				});
+				section.appendChild(row);
+			}
+		}
+		return section;
+	}
+	goToSearchfoxHit(tree, path, lno) {
+		const index = this.files.findIndex((file) => file.path === path);
+		if (index === -1) window.open(searchfoxSourceUrl(tree, path, lno), "_blank", "noopener");
+		else if (this.isStacked) this.scrollToFileInStacked(index);
+		else this.loadFile(index).then(() => this.setFocusedLine("new", lno));
+	}
 };
+/** Hits of the "Definitions" categories of the normal (non-test, non-generated) results. */
+function searchfoxDefinitions(results) {
+	return results.groups.filter((group) => group.kind === "normal" && group.category.startsWith("Definitions")).flatMap((group) => group.files.flatMap((file) => file.lines.map((line) => ({
+		path: file.path,
+		lno: line.lno
+	}))));
+}
 //#endregion
 //#region web/src/monaco-app.ts
 function applyMixin(TargetClass, MethodsClass) {

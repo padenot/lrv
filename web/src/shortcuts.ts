@@ -46,3 +46,11 @@ export const KEYBOARD_SHORTCUTS: KeyboardShortcut[] = [
     description: 'Previous commit (series mode)',
   },
 ];
+
+/** Searchfox mouse gestures, listed in the help only when the searchfox setting is on. */
+export const SEARCHFOX_SHORTCUTS: Array<Pick<KeyboardShortcut, 'keys' | 'description'>> = [
+  { keys: ['Mod+click'], description: 'Searchfox: go to definition' },
+  { keys: ['Mod+Alt+click'], description: 'Searchfox: find uses' },
+  { keys: ['Mod+Shift+click'], description: 'Searchfox: definition in a new tab' },
+  { keys: ['Mod+Alt+Shift+click'], description: 'Searchfox: uses in a new tab' },
+];

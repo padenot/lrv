@@ -10,7 +10,7 @@ import { openModal } from './modal';
 import { fetchJSON } from './api';
 import { resolveAppConfig } from './config';
 import { IS_MAC } from './platform';
-import { KEYBOARD_SHORTCUTS } from './shortcuts';
+import { KEYBOARD_SHORTCUTS, SEARCHFOX_SHORTCUTS } from './shortcuts';
 import type { AppContext } from './types/app';
 import { appendLinkifiedText } from './linkify';
 
@@ -71,7 +71,10 @@ export class DialogMethods {
     const tbody = el('tbody');
     const table = el('table', { className: 'shortcuts-table' }, [thead, tbody]);
 
-    KEYBOARD_SHORTCUTS.forEach((shortcut) => {
+    const shortcuts = this.config.searchfox
+      ? [...KEYBOARD_SHORTCUTS, ...SEARCHFOX_SHORTCUTS]
+      : KEYBOARD_SHORTCUTS;
+    shortcuts.forEach((shortcut) => {
       const row = el('tr');
 
       const keysCell = el('td');

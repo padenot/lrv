@@ -7,6 +7,24 @@ import {
   saveCommentDraft,
   syncCommentDraftToServer,
 } from '../web/src/comment-draft-storage';
+import { identifierAt } from '../web/src/searchfox';
+
+test('identifierAt finds the identifier covering a click, including at its edges', () => {
+  const text = 'AudioNode::Disconnect(x) + $y';
+  assert.deepEqual(identifierAt(text, 11), { word: 'Disconnect', start: 11 });
+  assert.deepEqual(identifierAt(text, 15), { word: 'Disconnect', start: 11 });
+  assert.deepEqual(identifierAt(text, 21), { word: 'Disconnect', start: 11 });
+  assert.deepEqual(identifierAt(text, 0), { word: 'AudioNode', start: 0 });
+  assert.deepEqual(identifierAt(text, 28), { word: '$y', start: 27 });
+});
+
+test('identifierAt rejects punctuation, whitespace and numeric literals', () => {
+  assert.equal(identifierAt('a + b', 2), null);
+  assert.equal(identifierAt('a + b', 3), null);
+  assert.equal(identifierAt('123abc', 0), null);
+  assert.deepEqual(identifierAt('x1 = 0x1F', 1), { word: 'x1', start: 0 });
+  assert.deepEqual(identifierAt('héllo', 4), { word: 'héllo', start: 0 });
+});
 
 const original: ReviewNote = {
   id: 'finding',
