@@ -55,6 +55,7 @@ Any comment UX change (shortcuts, edit, delete, validation) must go in both.
 - **Note actions**: Accept/Ignore/Reply (Discuss while an agent is attached; only Reply on host notes of revisions you don't own). Accept and Ignore are persisted dispositions; Finish turns accepted notes into empty-body `in_reply_to` entries.
 - **Commit messages**: the sidebar's Commit message row opens a commentable message per commit; overall feedback goes in the Finish dialog.
 - **Collapsed sidebar**: hides everything except the collapse button, which reopens it.
+- **Searchfox**: with the `searchfox` setting on (403 public, 409 off), `POST /api/searchfox/resolve` maps a Mod+click to searchfox symbols via the file's raw-analysis, locating the clicked line in searchfox's copy by text (nearest line, then whitespace-trimmed); no match or unindexed file gives `id:<word>`. `GET /api/searchfox/search?q=` proxies searchfox's JSON search. Logic in `searchfox.rs`.
 
 ## CLI Flags
 
