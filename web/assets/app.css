@@ -1858,6 +1858,13 @@ body {
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-color) 70%, var(--bg-secondary));
   color: inherit;
 }
+/* Same token colour rule as @pierre/diffs; the line's color-scheme picks the theme. */
+.searchfox-pierre span {
+  color: light-dark(
+    var(--diffs-token-light, var(--text-primary)),
+    var(--diffs-token-dark, var(--text-primary))
+  );
+}
 .searchfox-context {
   max-width: 40%;
   overflow: hidden;

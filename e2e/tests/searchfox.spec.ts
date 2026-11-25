@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Locator, type Page } from '@playwright/test';
 import { execFileSync, spawn, type ChildProcess } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -44,7 +44,7 @@ const SEARCH_RESULTS = {
         },
         {
           path: 'dom/media/Other.cpp',
-          lines: [{ lno: 40, line: '  node->Disconnect(out);', bounds: [8, 18], context: null }],
+          lines: [{ lno: 40, line: '  void Disconnect(out);', bounds: [7, 17], context: null }],
         },
       ],
     },
@@ -87,12 +87,15 @@ async function startReview(root: string): Promise<{ url: string; child: ChildPro
   const diffPath = path.join(root, 'review.diff');
   fs.writeFileSync(path.join(root, 'a.txt'), `int main() {\n${CALL_LINE}\n}\n`);
   fs.writeFileSync(path.join(root, 'b.txt'), 'first\nbeta target line\nthird\n');
+  fs.mkdirSync(path.join(root, 'dom/media'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'dom/media/Node.cpp'), 'void Disconnect(int out);\n// end\n');
   fs.writeFileSync(
     diffPath,
     'diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1,1 +1,3 @@\n-old a\n' +
       `+int main() {\n+${CALL_LINE}\n+}\n` +
       'diff --git a/b.txt b/b.txt\n--- a/b.txt\n+++ b/b.txt\n@@ -1,1 +1,3 @@\n-old b\n' +
-      '+first\n+beta target line\n+third\n',
+      '+first\n+beta target line\n+third\n' +
+      'diff --git a/dom/media/Node.cpp b/dom/media/Node.cpp\n--- a/dom/media/Node.cpp\n+++ b/dom/media/Node.cpp\n@@ -1,1 +1,2 @@\n-old node\n+void Disconnect(int out);\n+// end\n',
   );
   const child = spawn(binary, ['--file', diffPath, '--no-open'], {
     cwd: root,
@@ -372,29 +375,40 @@ test.describe('searchfox code navigation', () => {
     await expect(toast).toHaveCount(0, { timeout: 5000 });
   });
 
-  test('colours result tokens when the review starts in the stacked view', async ({ page }) => {
-    // No diff editor is ever created, so only the startup theme defines token colours.
-    await isolateConfig(page, { searchfox: true, stacked_view: true });
-    await mockSearchfox(page);
-    const started = await startReview(root);
-    child = started.child;
-    await page.goto(started.url);
-    await expect(page.locator('#preloader-overlay')).toHaveCount(0);
-    await expect(page.locator('.stacked-code-view')).toBeVisible();
+  for (const scheme of ['firefox-devtools-dark', 'github-light']) {
+    test(`colours result tokens like the stacked view when the review starts there (${scheme})`, async ({
+      page,
+    }) => {
+      await isolateConfig(page, { searchfox: true, stacked_view: true, color_scheme: scheme });
+      await mockSearchfox(page);
+      const started = await startReview(root);
+      child = started.child;
+      await page.goto(started.url);
+      await expect(page.locator('#preloader-overlay')).toHaveCount(0);
+      await expect(page.locator('.stacked-code-view')).toBeVisible();
+      const stackedVoid = page
+        .locator('.stacked-code-view [data-line] span', { hasText: /^void$/ })
+        .first();
+      await expect(stackedVoid).toBeAttached();
 
-    await page.evaluate(() => {
-      const app = window.__APP as unknown as Pick<AppContext, 'searchfoxLookup'>;
-      const text = '  return Disconnect(count);';
-      void app.searchfoxLookup(
-        { path: 'a.txt', line: 2, col: 9, word: 'Disconnect', text },
-        'uses',
-        false,
-      );
+      await page.evaluate(() => {
+        const app = window.__APP as unknown as Pick<AppContext, 'searchfoxLookup'>;
+        const text = '  return Disconnect(count);';
+        void app.searchfoxLookup(
+          { path: 'a.txt', line: 2, col: 9, word: 'Disconnect', text },
+          'uses',
+          false,
+        );
+      });
+
+      const resultLine = page.locator('.searchfox-line').nth(3);
+      const panelVoid = resultLine.locator('.searchfox-code span', { hasText: /^void$/ });
+      await expect(panelVoid).toBeAttached();
+      const colorOf = (locator: Locator) =>
+        locator.evaluate((node) => getComputedStyle(node).color);
+      const keywordColor = await colorOf(panelVoid);
+      expect(keywordColor).not.toBe(await colorOf(resultLine));
+      expect(keywordColor).toBe(await colorOf(stackedVoid));
     });
-
-    const cppLine = page.locator('.searchfox-line').nth(3).locator('.searchfox-code');
-    const token = cppLine.locator('span[class^="mtk"]').first();
-    await expect(token).toBeAttached();
-    expect(await token.evaluate((node) => getComputedStyle(node).color)).not.toBe('rgb(0, 0, 0)');
-  });
+  }
 });

@@ -50,9 +50,10 @@ type StackedDraft = {
   textarea?: HTMLTextAreaElement;
 };
 
-const DIFFS_THEME = { dark: 'pierre-dark', light: 'pierre-light' } as const;
+export const DIFFS_THEME = { dark: 'pierre-dark', light: 'pierre-light' } as const;
+export const DIFFS_TOKENIZE_MAX_LINE_LENGTH = 1000;
 
-function themeTypeFor(themeName: string): 'light' | 'dark' {
+export function themeTypeFor(themeName: string): 'light' | 'dark' {
   const base = window.UI_THEME_DEFS?.[themeName]?.base ?? themeName;
   return base === 'vs' || base === 'hc-light' ? 'light' : 'dark';
 }
@@ -353,7 +354,7 @@ export class StackedViewMethods {
         theme: DIFFS_THEME,
         lineDiffType: 'word-alt',
         maxLineDiffLength: 1000,
-        tokenizeMaxLineLength: 1000,
+        tokenizeMaxLineLength: DIFFS_TOKENIZE_MAX_LINE_LENGTH,
       },
     });
     const options: CodeViewOptions<StackedAnnotation, undefined> = {

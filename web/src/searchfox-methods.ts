@@ -1,6 +1,7 @@
 import { el } from './dom';
 import { openModal } from './modal';
 import { detectLanguageFromPathAndContent } from './language';
+import { DIFFS_THEME, DIFFS_TOKENIZE_MAX_LINE_LENGTH, themeTypeFor } from './stacked-view-methods';
 import {
   resolveSearchfox,
   searchSearchfox,
@@ -152,7 +153,6 @@ export class SearchfoxMethods {
     const section = el('section', { className: 'searchfox-group' }, [heading]);
     for (const file of group.files) {
       const inReview = this.files.some((reviewed) => reviewed.path === file.path);
-      const language = detectLanguageFromPathAndContent(file.path);
       section.appendChild(
         el('div', { className: 'searchfox-file' }, [
           el('span', { className: 'searchfox-path', text: file.path }),
@@ -168,12 +168,9 @@ export class SearchfoxMethods {
       for (const line of file.lines) {
         const code = el('code', { className: 'searchfox-code', text: line.line });
         markRange(code, line.bounds);
-        void monaco.editor.colorize(line.line, language, {}).then((html) => {
-          // Monaco escapes the text; its markup is token spans and a trailing <br>.
-          code.innerHTML = html;
-          code.querySelectorAll('br').forEach((br) => br.remove());
-          markRange(code, line.bounds);
-        });
+        void this.colorizeSearchfoxLine(code, file.path, line.line).then(() =>
+          markRange(code, line.bounds),
+        );
         const row = el('button', { className: 'searchfox-line', attrs: { type: 'button' } }, [
           el('span', { className: 'searchfox-lno', text: line.lno }),
           code,
@@ -187,6 +184,20 @@ export class SearchfoxMethods {
       }
     }
     return section;
+  }
+
+  /** Colours a result line the way the view it was opened from colours code. */
+  private async colorizeSearchfoxLine(code: HTMLElement, path: string, text: string) {
+    if (this.isStacked) {
+      code.classList.add('searchfox-pierre');
+      code.style.colorScheme = themeTypeFor(this.config.color_scheme);
+      code.replaceChildren(...(await pierreLineSpans(path, text)));
+      return;
+    }
+    const html = await monaco.editor.colorize(text, detectLanguageFromPathAndContent(path), {});
+    // Monaco escapes the text; its markup is token spans and a trailing <br>.
+    code.innerHTML = html;
+    code.querySelectorAll('br').forEach((br) => br.remove());
   }
 
   private goToSearchfoxHit(tree: string, path: string, lno: number) {
@@ -208,6 +219,31 @@ function searchfoxDefinitions(results: SearchfoxResults) {
     .flatMap((group) =>
       group.files.flatMap((file) => file.lines.map((line) => ({ path: file.path, lno: line.lno }))),
     );
+}
+
+/** Token spans for one result line, highlighted like the stacked view highlights `path`. */
+async function pierreLineSpans(path: string, text: string): Promise<HTMLSpanElement[]> {
+  const {
+    createSpanFromToken,
+    formatCSSVariablePrefix,
+    getFiletypeFromFileName,
+    getSharedHighlighter,
+  } = await import('../../node_modules/@pierre/diffs/dist/index.js');
+  const lang = getFiletypeFromFileName(path);
+  // Shares the highlighter the stacked view's worker pool already loaded on the main thread.
+  const highlighter = await getSharedHighlighter({
+    themes: Object.values(DIFFS_THEME),
+    langs: [lang],
+  });
+  const { tokens } = highlighter.codeToTokens(text, {
+    lang,
+    themes: DIFFS_THEME,
+    defaultColor: false,
+    cssVariablePrefix: formatCSSVariablePrefix('token'),
+    tokenizeMaxLineLength: DIFFS_TOKENIZE_MAX_LINE_LENGTH,
+    tokenizeTimeLimit: 0,
+  });
+  return tokens.flat().map((token) => createSpanFromToken(token, false));
 }
 
 /** Wraps UTF-16 offsets `bounds` of `root`'s text in <mark>s, splitting text nodes as needed. */

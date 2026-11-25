@@ -14225,6 +14225,7 @@ const DIFFS_THEME = {
 	dark: "pierre-dark",
 	light: "pierre-light"
 };
+const DIFFS_TOKENIZE_MAX_LINE_LENGTH = 1e3;
 function themeTypeFor(themeName) {
 	const base = window.UI_THEME_DEFS?.[themeName]?.base ?? themeName;
 	return base === "vs" || base === "hc-light" ? "light" : "dark";
@@ -14232,10 +14233,10 @@ function themeTypeFor(themeName) {
 let diffsRuntimePromise = null;
 function loadDiffsRuntime() {
 	diffsRuntimePromise ??= Promise.all([
-		import("./chunks/stacked-diff-D2_0u14V.js").then((n) => n.wt),
-		import("./chunks/stacked-diff-D2_0u14V.js").then((n) => n.Et),
-		import("./chunks/stacked-diff-D2_0u14V.js").then((n) => n.Tt),
-		import("./chunks/stacked-diff-D2_0u14V.js").then((n) => n.St)
+		import("./chunks/stacked-diff-ClUEWNN0.js").then((n) => n.Tt),
+		import("./chunks/stacked-diff-ClUEWNN0.js").then((n) => n.Dt),
+		import("./chunks/stacked-diff-ClUEWNN0.js").then((n) => n.Et),
+		import("./chunks/stacked-diff-ClUEWNN0.js").then((n) => n.St)
 	]).then(([codeView, patchParser, fileParser, workerPool]) => ({
 		CodeView: codeView.CodeView,
 		parsePatchFiles: patchParser.parsePatchFiles,
@@ -14421,7 +14422,7 @@ var StackedViewMethods = class {
 				theme: DIFFS_THEME,
 				lineDiffType: "word-alt",
 				maxLineDiffLength: 1e3,
-				tokenizeMaxLineLength: 1e3
+				tokenizeMaxLineLength: DIFFS_TOKENIZE_MAX_LINE_LENGTH
 			}
 		});
 		const options = {
@@ -15146,7 +15147,6 @@ var SearchfoxMethods = class {
 		const section = el("section", { className: "searchfox-group" }, [heading]);
 		for (const file of group.files) {
 			const inReview = this.files.some((reviewed) => reviewed.path === file.path);
-			const language = detectLanguageFromPathAndContent(file.path);
 			section.appendChild(el("div", { className: "searchfox-file" }, [el("span", {
 				className: "searchfox-path",
 				text: file.path
@@ -15161,11 +15161,7 @@ var SearchfoxMethods = class {
 					text: line.line
 				});
 				markRange(code, line.bounds);
-				monaco.editor.colorize(line.line, language, {}).then((html) => {
-					code.innerHTML = html;
-					code.querySelectorAll("br").forEach((br) => br.remove());
-					markRange(code, line.bounds);
-				});
+				this.colorizeSearchfoxLine(code, file.path, line.line).then(() => markRange(code, line.bounds));
 				const row = el("button", {
 					className: "searchfox-line",
 					attrs: { type: "button" }
@@ -15189,6 +15185,17 @@ var SearchfoxMethods = class {
 		}
 		return section;
 	}
+	/** Colours a result line the way the view it was opened from colours code. */
+	async colorizeSearchfoxLine(code, path, text) {
+		if (this.isStacked) {
+			code.classList.add("searchfox-pierre");
+			code.style.colorScheme = themeTypeFor(this.config.color_scheme);
+			code.replaceChildren(...await pierreLineSpans(path, text));
+			return;
+		}
+		code.innerHTML = await monaco.editor.colorize(text, detectLanguageFromPathAndContent(path), {});
+		code.querySelectorAll("br").forEach((br) => br.remove());
+	}
 	goToSearchfoxHit(tree, path, lno) {
 		const index = this.files.findIndex((file) => file.path === path);
 		if (index === -1) window.open(searchfoxSourceUrl(tree, path, lno), "_blank", "noopener");
@@ -15202,6 +15209,23 @@ function searchfoxDefinitions(results) {
 		path: file.path,
 		lno: line.lno
 	}))));
+}
+/** Token spans for one result line, highlighted like the stacked view highlights `path`. */
+async function pierreLineSpans(path, text) {
+	const { createSpanFromToken, formatCSSVariablePrefix, getFiletypeFromFileName, getSharedHighlighter } = await import("./chunks/stacked-diff-ClUEWNN0.js").then((n) => n.Ct);
+	const lang = getFiletypeFromFileName(path);
+	const { tokens } = (await getSharedHighlighter({
+		themes: Object.values(DIFFS_THEME),
+		langs: [lang]
+	})).codeToTokens(text, {
+		lang,
+		themes: DIFFS_THEME,
+		defaultColor: false,
+		cssVariablePrefix: formatCSSVariablePrefix("token"),
+		tokenizeMaxLineLength: DIFFS_TOKENIZE_MAX_LINE_LENGTH,
+		tokenizeTimeLimit: 0
+	});
+	return tokens.flat().map((token) => createSpanFromToken(token, false));
 }
 /** Wraps UTF-16 offsets `bounds` of `root`'s text in <mark>s, splitting text nodes as needed. */
 function markRange(root, bounds) {
@@ -15423,7 +15447,6 @@ var MonacoApp = class {
 				window.Perf.measure("init:monaco:load", "init:monaco:load:start", "init:monaco:load:end");
 				if (window.DEBUG) console.info("[app] monaco loaded");
 				this.defineCustomThemes();
-				monaco.editor.setTheme(this.config.color_scheme);
 				this.applyThemeToUI(this.config.color_scheme);
 				document.documentElement.setAttribute("data-ui-ready", "1");
 				window.Perf.mark("init:ui-setup:start");

@@ -326,8 +326,6 @@ export class MonacoApp {
           console.info('[app] monaco loaded');
         }
         this.defineCustomThemes();
-        // Token colours (used by colorize() outside editors too) only exist once a theme is set.
-        monaco.editor.setTheme(this.config.color_scheme);
         this.applyThemeToUI(this.config.color_scheme);
         document.documentElement.setAttribute('data-ui-ready', '1');
         window.Perf.mark('init:ui-setup:start');
