@@ -26,7 +26,7 @@ function setSearchfoxBusy(busy: boolean) {
   if (active && !busyIndicator) {
     busyIndicator = el(
       'div',
-      { className: 'searchfox-busy-indicator', attrs: { role: 'status' } },
+      { className: 'searchfox-pill searchfox-busy-indicator', attrs: { role: 'status' } },
       [
         el('span', { className: 'searchfox-spinner' }),
         el('span', { text: 'Searching searchfox…' }),
@@ -37,6 +37,29 @@ function setSearchfoxBusy(busy: boolean) {
     busyIndicator?.remove();
     busyIndicator = null;
   }
+}
+
+let toast: { node: HTMLDivElement; timer: ReturnType<typeof setTimeout> } | null = null;
+
+/** A brief message in the same pill as the busy indicator. */
+function showSearchfoxToast(message: string) {
+  if (toast) {
+    clearTimeout(toast.timer);
+    toast.node.remove();
+  }
+  const node = el('div', {
+    className: 'searchfox-pill searchfox-toast',
+    text: message,
+    attrs: { role: 'status' },
+  });
+  document.body.appendChild(node);
+  toast = {
+    node,
+    timer: setTimeout(() => {
+      node.remove();
+      toast = null;
+    }, 2500),
+  };
 }
 
 export class SearchfoxMethods {
@@ -70,6 +93,11 @@ export class SearchfoxMethods {
         this.setSearchfoxStatus(panel.body, 'Searching searchfox.org…', 'busy');
       }
       const results = await searchSearchfox(resolved.query);
+      if (results.groups.length === 0) {
+        panel?.close();
+        showSearchfoxToast(`No searchfox results for ${resolved.pretty ?? target.word}`);
+        return;
+      }
       if (mode === 'definition') {
         const definitions = searchfoxDefinitions(results);
         if (definitions.length === 1) {
@@ -123,10 +151,6 @@ export class SearchfoxMethods {
     close: () => void,
   ) {
     clearEl(body);
-    if (results.groups.length === 0) {
-      this.setSearchfoxStatus(body, 'No results.');
-      return;
-    }
     for (const group of results.groups) {
       body.appendChild(this.searchfoxGroupNode(tree, group, close));
     }

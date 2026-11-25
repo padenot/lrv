@@ -338,4 +338,31 @@ test.describe('searchfox code navigation', () => {
     await expect(page.locator('.searchfox-busy-indicator')).toHaveCount(0);
     await expect(page.locator('body')).not.toHaveClass(/searchfox-busy/);
   });
+
+  test('shows a toast instead of the panel when searchfox has no results', async ({ page }) => {
+    await isolateConfig(page, { searchfox: true });
+    await mockSearchfox(page);
+    await page.route('**/api/searchfox/search?*', (route) =>
+      route.fulfill({ json: { query: RESOLVED.query, groups: [] } }),
+    );
+    const started = await startReview(root);
+    child = started.child;
+    await page.goto(started.url);
+    await expect(page.locator('#preloader-overlay')).toHaveCount(0);
+    await expect(
+      page.locator('#editor-container:not(.diff-loading) .editor.modified .view-lines'),
+    ).toContainText('Disconnect');
+
+    const point = await modifiedClickPoint(page, 2, 10);
+    await page.keyboard.down(modifier);
+    await page.keyboard.down('Alt');
+    await page.mouse.click(point.x, point.y);
+    await page.keyboard.up('Alt');
+    await page.keyboard.up(modifier);
+
+    const toast = page.locator('.searchfox-toast');
+    await expect(toast).toHaveText('No searchfox results for AudioNode::Disconnect');
+    await expect(page.locator('.searchfox-modal')).toHaveCount(0);
+    await expect(toast).toHaveCount(0, { timeout: 5000 });
+  });
 });

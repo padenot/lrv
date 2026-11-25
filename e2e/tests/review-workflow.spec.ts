@@ -1484,16 +1484,15 @@ test.describe('Review Workflow E2E', () => {
         resolves.push(route.request().postDataJSON());
         return route.fulfill({ json: { query: 'id:x', pretty: null, symbols: [] } });
       });
-      await page.route('**/api/searchfox/search', (route) =>
+      await page.route('**/api/searchfox/search?*', (route) =>
         route.fulfill({ json: { query: 'id:x', groups: [] } }),
       );
       return resolves;
     }
 
-    // With no definitions the lookup shows the results panel, which covers the diff.
-    async function closeSearchfoxPanel(page: Page) {
-      await expect(page.locator('.searchfox-modal')).toBeVisible();
-      await page.keyboard.press('Escape');
+    // The mocked search is empty, so each lookup ends with a toast instead of the results panel.
+    async function expectNoResultsToast(page: Page) {
+      await expect(page.locator('.searchfox-toast')).toContainText('No searchfox results for');
       await expect(page.locator('.searchfox-modal')).toHaveCount(0);
     }
 
@@ -1550,7 +1549,7 @@ test.describe('Review Workflow E2E', () => {
             modifiers: ['ControlOrMeta'],
             position: await wordPosition(line, word),
           });
-          await closeSearchfoxPanel(page);
+          await expectNoResultsToast(page);
         }
         await expect.poll(() => resolves.length).toBe(3);
         expect(resolves).toEqual(lookups('searchfox.txt', 'searchfox.txt'));
@@ -1575,7 +1574,7 @@ test.describe('Review Workflow E2E', () => {
           modifiers: ['ControlOrMeta'],
           position: await wordPosition(line, word),
         });
-        await closeSearchfoxPanel(page);
+        await expectNoResultsToast(page);
       }
       await expect.poll(() => resolves.length).toBe(3);
       expect(resolves).toEqual(lookups('searchfox.txt', 'searchfox-renamed.txt'));
@@ -1635,7 +1634,7 @@ test.describe('Review Workflow E2E', () => {
       await expect(menu).toHaveCount(0);
       await expect.poll(() => resolves.length).toBe(1);
       expect(resolves).toEqual([lookups('searchfox.txt', 'searchfox.txt')[0]]);
-      await closeSearchfoxPanel(page);
+      await expectNoResultsToast(page);
     });
 
     test('right-click on a deleted line of a renamed file looks up the old path', async ({
@@ -1653,7 +1652,7 @@ test.describe('Review Workflow E2E', () => {
       await page.getByRole('menuitem', { name: 'Searchfox: Go to Definition' }).click();
       await expect.poll(() => resolves.length).toBe(1);
       expect(resolves).toEqual([lookups('searchfox.txt', 'searchfox-renamed.txt')[1]]);
-      await closeSearchfoxPanel(page);
+      await expectNoResultsToast(page);
     });
 
     test('the Searchfox menu moves focus with arrows and closes on Escape without a lookup', async ({
