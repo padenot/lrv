@@ -1218,7 +1218,8 @@ const DEFAULT_APP_CONFIG = {
 	stacked_view: false,
 	word_wrap: false,
 	ligatures: false,
-	auto_fetch_comments: false
+	auto_fetch_comments: false,
+	searchfox: false
 };
 function resolveAppConfig(input) {
 	return {
@@ -1229,7 +1230,8 @@ function resolveAppConfig(input) {
 		stacked_view: input.stacked_view ?? DEFAULT_APP_CONFIG.stacked_view,
 		word_wrap: input.word_wrap ?? DEFAULT_APP_CONFIG.word_wrap,
 		ligatures: input.ligatures ?? DEFAULT_APP_CONFIG.ligatures,
-		auto_fetch_comments: input.auto_fetch_comments ?? DEFAULT_APP_CONFIG.auto_fetch_comments
+		auto_fetch_comments: input.auto_fetch_comments ?? DEFAULT_APP_CONFIG.auto_fetch_comments,
+		searchfox: input.searchfox ?? DEFAULT_APP_CONFIG.searchfox
 	};
 }
 //#endregion
@@ -13168,6 +13170,7 @@ var DialogMethods = class {
 		const currentWordWrap = this.config.word_wrap;
 		const currentLigatures = this.config.ligatures;
 		const currentAutoFetch = this.config.auto_fetch_comments;
+		const currentSearchfox = this.config.searchfox;
 		if (window.DEBUG) console.info("Settings modal - current values:", {
 			currentColorScheme,
 			currentFont,
@@ -13262,6 +13265,15 @@ var DialogMethods = class {
 			name: "auto_fetch_comments",
 			checked: currentAutoFetch
 		} }), el("span", { text: "Load comments from the commit’s Phabricator revision or GitHub PR (applies on next launch)" })])]);
+		const searchfoxField = el("div", { className: "settings-field" }, [el("label", {
+			attrs: { for: "searchfox" },
+			text: "Searchfox"
+		}), el("div", { className: "checkbox-wrapper" }, [el("input", { attrs: {
+			type: "checkbox",
+			id: "searchfox",
+			name: "searchfox",
+			checked: currentSearchfox
+		} }), el("span", { text: "Mod+click identifiers to find definitions and uses on searchfox.org (sends identifiers and file paths to searchfox.org)" })])]);
 		form.appendChild(themeField);
 		form.appendChild(fontField);
 		form.appendChild(splitViewField);
@@ -13269,6 +13281,7 @@ var DialogMethods = class {
 		form.appendChild(ligaturesField);
 		form.appendChild(autoCloseField);
 		form.appendChild(autoFetchField);
+		form.appendChild(searchfoxField);
 		body.appendChild(form);
 		const colorField = form.querySelector("#color-scheme");
 		if (colorField) colorField.value = currentColorScheme;
@@ -13286,6 +13299,7 @@ var DialogMethods = class {
 				word_wrap: formData.get("word_wrap") === "on",
 				ligatures: formData.get("ligatures") === "on",
 				auto_fetch_comments: formData.get("auto_fetch_comments") === "on",
+				searchfox: formData.get("searchfox") === "on",
 				stacked_view: this.config.stacked_view
 			});
 			try {
@@ -14807,6 +14821,11 @@ var StackedViewMethods = class {
 	}
 };
 //#endregion
+//#region web/src/searchfox-methods.ts
+var SearchfoxMethods = class {
+	async searchfoxLookup(_target, _mode, _newTab) {}
+};
+//#endregion
 //#region web/src/monaco-app.ts
 function applyMixin(TargetClass, MethodsClass) {
 	for (const name of Object.getOwnPropertyNames(MethodsClass.prototype)) {
@@ -15316,6 +15335,7 @@ applyMixin(MonacoApp, DiscussionMethods);
 applyMixin(MonacoApp, DialogMethods);
 applyMixin(MonacoApp, SeriesMethods);
 applyMixin(MonacoApp, StackedViewMethods);
+applyMixin(MonacoApp, SearchfoxMethods);
 applyMixin(MonacoApp, PublishDialogMethods);
 applyMixin(MonacoApp, ConnectAgentMethods);
 applyMixin(MonacoApp, CommitBarMethods);

@@ -2,6 +2,7 @@ import type { CommentLine, ReviewComment } from '../comments';
 import type { Discussion, DiscussionManager } from '../discussions';
 import type { ReviewNote } from '../review-notes';
 import type { editor } from 'monaco-editor';
+import type { SearchfoxTarget } from '../searchfox';
 
 export type Side = 'old' | 'new';
 
@@ -43,6 +44,7 @@ export type AppConfig = {
   word_wrap: boolean;
   ligatures: boolean;
   auto_fetch_comments: boolean;
+  searchfox: boolean;
 };
 
 export type AppConfigInput = Partial<AppConfig>;
@@ -82,6 +84,8 @@ export type AppContextData = {
   phabricator_available?: boolean;
   phabricator_revisions?: (string | null)[];
   own_revisions?: (boolean | null)[];
+  /** Searchfox tree used for code navigation, e.g. "firefox-main". */
+  searchfox_tree?: string | null;
 };
 
 export type UserTheme = {
@@ -244,6 +248,14 @@ export interface AppContext {
     discussion?: Discussion,
   ): void;
   showStackedDiscussionDraft(discussion: Discussion): void;
+  /** Resolves `target` on searchfox. `definition` jumps to the single
+   * definition when there is one, `uses` lists every hit; both fall back to the
+   * results panel. With `newTab`, opens searchfox.org in a new browser tab instead. */
+  searchfoxLookup(
+    target: SearchfoxTarget,
+    mode: 'definition' | 'uses',
+    newTab: boolean,
+  ): Promise<void>;
   discardStackedDiscussionDraft(discussionId: string): void;
   deleteDiscussion(discussion: Discussion): Promise<void>;
   summarizeDiscussion(discussion: Discussion): Promise<string>;

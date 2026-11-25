@@ -24,6 +24,7 @@ fn test_config_serde() {
         word_wrap: true,
         ligatures: true,
         auto_fetch_comments: true,
+        searchfox: true,
     };
 
     // Serialize to TOML
@@ -39,6 +40,7 @@ fn test_config_serde() {
     assert!(!deserialized.auto_close_tab);
     assert!(deserialized.word_wrap);
     assert!(deserialized.ligatures);
+    assert!(deserialized.searchfox);
 }
 
 /// Test config with missing fields (should use defaults)

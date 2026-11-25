@@ -23,6 +23,9 @@ pub struct UserConfig {
     /// its existing comments.
     #[serde(default)]
     pub auto_fetch_comments: bool,
+    /// Searchfox code navigation (Mod+click on identifiers). Queries searchfox.org.
+    #[serde(default)]
+    pub searchfox: bool,
 }
 
 fn default_color_scheme() -> String {
@@ -52,6 +55,7 @@ impl Default for UserConfig {
             word_wrap: false,
             ligatures: false,
             auto_fetch_comments: false,
+            searchfox: false,
         }
     }
 }

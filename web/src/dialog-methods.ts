@@ -146,6 +146,7 @@ export class DialogMethods {
     const currentWordWrap = this.config.word_wrap;
     const currentLigatures = this.config.ligatures;
     const currentAutoFetch = this.config.auto_fetch_comments;
+    const currentSearchfox = this.config.searchfox;
 
     if (window.DEBUG) {
       console.info('Settings modal - current values:', {
@@ -298,6 +299,23 @@ export class DialogMethods {
       ]),
     ]);
 
+    const searchfoxField = el('div', { className: 'settings-field' }, [
+      el('label', { attrs: { for: 'searchfox' }, text: 'Searchfox' }),
+      el('div', { className: 'checkbox-wrapper' }, [
+        el('input', {
+          attrs: {
+            type: 'checkbox',
+            id: 'searchfox',
+            name: 'searchfox',
+            checked: currentSearchfox,
+          },
+        }),
+        el('span', {
+          text: 'Mod+click identifiers to find definitions and uses on searchfox.org (sends identifiers and file paths to searchfox.org)',
+        }),
+      ]),
+    ]);
+
     form.appendChild(themeField);
     form.appendChild(fontField);
     form.appendChild(splitViewField);
@@ -305,6 +323,7 @@ export class DialogMethods {
     form.appendChild(ligaturesField);
     form.appendChild(autoCloseField);
     form.appendChild(autoFetchField);
+    form.appendChild(searchfoxField);
 
     body.appendChild(form);
     const colorField = form.querySelector<HTMLSelectElement>('#color-scheme');
@@ -329,6 +348,7 @@ export class DialogMethods {
         word_wrap: formData.get('word_wrap') === 'on',
         ligatures: formData.get('ligatures') === 'on',
         auto_fetch_comments: formData.get('auto_fetch_comments') === 'on',
+        searchfox: formData.get('searchfox') === 'on',
         stacked_view: this.config.stacked_view,
       });
 
