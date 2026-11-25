@@ -412,4 +412,65 @@ test.describe('searchfox code navigation', () => {
       expect(keywordColor).toBe(await colorOf(stackedVoid));
     });
   }
+
+  test('highlights each stacked-view result line on its own', async ({ page }) => {
+    await isolateConfig(page, { searchfox: true, stacked_view: true });
+    await mockSearchfox(page);
+    const line = (lno: number, text: string) => ({
+      lno,
+      line: text,
+      bounds: [text.indexOf('Disconnect'), text.indexOf('Disconnect') + 10],
+      context: null,
+    });
+    await page.route('**/api/searchfox/search?*', (route) =>
+      route.fulfill({
+        json: {
+          query: RESOLVED.query,
+          groups: [
+            {
+              kind: 'normal',
+              category: 'Uses (AudioNode::Disconnect)',
+              files: [
+                {
+                  path: 'dom/media/Other.cpp',
+                  // The first line opens a comment that searchfox's excerpt doesn't close.
+                  lines: [
+                    line(10, '/* Disconnect every node'),
+                    line(40, '  void Disconnect(out);'),
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      }),
+    );
+    const started = await startReview(root);
+    child = started.child;
+    await page.goto(started.url);
+    await expect(page.locator('#preloader-overlay')).toHaveCount(0);
+    await expect(page.locator('.stacked-code-view')).toBeVisible();
+    const stackedVoid = page
+      .locator('.stacked-code-view [data-line] span', { hasText: /void$/ })
+      .first();
+    await expect(stackedVoid).toBeAttached();
+
+    await page.evaluate(() => {
+      const app = window.__APP as unknown as Pick<AppContext, 'searchfoxLookup'>;
+      const text = '  return Disconnect(count);';
+      void app.searchfoxLookup(
+        { path: 'a.txt', line: 2, col: 9, word: 'Disconnect', text },
+        'uses',
+        false,
+      );
+    });
+
+    const panelVoid = page
+      .locator('.searchfox-line')
+      .nth(1)
+      .locator('.searchfox-code span', { hasText: /void$/ });
+    await expect(panelVoid).toBeAttached();
+    const colorOf = (locator: Locator) => locator.evaluate((node) => getComputedStyle(node).color);
+    expect(await colorOf(panelVoid)).toBe(await colorOf(stackedVoid));
+  });
 });

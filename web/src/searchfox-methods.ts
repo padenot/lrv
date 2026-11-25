@@ -194,26 +194,28 @@ export class SearchfoxMethods {
   private async colorizeSearchfoxLines(path: string, rows: SearchfoxRow[]) {
     if (this.isStacked) {
       const pool = await getStackedWorkerPool();
-      // One file so the grammar sees the lines in order; the cache key holds the contents.
-      const contents = rows.map(({ line }) => line.line).join('\n');
-      const file = { name: path, contents, cacheKey: `searchfox:${path}:${contents}` };
-      await pool.primeFileHighlightCache(file);
-      const highlighted = pool.getFileResultCache(file)?.result.code;
-      // Plain-text files are not highlighted, so their lines keep the text they have.
-      if (!highlighted) {
-        return;
-      }
       const colorScheme = themeTypeFor(this.config.color_scheme);
-      rows.forEach(({ line, code }, index) => {
-        const hast = highlighted[index];
-        if (hast?.type !== 'element') {
-          return;
-        }
-        code.classList.add('searchfox-pierre');
-        code.style.colorScheme = colorScheme;
-        code.replaceChildren(...hastToDom(hast.children));
-        markRange(code, line.bounds);
-      });
+      await Promise.all(
+        rows.map(async ({ line, code }) => {
+          // Each result line on its own: they aren't contiguous, so grammar state (e.g. an
+          // unclosed comment) must not carry from one to the next.
+          const file = {
+            name: path,
+            contents: line.line,
+            cacheKey: `searchfox:${path}:${line.line}`,
+          };
+          await pool.primeFileHighlightCache(file);
+          const hast = pool.getFileResultCache(file)?.result.code[0];
+          // Plain-text files are not highlighted, so their lines keep the text they have.
+          if (hast?.type !== 'element') {
+            return;
+          }
+          code.classList.add('searchfox-pierre');
+          code.style.colorScheme = colorScheme;
+          code.replaceChildren(...hastToDom(hast.children));
+          markRange(code, line.bounds);
+        }),
+      );
       return;
     }
     await Promise.all(

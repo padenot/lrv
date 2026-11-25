@@ -15202,24 +15202,21 @@ var SearchfoxMethods = class {
 	async colorizeSearchfoxLines(path, rows) {
 		if (this.isStacked) {
 			const pool = await getStackedWorkerPool();
-			const contents = rows.map(({ line }) => line.line).join("\n");
-			const file = {
-				name: path,
-				contents,
-				cacheKey: `searchfox:${path}:${contents}`
-			};
-			await pool.primeFileHighlightCache(file);
-			const highlighted = pool.getFileResultCache(file)?.result.code;
-			if (!highlighted) return;
 			const colorScheme = themeTypeFor(this.config.color_scheme);
-			rows.forEach(({ line, code }, index) => {
-				const hast = highlighted[index];
+			await Promise.all(rows.map(async ({ line, code }) => {
+				const file = {
+					name: path,
+					contents: line.line,
+					cacheKey: `searchfox:${path}:${line.line}`
+				};
+				await pool.primeFileHighlightCache(file);
+				const hast = pool.getFileResultCache(file)?.result.code[0];
 				if (hast?.type !== "element") return;
 				code.classList.add("searchfox-pierre");
 				code.style.colorScheme = colorScheme;
 				code.replaceChildren(...hastToDom(hast.children));
 				markRange(code, line.bounds);
-			});
+			}));
 			return;
 		}
 		await Promise.all(rows.map(async ({ line, code }) => {
