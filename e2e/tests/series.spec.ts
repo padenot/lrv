@@ -786,7 +786,7 @@ test.describe('Series: stacked-mode comments stay scoped to their own commit', (
     await page.evaluate(() => {
       const app = (window as any).__APP;
       app.fileCache = {};
-      app.stackedHydratedFiles.clear();
+      app.stackedHydrations.clear();
       (window as any).__pendingHydration = app.hydrateStackedFile(
         app.files[0],
         app.stackedParseDiffFromFile,
