@@ -211,23 +211,36 @@ impl Searchfox {
         };
         let searchfox: Vec<&str> = file.lines.iter().map(String::as_str).collect();
         let reviewed: Vec<&str> = reviewed.lines().collect();
-        let pairs = matched_lines(&searchfox, &reviewed);
-        let Ok(index) = pairs.binary_search_by_key(&target.line, |&(_, reviewed)| reviewed) else {
-            return Ok(unresolved);
-        };
-        let line = pairs[index].0;
-        let Some(tokens) = file.tokens.get(&line) else {
-            return Ok(unresolved);
-        };
-        // The column is an offset into the clicked text, which must be the reviewed line the
-        // mapping used. Matched lines are equal, so the byte column applies to searchfox's copy.
-        if reviewed[target.line - 1] != target.text {
+        // The column is an offset into the clicked text, which must be the reviewed line, with
+        // the word at that column.
+        if reviewed.get(target.line.wrapping_sub(1)) != Some(&target.text.as_str())
+            || !word_at(&target.text, target.col, &target.word)
+        {
             return Ok(unresolved);
         }
-        let Some(col) = byte_offset(&target.text, target.col) else {
-            return Ok(unresolved);
+        let pairs = matched_lines(&searchfox, &reviewed);
+        let hits = match pairs.binary_search_by_key(&target.line, |&(_, reviewed)| reviewed) {
+            Ok(index) => {
+                let line = pairs[index].0;
+                // Matched lines are equal, so the byte column applies to searchfox's copy.
+                let (Some(tokens), Some(col)) = (
+                    file.tokens.get(&line),
+                    byte_offset(&target.text, target.col),
+                ) else {
+                    return Ok(unresolved);
+                };
+                covering(searchfox[line - 1], tokens, col, &target.word)
+            }
+            // searchfox's revision doesn't have the clicked line (the review adds or changes it),
+            // so the word is resolved from its occurrence there nearest to where the line sits.
+            Err(index) => {
+                let near = index
+                    .checked_sub(1)
+                    .or((index < pairs.len()).then_some(index))
+                    .map_or(1, |i| pairs[i].0);
+                nearest_occurrence(&searchfox, &file.tokens, near, &target.word)
+            }
         };
-        let hits = covering(searchfox[line - 1], tokens, col, &target.word);
         let Some(first) = hits.first() else {
             return Ok(unresolved);
         };
@@ -590,6 +603,43 @@ fn utf16_offset(text: &str, byte: usize) -> Option<usize> {
     Some(text.get(..byte)?.encode_utf16().count())
 }
 
+/// Whether `word` occurs in `text` over UTF-16 column `col`.
+fn word_at(text: &str, col: usize, word: &str) -> bool {
+    let Some(col) = byte_offset(text, col) else {
+        return false;
+    };
+    text.match_indices(word)
+        .any(|(start, _)| start <= col && col < start + word.len())
+}
+
+/// The tokens of the occurrence of `word` nearest to line `near` (the first one on that line):
+/// how a word on a line searchfox doesn't have is resolved.
+fn nearest_occurrence<'a>(
+    lines: &[&str],
+    tokens: &'a Tokens,
+    near: usize,
+    word: &str,
+) -> Vec<&'a Token> {
+    let occurrence = tokens
+        .iter()
+        .flat_map(|(&line, tokens)| tokens.iter().map(move |token| (line, token)))
+        .filter(|(line, token)| {
+            lines
+                .get(line - 1)
+                .and_then(|text| text.get(token.start..token.end))
+                == Some(word)
+        })
+        .min_by_key(|(line, token)| (line.abs_diff(near), *line, token.start))
+        .map(|(line, token)| (line, token.start));
+    let Some((line, start)) = occurrence else {
+        return Vec::new();
+    };
+    tokens[&line]
+        .iter()
+        .filter(|t| t.start == start && lines[line - 1].get(t.start..t.end) == Some(word))
+        .collect()
+}
+
 /// The tokens whose span covers byte column `col` of `line` (analysis columns are bytes),
 /// preferring those whose text is `word`.
 fn covering<'a>(line: &str, tokens: &'a [Token], col: usize, word: &str) -> Vec<&'a Token> {
@@ -662,6 +712,40 @@ mod tests {
             permalink_revision(r#"<a id="panel-permalink" href="/firefox-main/rev/HEAD/x">"#)
                 .is_err()
         );
+    }
+
+    #[test]
+    fn nearest_occurrence_resolves_words_on_lines_searchfox_lacks() {
+        let lines = ["int i = 0;", "f(i);", "", "", "int i = 1;", "g(i);"];
+        let tokens = parse_analysis(concat!(
+            r#"{"loc":"00001:4-5","source":1,"pretty":"first i","sym":"V_first"}"#,
+            "\n",
+            r#"{"loc":"00002:2-3","source":1,"pretty":"first i","sym":"V_first"}"#,
+            "\n",
+            r#"{"loc":"00005:4-5","source":1,"pretty":"second i","sym":"V_second"}"#,
+            "\n",
+            r#"{"loc":"00006:2-3","source":1,"pretty":"second i","sym":"V_second"}"#,
+            "\n",
+        ))
+        .unwrap();
+        let pretty = |near| {
+            nearest_occurrence(&lines, &tokens, near, "i")
+                .first()
+                .map(|t| t.pretty.clone())
+        };
+        // The same name means different symbols in different places: the nearest wins.
+        assert_eq!(pretty(2).as_deref(), Some("first i"));
+        assert_eq!(pretty(4).as_deref(), Some("second i"));
+        assert!(nearest_occurrence(&lines, &tokens, 3, "j").is_empty());
+    }
+
+    #[test]
+    fn word_at_requires_the_word_over_the_column() {
+        assert!(word_at("lock(mMutex);", 7, "mMutex"));
+        assert!(!word_at("lock(mMutex);", 2, "mMutex"));
+        assert!(!word_at("// new", 3, "Disconnect"));
+        // UTF-16 columns: "é" is one unit, two bytes.
+        assert!(word_at("/* é */ Foo();", 8, "Foo"));
     }
 
     #[test]

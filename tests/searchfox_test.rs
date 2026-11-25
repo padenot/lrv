@@ -21,8 +21,9 @@ const INDEXED: &str = "int x;\nvoid AudioNode::Disconnect(ErrorResult& aRv) {\n}
 /// The commit before the indexed one, with different text: a lookup that used its parent (or a
 /// stale revision) would map lines onto it.
 const PARENT: &str = "unrelated();\n";
-/// The reviewed new side: `INDEXED` with a line added above it.
-const REVIEWED: &str = "// new\nint x;\nvoid AudioNode::Disconnect(ErrorResult& aRv) {\n}\n";
+/// The reviewed new side: `INDEXED` with a line added above it and a call added below it.
+const REVIEWED: &str =
+    "// new\nint x;\nvoid AudioNode::Disconnect(ErrorResult& aRv) {\n}\nDisconnect(aRv);\n";
 
 const ANALYSIS: &str = concat!(
     r#"{"loc":"00001:0","source":1,"syntax":"def,file","pretty":"file dom/media/webaudio/AudioNode.cpp","sym":"FILE_dom/media/webaudio/AudioNode@2Ecpp"}"#,
@@ -224,11 +225,11 @@ async fn send(app: &axum::Router, request: Request<Body>) -> (StatusCode, serde_
     (status, body)
 }
 
-fn resolve_request(line: usize, text: &str) -> Request<Body> {
+fn resolve_request(line: usize, text: &str, col: usize) -> Request<Body> {
     let body = serde_json::json!({
         "path": PATH,
         "line": line,
-        "col": 20,
+        "col": col,
         "word": "Disconnect",
         "text": text,
         "side": "new",
@@ -272,10 +273,10 @@ async fn searchfox_endpoints_gate_and_resolve_at_the_indexed_revision() {
     // Gating comes first: disabled setting, then public server.
     start_mock(hashes(), false).await;
     let app = lrv::server::create_router(state(&repo, false, false), false);
-    let (status, _) = send(&app, resolve_request(3, SIGNATURE)).await;
+    let (status, _) = send(&app, resolve_request(3, SIGNATURE, 20)).await;
     assert_eq!(status, StatusCode::CONFLICT, "disabled by default");
     let app = lrv::server::create_router(state(&repo, true, true), false);
-    let (status, _) = send(&app, resolve_request(3, SIGNATURE)).await;
+    let (status, _) = send(&app, resolve_request(3, SIGNATURE, 20)).await;
     assert_eq!(
         status,
         StatusCode::FORBIDDEN,
@@ -289,7 +290,7 @@ async fn searchfox_endpoints_gate_and_resolve_at_the_indexed_revision() {
     // and text (from the repository) agree.
     let mock = start_mock(hashes(), true).await;
     let app = lrv::server::create_router(state(&repo, false, true), false);
-    let (status, body) = send(&app, resolve_request(3, SIGNATURE)).await;
+    let (status, body) = send(&app, resolve_request(3, SIGNATURE, 20)).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["query"], SYMBOL_QUERY);
     assert_eq!(
@@ -302,13 +303,23 @@ async fn searchfox_endpoints_gate_and_resolve_at_the_indexed_revision() {
         "retried once"
     );
 
-    // The clicked line is unchanged in the review but not in searchfox's copy: unresolved.
-    let (status, body) = send(&app, resolve_request(1, "// new")).await;
+    // The word isn't on the clicked line: unresolved.
+    let (status, body) = send(&app, resolve_request(1, "// new", 3)).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["query"], "id:Disconnect");
 
+    // A line the review adds isn't in searchfox's copy: the word resolves from its occurrence
+    // there nearest to where the line sits.
+    let (status, body) = send(&app, resolve_request(5, "Disconnect(aRv);", 1)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["query"], SYMBOL_QUERY);
+
     // A click whose text isn't the reviewed line can't place its column: unresolved.
-    let (status, body) = send(&app, resolve_request(3, "void AudioNode::Disconnect() {")).await;
+    let (status, body) = send(
+        &app,
+        resolve_request(3, "void AudioNode::Disconnect() {", 20),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["query"], "id:Disconnect");
 
@@ -338,7 +349,7 @@ async fn searchfox_endpoints_gate_and_resolve_at_the_indexed_revision() {
     // which is only trusted while the head is the revision.
     let mock = start_mock(hashes(), false).await;
     let app = lrv::server::create_router(state(&plain, false, true), false);
-    let (status, body) = send(&app, resolve_request(3, SIGNATURE)).await;
+    let (status, body) = send(&app, resolve_request(3, SIGNATURE, 20)).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["query"], SYMBOL_QUERY);
     assert_eq!(mock.analysis_reads.load(Ordering::SeqCst), 1);
