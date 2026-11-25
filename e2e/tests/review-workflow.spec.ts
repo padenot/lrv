@@ -1614,6 +1614,88 @@ test.describe('Review Workflow E2E', () => {
       expect(resolves).toEqual([]);
       await expect(page.locator('.stacked-comment-form')).toHaveCount(0);
     });
+
+    test('right-click on an added line opens the Searchfox menu, Find Uses sends a lookup', async ({
+      page,
+    }) => {
+      await setupSearchfoxRepo();
+      await isolateConfig(page, { searchfox: true });
+      const resolves = await mockSearchfox(page);
+      await openStackedView(page);
+      const line = page
+        .locator('.stacked-code-view diffs-container', { hasText: 'searchfox' })
+        .locator('[data-line][data-line-type="change-addition"]')
+        .first();
+      await line.click({ button: 'right', position: await wordPosition(line, 'added') });
+      const menu = page.getByRole('menu');
+      await expect(
+        menu.getByRole('menuitem', { name: 'Searchfox: Go to Definition' }),
+      ).toBeVisible();
+      await menu.getByRole('menuitem', { name: 'Searchfox: Find Uses' }).click();
+      await expect(menu).toHaveCount(0);
+      await expect.poll(() => resolves.length).toBe(1);
+      expect(resolves).toEqual([lookups('searchfox.txt', 'searchfox.txt')[0]]);
+      await closeSearchfoxPanel(page);
+    });
+
+    test('right-click on a deleted line of a renamed file looks up the old path', async ({
+      page,
+    }) => {
+      await setupSearchfoxRepo('searchfox-renamed.txt');
+      await isolateConfig(page, { searchfox: true });
+      const resolves = await mockSearchfox(page);
+      await openStackedView(page);
+      const line = page
+        .locator('.stacked-code-view diffs-container', { hasText: 'searchfox' })
+        .locator('[data-line][data-line-type="change-deletion"]')
+        .first();
+      await line.click({ button: 'right', position: await wordPosition(line, 'removed') });
+      await page.getByRole('menuitem', { name: 'Searchfox: Go to Definition' }).click();
+      await expect.poll(() => resolves.length).toBe(1);
+      expect(resolves).toEqual([lookups('searchfox.txt', 'searchfox-renamed.txt')[1]]);
+      await closeSearchfoxPanel(page);
+    });
+
+    test('the Searchfox menu moves focus with arrows and closes on Escape without a lookup', async ({
+      page,
+    }) => {
+      await setupSearchfoxRepo();
+      await isolateConfig(page, { searchfox: true });
+      const resolves = await mockSearchfox(page);
+      await openStackedView(page);
+      const line = page
+        .locator('.stacked-code-view diffs-container', { hasText: 'searchfox' })
+        .locator('[data-line][data-line-type="change-addition"]')
+        .first();
+      await line.click({ button: 'right', position: await wordPosition(line, 'added') });
+      const items = page.getByRole('menu').getByRole('menuitem');
+      await expect(items.first()).toBeFocused();
+      await page.keyboard.press('ArrowDown');
+      await expect(items.nth(1)).toBeFocused();
+      await page.keyboard.press('Escape');
+      await expect(page.getByRole('menu')).toHaveCount(0);
+      // Lookups are sent immediately, so a short wait is enough to see one.
+      await page.waitForTimeout(300);
+      expect(resolves).toEqual([]);
+      await expect(page.locator('.searchfox-modal')).toHaveCount(0);
+    });
+
+    test('right-click sends no lookup and shows no Searchfox menu with the setting off', async ({
+      page,
+    }) => {
+      await setupSearchfoxRepo();
+      await isolateConfig(page, { searchfox: false });
+      const resolves = await mockSearchfox(page);
+      await openStackedView(page);
+      const line = page
+        .locator('.stacked-code-view diffs-container', { hasText: 'searchfox' })
+        .locator('[data-line][data-line-type="change-addition"]')
+        .first();
+      await line.click({ button: 'right', position: await wordPosition(line, 'added') });
+      await expect(page.getByRole('menu')).toHaveCount(0);
+      await page.waitForTimeout(300);
+      expect(resolves).toEqual([]);
+    });
   });
 
   test('stacked mode can expand unmodified lines in the last file', async ({ page }) => {

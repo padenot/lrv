@@ -23,7 +23,13 @@ import {
   type ReviewComment,
 } from './comments';
 import { fetchJSON } from './api';
-import { identifierAt, searchfoxClick, type SearchfoxTarget } from './searchfox';
+import {
+  identifierAt,
+  searchfoxClick,
+  searchfoxMenuActions,
+  type SearchfoxTarget,
+} from './searchfox';
+import { openContextMenu } from './context-menu';
 import type { ReviewNote } from './review-notes';
 import type { AppConfig, AppContext, DiffFile, DiffLine, Side } from './types/app';
 
@@ -311,6 +317,9 @@ export class StackedViewMethods {
 
     const codeViewRoot = el('div', { className: 'stacked-code-view' });
     codeViewRoot.addEventListener('mousedown', (event) => this.handleStackedSearchfoxClick(event));
+    codeViewRoot.addEventListener('contextmenu', (event) =>
+      this.handleStackedSearchfoxContextMenu(event),
+    );
     container.appendChild(codeViewRoot);
     const binaryFiles = this.files.filter((file) => file.is_binary);
 
@@ -1068,6 +1077,23 @@ export class StackedViewMethods {
     }
     event.preventDefault();
     void this.searchfoxLookup(target, click.mode, click.newTab);
+  }
+
+  /** On an identifier, replaces the browser menu with Searchfox lookups; elsewhere the browser menu stays. */
+  private handleStackedSearchfoxContextMenu(event: MouseEvent) {
+    const target = this.config.searchfox ? this.stackedSearchfoxTarget(event) : null;
+    if (!target) {
+      return;
+    }
+    event.preventDefault();
+    openContextMenu(
+      event.clientX,
+      event.clientY,
+      searchfoxMenuActions.map(({ label, mode }) => ({
+        label,
+        onSelect: () => void this.searchfoxLookup(target, mode, false),
+      })),
+    );
   }
 
   /** The identifier under a click on a code line; null on gutters, annotations, headers and separators. */

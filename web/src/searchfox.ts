@@ -60,6 +60,12 @@ export function searchfoxSearchUrl(tree: string, query: string): string {
   return `https://searchfox.org/${tree}/search?q=${encodeURIComponent(query)}`;
 }
 
+/** Context-menu entries for a lookup, shared by the Monaco and stacked views. */
+export const searchfoxMenuActions = [
+  { label: 'Searchfox: Go to Definition', mode: 'definition' },
+  { label: 'Searchfox: Find Uses', mode: 'uses' },
+] as const;
+
 export type SearchfoxClick = { mode: 'definition' | 'uses'; newTab: boolean };
 
 /** Mod+click: definition; Mod+Alt+click: uses; add Shift to open

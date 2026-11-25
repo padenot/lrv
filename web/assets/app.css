@@ -1838,6 +1838,37 @@ body {
   white-space: nowrap;
 }
 
+/* Context menu (stacked view Searchfox lookups) */
+.context-menu {
+  position: fixed;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  min-width: 200px;
+  padding: 4px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  box-shadow: var(--shadow-md);
+}
+.context-menu-item {
+  padding: 5px 10px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.context-menu-item:hover,
+.context-menu-item:focus-visible {
+  outline: none;
+  background: color-mix(in srgb, var(--accent-color) 25%, transparent);
+}
+
 /* Settings modal styles */
 .settings-form {
   display: flex;

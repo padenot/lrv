@@ -11300,6 +11300,14 @@ function searchfoxSourceUrl(tree, path, line) {
 function searchfoxSearchUrl(tree, query) {
 	return `https://searchfox.org/${tree}/search?q=${encodeURIComponent(query)}`;
 }
+/** Context-menu entries for a lookup, shared by the Monaco and stacked views. */
+const searchfoxMenuActions = [{
+	label: "Searchfox: Go to Definition",
+	mode: "definition"
+}, {
+	label: "Searchfox: Find Uses",
+	mode: "uses"
+}];
 /** Mod+click: definition; Mod+Alt+click: uses; add Shift to open
 * searchfox.org in a new tab. Returns null when Mod isn't held. */
 function searchfoxClick(event) {
@@ -11641,16 +11649,8 @@ var FileLoadingMethods = class {
 		if (this.config.searchfox) this.editorClickDisposables.push(...this.searchfoxContextActions(modifiedEditor, filePath), ...this.searchfoxContextActions(originalEditor, originalPath));
 	}
 	searchfoxContextActions(targetEditor, path) {
-		return [{
-			id: "searchfox.definition",
-			label: "Searchfox: Go to Definition",
-			mode: "definition"
-		}, {
-			id: "searchfox.uses",
-			label: "Searchfox: Find Uses",
-			mode: "uses"
-		}].map(({ id, label, mode }) => targetEditor.addAction({
-			id,
+		return searchfoxMenuActions.map(({ label, mode }) => targetEditor.addAction({
+			id: `searchfox.${mode}`,
 			label,
 			contextMenuGroupId: "navigation",
 			run: () => {
@@ -14155,6 +14155,71 @@ var SeriesMethods = class {
 	}
 };
 //#endregion
+//#region web/src/context-menu.ts
+let dismissOpenMenu = null;
+/** Opens a menu of `items` at the viewport point (x, y), replacing any open menu. */
+function openContextMenu(x, y, items) {
+	dismissOpenMenu?.();
+	const previouslyFocused = document.activeElement;
+	const buttons = items.map(({ label, onSelect }) => {
+		const button = el("button", {
+			className: "context-menu-item",
+			text: label,
+			attrs: {
+				type: "button",
+				role: "menuitem"
+			}
+		});
+		button.addEventListener("click", () => {
+			dismiss();
+			onSelect();
+		});
+		return button;
+	});
+	const menu = el("div", {
+		className: "context-menu",
+		attrs: { role: "menu" }
+	}, buttons);
+	document.body.appendChild(menu);
+	const { width, height } = menu.getBoundingClientRect();
+	menu.style.left = `${Math.max(0, Math.min(x, window.innerWidth - width))}px`;
+	menu.style.top = `${Math.max(0, Math.min(y, window.innerHeight - height))}px`;
+	const onKeydown = (event) => {
+		if (event.key === "Escape") {
+			event.stopPropagation();
+			dismiss();
+			if (previouslyFocused instanceof HTMLElement) previouslyFocused.focus();
+		} else if (event.key === "Tab") dismiss();
+		else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+			event.preventDefault();
+			const step = event.key === "ArrowDown" ? 1 : -1;
+			const current = buttons.indexOf(document.activeElement);
+			buttons[(current + step + buttons.length) % buttons.length].focus();
+		}
+	};
+	const onMousedown = (event) => {
+		if (!menu.contains(event.target)) dismiss();
+	};
+	const listenerOptions = { capture: true };
+	const dismiss = () => {
+		menu.remove();
+		document.removeEventListener("keydown", onKeydown, listenerOptions);
+		document.removeEventListener("mousedown", onMousedown, listenerOptions);
+		window.removeEventListener("scroll", dismiss, listenerOptions);
+		window.removeEventListener("blur", dismiss);
+		dismissOpenMenu = null;
+	};
+	dismissOpenMenu = dismiss;
+	document.addEventListener("keydown", onKeydown, listenerOptions);
+	document.addEventListener("mousedown", onMousedown, listenerOptions);
+	window.addEventListener("scroll", dismiss, {
+		capture: true,
+		passive: true
+	});
+	window.addEventListener("blur", dismiss);
+	buttons[0].focus({ preventScroll: true });
+}
+//#endregion
 //#region web/src/stacked-view-methods.ts
 const DIFFS_THEME = {
 	dark: "pierre-dark",
@@ -14329,6 +14394,7 @@ var StackedViewMethods = class {
 		if (!this.isStacked || !container.isConnected || renderToken !== this.stackedRenderToken || generation !== this.commitLoadGeneration) return;
 		const codeViewRoot = el("div", { className: "stacked-code-view" });
 		codeViewRoot.addEventListener("mousedown", (event) => this.handleStackedSearchfoxClick(event));
+		codeViewRoot.addEventListener("contextmenu", (event) => this.handleStackedSearchfoxContextMenu(event));
 		container.appendChild(codeViewRoot);
 		const binaryFiles = this.files.filter((file) => file.is_binary);
 		const items = this.files.map((file) => this.buildCodeViewItem(file, parsePatchFiles)).filter((item) => !!item);
@@ -14900,6 +14966,16 @@ var StackedViewMethods = class {
 		if (!target) return;
 		event.preventDefault();
 		this.searchfoxLookup(target, click.mode, click.newTab);
+	}
+	/** On an identifier, replaces the browser menu with Searchfox lookups; elsewhere the browser menu stays. */
+	handleStackedSearchfoxContextMenu(event) {
+		const target = this.config.searchfox ? this.stackedSearchfoxTarget(event) : null;
+		if (!target) return;
+		event.preventDefault();
+		openContextMenu(event.clientX, event.clientY, searchfoxMenuActions.map(({ label, mode }) => ({
+			label,
+			onSelect: () => void this.searchfoxLookup(target, mode, false)
+		})));
 	}
 	/** The identifier under a click on a code line; null on gutters, annotations, headers and separators. */
 	stackedSearchfoxTarget(event) {

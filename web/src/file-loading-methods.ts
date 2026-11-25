@@ -3,7 +3,12 @@ import { detectLanguageFromPathAndContent } from './language';
 import { MONACO_HIDE_UNCHANGED } from './diff-utils';
 import { monoFontStack, prefersReducedMotion } from './font';
 import { markAppReady } from './ui-signals';
-import { identifierAt, searchfoxClick, type SearchfoxTarget } from './searchfox';
+import {
+  identifierAt,
+  searchfoxClick,
+  searchfoxMenuActions,
+  type SearchfoxTarget,
+} from './searchfox';
 import type { AppContext, DiffFile } from './types/app';
 import type { editor } from 'monaco-editor';
 
@@ -487,13 +492,9 @@ export class FileLoadingMethods {
   }
 
   private searchfoxContextActions(targetEditor: editor.IStandaloneCodeEditor, path: string) {
-    const actions = [
-      { id: 'searchfox.definition', label: 'Searchfox: Go to Definition', mode: 'definition' },
-      { id: 'searchfox.uses', label: 'Searchfox: Find Uses', mode: 'uses' },
-    ] as const;
-    return actions.map(({ id, label, mode }) =>
+    return searchfoxMenuActions.map(({ label, mode }) =>
       targetEditor.addAction({
-        id,
+        id: `searchfox.${mode}`,
         label,
         contextMenuGroupId: 'navigation',
         run: () => {
