@@ -1490,6 +1490,13 @@ test.describe('Review Workflow E2E', () => {
       return resolves;
     }
 
+    // With no definitions the lookup shows the results panel, which covers the diff.
+    async function closeSearchfoxPanel(page: Page) {
+      await expect(page.locator('.searchfox-modal')).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(page.locator('.searchfox-modal')).toHaveCount(0);
+    }
+
     // Left quarter of the second character of `word`, so the caret lands before that character.
     async function wordPosition(line: Locator, word: string) {
       return line.evaluate((element, word) => {
@@ -1543,6 +1550,7 @@ test.describe('Review Workflow E2E', () => {
             modifiers: ['ControlOrMeta'],
             position: await wordPosition(line, word),
           });
+          await closeSearchfoxPanel(page);
         }
         await expect.poll(() => resolves.length).toBe(3);
         expect(resolves).toEqual(lookups('searchfox.txt', 'searchfox.txt'));
@@ -1567,6 +1575,7 @@ test.describe('Review Workflow E2E', () => {
           modifiers: ['ControlOrMeta'],
           position: await wordPosition(line, word),
         });
+        await closeSearchfoxPanel(page);
       }
       await expect.poll(() => resolves.length).toBe(3);
       expect(resolves).toEqual(lookups('searchfox.txt', 'searchfox-renamed.txt'));

@@ -58,6 +58,7 @@ pub struct Resolved {
 pub struct SearchLine {
     pub lno: usize,
     pub line: String,
+    /// Byte offsets from searchfox, converted to UTF-16 offsets for the browser.
     pub bounds: Option<(usize, usize)>,
     pub context: Option<String>,
 }
@@ -203,10 +204,19 @@ fn group_results(body: Map<String, Value>) -> Result<Vec<SearchGroup>> {
         }
         let categories: Map<String, Value> = serde_json::from_value(categories)?;
         for (category, files) in categories {
+            let mut files: Vec<SearchFile> = serde_json::from_value(files)?;
+            for line in files.iter_mut().flat_map(|f| &mut f.lines) {
+                line.bounds = line.bounds.and_then(|(start, end)| {
+                    Some((
+                        utf16_offset(&line.line, start)?,
+                        utf16_offset(&line.line, end)?,
+                    ))
+                });
+            }
             groups.push(SearchGroup {
                 kind: kind.clone(),
                 category,
-                files: serde_json::from_value(files)?,
+                files,
             });
         }
     }
@@ -250,6 +260,11 @@ fn byte_offset(text: &str, col: usize) -> Option<usize> {
         units += c.len_utf16();
     }
     (units == col).then_some(text.len())
+}
+
+/// The UTF-16 offset of byte offset `byte` in `text`, for the browser.
+fn utf16_offset(text: &str, byte: usize) -> Option<usize> {
+    Some(text.get(..byte)?.encode_utf16().count())
 }
 
 /// The tokens whose span covers byte column `col` of `line` (analysis columns are bytes),
@@ -418,7 +433,7 @@ mod tests {
             r#"{
                 "normal": {
                     "Uses": [{"path": "a.cpp", "lines": [{"lno": 3, "line": "x();", "bounds": [0, 1], "context": "", "contextsym": "", "peekRange": "3-3"}]}],
-                    "Definitions": [{"path": "b.cpp", "lines": [{"lno": 9, "line": "void x() {", "bounds": [5, 6], "context": null}]}]
+                    "Definitions": [{"path": "b.cpp", "lines": [{"lno": 9, "line": "/*é*/x() {", "bounds": [6, 7], "context": null}]}]
                 },
                 "generated": {"Uses": [{"path": "__GENERATED__/c.cpp", "lines": []}]},
                 "*title*": "Symbol x",
@@ -440,6 +455,8 @@ mod tests {
                 ("generated", "Uses", 1)
             ]
         );
+        let line = &groups[1].files[0].lines[0];
+        assert_eq!(line.bounds, Some((5, 6)));
         let line = &groups[0].files[0].lines[0];
         assert_eq!((line.lno, line.bounds), (3, Some((0, 1))));
         assert_eq!(line.context.as_deref(), Some(""));

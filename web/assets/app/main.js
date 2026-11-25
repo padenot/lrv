@@ -11837,11 +11837,7 @@ const SEARCHFOX_SHORTCUTS = [
 	},
 	{
 		keys: ["Mod+Shift+click"],
-		description: "Searchfox: definition in a new tab"
-	},
-	{
-		keys: ["Mod+Alt+Shift+click"],
-		description: "Searchfox: uses in a new tab"
+		description: "Searchfox: open on searchfox.org in a new tab"
 	}
 ];
 //#endregion
@@ -14158,30 +14154,6 @@ var SeriesMethods = class {
 		this.loadCommit(this.currentCommitIdx - 1);
 	}
 };
-//#endregion
-//#region web/src/searchfox.ts
-/** Mod+click: definition; Mod+Alt+click: uses; add Shift to open
-* searchfox.org in a new tab. Returns null when Mod isn't held. */
-function searchfoxClick(event) {
-	if (!(IS_MAC ? event.metaKey : event.ctrlKey)) return null;
-	return {
-		mode: event.altKey ? "uses" : "definition",
-		newTab: event.shiftKey
-	};
-}
-const IDENTIFIER_CHAR = /[\p{L}\p{N}_$]/u;
-/** The identifier of `text` covering offset `col`, or null. */
-function identifierAt(text, col) {
-	let start = col;
-	while (start > 0 && IDENTIFIER_CHAR.test(text.charAt(start - 1))) start--;
-	let end = col;
-	while (end < text.length && IDENTIFIER_CHAR.test(text.charAt(end))) end++;
-	if (start === end || /\p{N}/u.test(text.charAt(start))) return null;
-	return {
-		word: text.slice(start, end),
-		start
-	};
-}
 //#endregion
 //#region web/src/stacked-view-methods.ts
 const DIFFS_THEME = {
