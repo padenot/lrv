@@ -15132,6 +15132,7 @@ var SearchfoxMethods = class {
 		const section = el("section", { className: "searchfox-group" }, [heading]);
 		for (const file of group.files) {
 			const inReview = this.files.some((reviewed) => reviewed.path === file.path);
+			const language = detectLanguageFromPathAndContent(file.path);
 			section.appendChild(el("div", { className: "searchfox-file" }, [el("span", {
 				className: "searchfox-path",
 				text: file.path
@@ -15141,11 +15142,16 @@ var SearchfoxMethods = class {
 				attrs: { title: "Part of this review" }
 			}) : null]));
 			for (const line of file.lines) {
-				const code = el("code", { className: "searchfox-code" });
-				if (line.bounds) {
-					const [start, end] = line.bounds;
-					code.append(line.line.slice(0, start), el("mark", { text: line.line.slice(start, end) }), line.line.slice(end));
-				} else code.textContent = line.line;
+				const code = el("code", {
+					className: "searchfox-code",
+					text: line.line
+				});
+				markRange(code, line.bounds);
+				monaco.editor.colorize(line.line, language, {}).then((html) => {
+					code.innerHTML = html;
+					code.querySelectorAll("br").forEach((br) => br.remove());
+					markRange(code, line.bounds);
+				});
 				const row = el("button", {
 					className: "searchfox-line",
 					attrs: { type: "button" }
@@ -15182,6 +15188,26 @@ function searchfoxDefinitions(results) {
 		path: file.path,
 		lno: line.lno
 	}))));
+}
+/** Wraps UTF-16 offsets `bounds` of `root`'s text in <mark>s, splitting text nodes as needed. */
+function markRange(root, bounds) {
+	if (!bounds) return;
+	const [start, end] = bounds;
+	const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+	const texts = [];
+	for (let node = walker.nextNode(); node; node = walker.nextNode()) texts.push(node);
+	let offset = 0;
+	for (const text of texts) {
+		const textStart = offset;
+		offset += text.length;
+		if (offset <= start || textStart >= end) continue;
+		let piece = text;
+		if (start > textStart) piece = piece.splitText(start - textStart);
+		if (end < offset) piece.splitText(end - Math.max(start, textStart));
+		const mark = el("mark");
+		piece.replaceWith(mark);
+		mark.appendChild(piece);
+	}
 }
 //#endregion
 //#region web/src/monaco-app.ts

@@ -1856,7 +1856,7 @@ body {
   border-radius: 2px;
   background: color-mix(in srgb, var(--accent-color) 45%, var(--bg-secondary));
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-color) 70%, var(--bg-secondary));
-  color: var(--text-primary);
+  color: inherit;
 }
 .searchfox-context {
   max-width: 40%;

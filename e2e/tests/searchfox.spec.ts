@@ -217,6 +217,10 @@ test.describe('searchfox code navigation', () => {
     await expect(panel.locator('.searchfox-kind')).toHaveText('test');
     await expect(panel.locator('.searchfox-line')).toHaveCount(5);
     await expect(panel.locator('.searchfox-line').nth(1).locator('mark')).toHaveText('Disconnect');
+    // Lines are syntax highlighted by Monaco, with the match still marked.
+    const cppLine = panel.locator('.searchfox-line').nth(3).locator('.searchfox-code');
+    await expect(cppLine.locator('span[class^="mtk"]').first()).toBeAttached();
+    await expect(cppLine.locator('mark')).toHaveText('Disconnect');
     await expect(panel.locator('.searchfox-in-review')).toHaveCount(3);
     await expect(panel.locator('.searchfox-file', { hasText: 'Other.cpp' })).not.toContainText(
       'in review',
