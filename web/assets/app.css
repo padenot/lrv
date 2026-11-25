@@ -1836,6 +1836,7 @@ body {
 .searchfox-line:focus-visible {
   outline: none;
   background: color-mix(in srgb, var(--accent-color) 14%, var(--bg-secondary));
+  box-shadow: inset 2px 0 0 var(--accent-color);
 }
 .searchfox-lno {
   min-width: 4ch;
@@ -1851,10 +1852,11 @@ body {
   white-space: pre;
 }
 .searchfox-code mark {
-  background: color-mix(in srgb, var(--accent-color) 30%, transparent);
-  box-shadow: inset 0 -1px 0 var(--searchfox-accent-text);
-  color: var(--text-primary);
+  padding: 0 1px;
   border-radius: 2px;
+  background: color-mix(in srgb, var(--accent-color) 45%, var(--bg-secondary));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-color) 70%, var(--bg-secondary));
+  color: var(--text-primary);
 }
 .searchfox-context {
   max-width: 40%;
