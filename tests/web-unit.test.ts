@@ -8,7 +8,7 @@ import {
   syncCommentDraftToServer,
 } from '../web/src/comment-draft-storage';
 import { identifierAt } from '../web/src/searchfox';
-import { stepFocus, stepHunk } from '../web/src/diff-utils';
+import { counterpartLine, stepFocus, stepHunk } from '../web/src/diff-utils';
 
 test('identifierAt finds the identifier covering a click, including at its edges', () => {
   const text = 'AudioNode::Disconnect(x) + $y';
@@ -197,4 +197,35 @@ test('stepHunk lands on the adjacent range start and stops at the file edges', (
   assert.equal(stepHunk(hunks, 1, 1), null);
   assert.equal(stepHunk(hunks, 0, -1), null);
   assert.equal(stepHunk([], 0, 1), null);
+});
+
+test('counterpartLine pairs the deleted and added lines of a change block by position', () => {
+  // Old lines 2-3 replaced by new lines 2-4; old 6 kept as new 7; new 9 added.
+  const hunks = [
+    {
+      lines: [
+        { type: 'context', old_line: 1, new_line: 1 },
+        { type: 'delete', old_line: 2, new_line: null },
+        { type: 'delete', old_line: 3, new_line: null },
+        { type: 'add', old_line: null, new_line: 2 },
+        { type: 'add', old_line: null, new_line: 3 },
+        { type: 'add', old_line: null, new_line: 4 },
+        { type: 'context', old_line: 4, new_line: 5 },
+      ],
+    },
+    {
+      lines: [
+        { type: 'context', old_line: 6, new_line: 7 },
+        { type: 'add', old_line: null, new_line: 9 },
+      ],
+    },
+  ];
+  assert.deepEqual(counterpartLine(hunks, { side: 'old', line: 2 }), { side: 'new', line: 2 });
+  assert.deepEqual(counterpartLine(hunks, { side: 'old', line: 3 }), { side: 'new', line: 3 });
+  assert.deepEqual(counterpartLine(hunks, { side: 'new', line: 3 }), { side: 'old', line: 3 });
+  // Past the shorter side: its last line.
+  assert.deepEqual(counterpartLine(hunks, { side: 'new', line: 4 }), { side: 'old', line: 3 });
+  // Unchanged lines, and an addition with nothing deleted opposite it.
+  assert.equal(counterpartLine(hunks, { side: 'new', line: 1 }), null);
+  assert.equal(counterpartLine(hunks, { side: 'new', line: 9 }), null);
 });

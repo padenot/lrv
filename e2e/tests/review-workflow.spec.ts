@@ -2311,6 +2311,77 @@ test.describe('Review Workflow E2E', () => {
       }
     });
 
+    test('h and l move the focus between a replaced line and its replacement', async ({ page }) => {
+      if (!testRepoPath) {
+        throw new Error('Test repo not initialized');
+      }
+      // Old lines 10-11 become new lines 10-12; the hunk's new range starts at line 7.
+      const base = Array.from({ length: 30 }, (_, i) => `line ${i + 1}`);
+      fs.writeFileSync(path.join(testRepoPath, 'a-replace.txt'), base.join('\n') + '\n');
+      await execAsync(`cd "${testRepoPath}" && git add a-replace.txt && git commit -q -m replace`);
+      const edited = [
+        ...base.slice(0, 9),
+        'changed 10',
+        'changed 11',
+        'changed 12',
+        ...base.slice(11),
+      ];
+      fs.writeFileSync(path.join(testRepoPath, 'a-replace.txt'), edited.join('\n') + '\n');
+      await stopServer();
+      await startServer();
+      const focus = () =>
+        page.evaluate(
+          () => (window as any).__APP.currentFocusedLine as { side: string; line: number },
+        );
+
+      for (const view of ['stacked', 'monaco'] as const) {
+        if (view === 'stacked') {
+          await openStackedView(page);
+        } else {
+          await page.locator('#toggle-stacked').click();
+          await expect(page.locator('#toggle-stacked')).not.toHaveText('Mode: Stacked');
+          await expect
+            .poll(() =>
+              page.evaluate(() =>
+                monaco.editor
+                  .getDiffEditors()[0]
+                  ?.getModifiedEditor()
+                  .getValue()
+                  .includes('changed 12'),
+              ),
+            )
+            .toBe(true);
+        }
+        await page.locator('.header .wordmark').click();
+        await page.keyboard.press('Escape');
+        for (let i = 0; i < 4; i++) {
+          await page.keyboard.press('j');
+        }
+        await expect.poll(focus).toEqual({ side: 'new', line: 10 });
+        await page.keyboard.press('h');
+        await expect.poll(focus).toEqual({ side: 'old', line: 10 });
+        if (view === 'stacked') {
+          await expectStackedFocus(page, 10, 'old');
+        }
+        await page.keyboard.press('l');
+        await expect.poll(focus).toEqual({ side: 'new', line: 10 });
+        await page.keyboard.press('j');
+        await page.keyboard.press('j');
+        // New line 12 has no deleted line of its own: it faces the block's last one.
+        await page.keyboard.press('h');
+        await expect.poll(focus).toEqual({ side: 'old', line: 11 });
+        // And back to the added line facing old line 11.
+        await page.keyboard.press('l');
+        await expect.poll(focus).toEqual({ side: 'new', line: 11 });
+        // Unchanged lines have no opposite line: h does nothing.
+        await page.keyboard.press('k');
+        await page.keyboard.press('k');
+        await expect.poll(focus).toEqual({ side: 'new', line: 9 });
+        await page.keyboard.press('h');
+        await expect.poll(focus).toEqual({ side: 'new', line: 9 });
+      }
+    });
+
     test('Shift+J past the last hunk focuses the next file', async ({ page }) => {
       await openHunksFixture(page);
       await page.locator('.header .wordmark').click();

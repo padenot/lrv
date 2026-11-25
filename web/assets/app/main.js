@@ -1627,6 +1627,39 @@ function stepHunk(hunks, hunkIndex, delta) {
 		focus: hunkStartFocus(adjacent)
 	} : null;
 }
+/**
+* The line opposite `focus` on the other side, as side-by-side shows it: within a block of
+* consecutive changed lines, the i-th deleted line faces the i-th added line, and lines past
+* the shorter side face its last line. Null for unchanged lines and for a block with nothing on
+* the other side.
+*/
+function counterpartLine(hunks, focus) {
+	for (const hunk of hunks) {
+		let block = [];
+		for (const line of [...hunk.lines, null]) {
+			if (line && (line.type === "add" || line.type === "delete")) {
+				block.push(line);
+				continue;
+			}
+			const deleted = lineNumbers(block, "delete", "old_line");
+			const added = lineNumbers(block, "add", "new_line");
+			const [from, to] = focus.side === "old" ? [deleted, added] : [added, deleted];
+			const index = from.indexOf(focus.line);
+			if (index !== -1) {
+				const line = to[Math.min(index, to.length - 1)];
+				return line === void 0 ? null : {
+					side: focus.side === "old" ? "new" : "old",
+					line
+				};
+			}
+			block = [];
+		}
+	}
+	return null;
+}
+function lineNumbers(block, type, side) {
+	return block.filter((line) => line.type === type).map((line) => line[side]).filter((line) => typeof line === "number");
+}
 //#endregion
 //#region web/src/file-data-methods.ts
 var FileDataMethods = class {
@@ -11843,6 +11876,16 @@ const KEYBOARD_SHORTCUTS = [
 		description: "Previous changed line"
 	},
 	{
+		keys: ["h"],
+		action: "oldSide",
+		description: "Deleted line opposite the focused line"
+	},
+	{
+		keys: ["l"],
+		action: "newSide",
+		description: "Added line opposite the focused line"
+	},
+	{
 		keys: ["s"],
 		action: "toggleView",
 		description: "Toggle inline/side-by-side"
@@ -11962,6 +12005,12 @@ var NavigationMethods = class {
 				case "lineUp":
 					this.moveLine(-1);
 					break;
+				case "oldSide":
+					this.moveSide("old");
+					break;
+				case "newSide":
+					this.moveSide("new");
+					break;
 				case "nextHunk":
 					this.nextHunk();
 					break;
@@ -11992,7 +12041,7 @@ var NavigationMethods = class {
 		});
 	}
 	canRunShortcut(action) {
-		return !(action === "lineDown" || action === "lineUp" || action === "openComment" || action === "clearFocus") || this.hasCodeView();
+		return !(action === "lineDown" || action === "lineUp" || action === "oldSide" || action === "newSide" || action === "openComment" || action === "clearFocus") || this.hasCodeView();
 	}
 	hasCodeView() {
 		if (this.isStacked) return !this.currentFileIsCommit && this.files.length > 0;
@@ -12158,6 +12207,21 @@ var NavigationMethods = class {
 		}
 		if (hunkChanged) this.jumpToHunk(step.hunkIndex);
 		this.setFocusedLine(step.focus.side, step.focus.line, true);
+	}
+	/** h/l: focus the changed line opposite the focused one, on `side`. */
+	moveSide(side) {
+		const focus = this.currentFocusedLine;
+		if (!focus || focus.side === side) return;
+		const file = this.getCurrentFile();
+		const target = counterpartLine(file.hunks, focus);
+		if (!target) return;
+		const hunkIndex = this.hunksOf(file).findIndex((hunk) => hunk.side === target.side && hunk.start <= target.line && target.line <= hunk.end);
+		if (hunkIndex !== -1) this.currentHunkIndex[file.path] = hunkIndex;
+		if (this.isStacked) {
+			this.showStackedFocus(target, "nearest");
+			return;
+		}
+		this.setFocusedLine(target.side, target.line, true);
 	}
 	clearFocusedHunk() {
 		if (!this.editor) return;

@@ -3,6 +3,7 @@ import { KEYBOARD_SHORTCUTS, shortcutKeys, type KeyboardAction } from './shortcu
 import { prefersReducedMotion } from './font';
 import {
   FOCUS_MARGIN_LINES,
+  counterpartLine,
   hunkStartFocus,
   stepFocus,
   stepHunk,
@@ -113,6 +114,12 @@ export class NavigationMethods {
         case 'lineUp':
           this.moveLine(-1);
           break;
+        case 'oldSide':
+          this.moveSide('old');
+          break;
+        case 'newSide':
+          this.moveSide('new');
+          break;
         case 'nextHunk':
           this.nextHunk();
           break;
@@ -155,6 +162,8 @@ export class NavigationMethods {
     const needsCodeView =
       action === 'lineDown' ||
       action === 'lineUp' ||
+      action === 'oldSide' ||
+      action === 'newSide' ||
       action === 'openComment' ||
       action === 'clearFocus';
     return !needsCodeView || this.hasCodeView();
@@ -433,6 +442,30 @@ export class NavigationMethods {
       this.jumpToHunk(step.hunkIndex);
     }
     this.setFocusedLine(step.focus.side, step.focus.line, true);
+  }
+
+  /** h/l: focus the changed line opposite the focused one, on `side`. */
+  moveSide(side: Side) {
+    const focus = this.currentFocusedLine;
+    if (!focus || focus.side === side) {
+      return;
+    }
+    const file = this.getCurrentFile();
+    const target = counterpartLine(file.hunks, focus);
+    if (!target) {
+      return;
+    }
+    const hunkIndex = this.hunksOf(file).findIndex(
+      (hunk) => hunk.side === target.side && hunk.start <= target.line && target.line <= hunk.end,
+    );
+    if (hunkIndex !== -1) {
+      this.currentHunkIndex[file.path] = hunkIndex;
+    }
+    if (this.isStacked) {
+      this.showStackedFocus(target, 'nearest');
+      return;
+    }
+    this.setFocusedLine(target.side, target.line, true);
   }
 
   clearFocusedHunk() {

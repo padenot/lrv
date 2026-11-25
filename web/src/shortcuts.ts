@@ -5,6 +5,8 @@ export type KeyboardAction =
   | 'previousHunk'
   | 'lineDown'
   | 'lineUp'
+  | 'oldSide'
+  | 'newSide'
   | 'toggleView'
   | 'openComment'
   | 'clearFocus'
@@ -48,6 +50,8 @@ export const KEYBOARD_SHORTCUTS: KeyboardShortcut[] = [
     action: 'lineUp',
     description: 'Previous changed line',
   },
+  { keys: ['h'], action: 'oldSide', description: 'Deleted line opposite the focused line' },
+  { keys: ['l'], action: 'newSide', description: 'Added line opposite the focused line' },
   { keys: ['s'], action: 'toggleView', description: 'Toggle inline/side-by-side' },
   { keys: ['Enter'], action: 'openComment', description: 'Comment on focused line' },
   { keys: ['Escape'], action: 'clearFocus', description: 'Clear focus' },

@@ -99,3 +99,38 @@ export function stepHunk(hunks: HunkRange[], hunkIndex: number, delta: 1 | -1): 
   const adjacent = hunks[adjacentIndex];
   return adjacent ? { hunkIndex: adjacentIndex, focus: hunkStartFocus(adjacent) } : null;
 }
+
+/**
+ * The line opposite `focus` on the other side, as side-by-side shows it: within a block of
+ * consecutive changed lines, the i-th deleted line faces the i-th added line, and lines past
+ * the shorter side face its last line. Null for unchanged lines and for a block with nothing on
+ * the other side.
+ */
+export function counterpartLine(hunks: DiffHunk[], focus: FocusedLine): FocusedLine | null {
+  for (const hunk of hunks) {
+    let block: DiffLine[] = [];
+    for (const line of [...hunk.lines, null]) {
+      if (line && (line.type === 'add' || line.type === 'delete')) {
+        block.push(line);
+        continue;
+      }
+      const deleted = lineNumbers(block, 'delete', 'old_line');
+      const added = lineNumbers(block, 'add', 'new_line');
+      const [from, to] = focus.side === 'old' ? [deleted, added] : [added, deleted];
+      const index = from.indexOf(focus.line);
+      if (index !== -1) {
+        const line = to[Math.min(index, to.length - 1)];
+        return line === undefined ? null : { side: focus.side === 'old' ? 'new' : 'old', line };
+      }
+      block = [];
+    }
+  }
+  return null;
+}
+
+function lineNumbers(block: DiffLine[], type: string, side: 'old_line' | 'new_line'): number[] {
+  return block
+    .filter((line) => line.type === type)
+    .map((line) => line[side])
+    .filter((line): line is number => typeof line === 'number');
+}
