@@ -15423,6 +15423,7 @@ var MonacoApp = class {
 				window.Perf.measure("init:monaco:load", "init:monaco:load:start", "init:monaco:load:end");
 				if (window.DEBUG) console.info("[app] monaco loaded");
 				this.defineCustomThemes();
+				monaco.editor.setTheme(this.config.color_scheme);
 				this.applyThemeToUI(this.config.color_scheme);
 				document.documentElement.setAttribute("data-ui-ready", "1");
 				window.Perf.mark("init:ui-setup:start");

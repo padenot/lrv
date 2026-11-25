@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { isolateConfig } from '../test-config';
+import type { AppContext } from '../../web/src/types/app';
 
 const binary = process.env.LRV_BIN || path.resolve(__dirname, '../../target/debug/lrv');
 const TREE = 'mozilla-central';
@@ -369,5 +370,31 @@ test.describe('searchfox code navigation', () => {
     await expect(toast).toHaveText('No searchfox results for AudioNode::Disconnect');
     await expect(page.locator('.searchfox-modal')).toHaveCount(0);
     await expect(toast).toHaveCount(0, { timeout: 5000 });
+  });
+
+  test('colours result tokens when the review starts in the stacked view', async ({ page }) => {
+    // No diff editor is ever created, so only the startup theme defines token colours.
+    await isolateConfig(page, { searchfox: true, stacked_view: true });
+    await mockSearchfox(page);
+    const started = await startReview(root);
+    child = started.child;
+    await page.goto(started.url);
+    await expect(page.locator('#preloader-overlay')).toHaveCount(0);
+    await expect(page.locator('.stacked-code-view')).toBeVisible();
+
+    await page.evaluate(() => {
+      const app = window.__APP as unknown as Pick<AppContext, 'searchfoxLookup'>;
+      const text = '  return Disconnect(count);';
+      void app.searchfoxLookup(
+        { path: 'a.txt', line: 2, col: 9, word: 'Disconnect', text },
+        'uses',
+        false,
+      );
+    });
+
+    const cppLine = page.locator('.searchfox-line').nth(3).locator('.searchfox-code');
+    const token = cppLine.locator('span[class^="mtk"]').first();
+    await expect(token).toBeAttached();
+    expect(await token.evaluate((node) => getComputedStyle(node).color)).not.toBe('rgb(0, 0, 0)');
   });
 });
