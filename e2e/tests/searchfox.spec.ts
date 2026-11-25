@@ -191,6 +191,9 @@ test.describe('searchfox code navigation', () => {
       page.locator('#editor-container:not(.diff-loading) .editor.modified .view-lines'),
     ).toContainText('beta target line');
     await expect(page.locator('.focused-line')).toBeVisible();
+    // The line flashes briefly, then the flash is removed.
+    await expect(page.locator('.searchfox-flash')).toBeVisible();
+    await expect(page.locator('.searchfox-flash')).toHaveCount(0);
   });
 
   test('Mod+Alt+click opens the results panel; a hit in the review opens that file at the line', async ({

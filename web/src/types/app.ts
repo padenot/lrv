@@ -215,6 +215,8 @@ export interface AppContext {
   hideStackedView(): void;
   toggleStackedView(): void;
   scrollToFileInStacked(index: number): Promise<void>;
+  /** Scrolls the stacked view to new-side `line` of file `index` and selects it. */
+  revealStackedLine(index: number, line: number): Promise<void>;
   updateStackedDiffStyle(): void;
   renderStackedComments(): void;
   renderFileList(): void;

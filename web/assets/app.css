@@ -1909,6 +1909,22 @@ body.searchfox-busy * {
   }
 }
 
+/* A line reached from searchfox results; the stacked view has the same rule in its shadow CSS. */
+.searchfox-flash {
+  animation: searchfox-flash 1.2s ease-out;
+}
+@keyframes searchfox-flash {
+  from {
+    background-color: color-mix(in srgb, var(--accent-color) 35%, transparent);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .searchfox-flash {
+    animation: none;
+    background-color: color-mix(in srgb, var(--accent-color) 20%, transparent);
+  }
+}
+
 /* Context menu (stacked view Searchfox lookups) */
 .context-menu {
   position: fixed;

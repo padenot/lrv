@@ -66,6 +66,9 @@ export const searchfoxMenuActions = [
   { label: 'Searchfox: Find Uses', mode: 'uses' },
 ] as const;
 
+/** How long a line reached from searchfox results flashes. */
+export const SEARCHFOX_FLASH_MS = 1200;
+
 export type SearchfoxClick = { mode: 'definition' | 'uses'; newTab: boolean };
 
 /** Mod+click: definition; Mod+Alt+click: uses; add Shift to open

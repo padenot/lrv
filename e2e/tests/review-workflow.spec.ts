@@ -1655,6 +1655,62 @@ test.describe('Review Workflow E2E', () => {
       await expectNoResultsToast(page);
     });
 
+    test('Mod+click on a definition in collapsed context expands, reveals and flashes it', async ({
+      page,
+    }) => {
+      if (!testRepoPath) {
+        throw new Error('Test repo not initialized');
+      }
+      const lines = Array.from({ length: 60 }, (_, i) => `const filler${i + 1} = ${i + 1};`);
+      lines[49] = 'const target = 50;';
+      fs.writeFileSync(path.join(testRepoPath, 'long.txt'), `${lines.join('\n')}\n`);
+      await execAsync(`cd "${testRepoPath}" && git add long.txt && git commit -q -m long`);
+      const changed = ['const first = target;', ...lines.slice(1)];
+      fs.writeFileSync(path.join(testRepoPath, 'long.txt'), `${changed.join('\n')}\n`);
+      await stopServer();
+      await startServer();
+      await isolateConfig(page, { searchfox: true });
+      await page.route('**/api/searchfox/resolve', (route) =>
+        route.fulfill({ json: { query: 'id:target', pretty: null, symbols: [] } }),
+      );
+      // searchfox's revision has the definition 5 lines higher than the reviewed file.
+      await page.route('**/api/searchfox/search?*', (route) =>
+        route.fulfill({
+          json: {
+            query: 'id:target',
+            groups: [
+              {
+                kind: 'normal',
+                category: 'Definitions (target)',
+                files: [
+                  {
+                    path: 'long.txt',
+                    lines: [
+                      { lno: 45, line: 'const target = 50;', bounds: [6, 12], context: null },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        }),
+      );
+      await openStackedView(page);
+      const line = page
+        .locator('.stacked-code-view diffs-container', { hasText: 'long.txt' })
+        .locator('[data-line][data-line-type="change-addition"]')
+        .first();
+      await line.click({
+        modifiers: ['ControlOrMeta'],
+        position: await wordPosition(line, 'target'),
+      });
+
+      const flashed = page.locator('[data-searchfox-flash]');
+      await expect(flashed).toHaveAttribute('data-line', '50');
+      await expect(flashed).toContainText('const target = 50;');
+      await expect(flashed).toHaveCount(0);
+    });
+
     test('the Searchfox menu moves focus with arrows and closes on Escape without a lookup', async ({
       page,
     }) => {

@@ -11308,6 +11308,8 @@ const searchfoxMenuActions = [{
 	label: "Searchfox: Find Uses",
 	mode: "uses"
 }];
+/** How long a line reached from searchfox results flashes. */
+const SEARCHFOX_FLASH_MS = 1200;
 /** Mod+click: definition; Mod+Alt+click: uses; add Shift to open
 * searchfox.org in a new tab. Returns null when Mod isn't held. */
 function searchfoxClick(event) {
@@ -14274,9 +14276,11 @@ var StackedViewMethods = class {
 	stackedItemVersion;
 	stackedScrollUnsubscribe;
 	stackedRenderToken;
-	stackedHydratedFiles;
+	stackedHydrations;
 	stackedLastRangeSelection;
 	stackedFileScrollOffsets;
+	stackedInstances;
+	stackedFlash;
 	showStackedView() {
 		this.resetFileView();
 		this.isStacked = true;
@@ -14379,6 +14383,58 @@ var StackedViewMethods = class {
 			block: "start"
 		});
 	}
+	async revealStackedLine(index, line) {
+		await this.scrollToFileInStacked(index);
+		const file = this.files[index];
+		const view = this.stackedCodeView;
+		if (!view || !file) return;
+		const id = this.stackedItemId(file.path);
+		const scroll = (target) => new Promise((resolve) => view.requestScroll(target, resolve));
+		await scroll({
+			type: "item",
+			id,
+			align: "start",
+			behavior: "instant"
+		});
+		await this.hydrateStackedFile(file, (await loadDiffsRuntime()).parseDiffFromFile);
+		const instance = this.stackedInstances?.get(file.path);
+		if (instance && "revealLine" in instance && typeof instance.revealLine === "function") instance.revealLine(line, "additions");
+		if (await scroll({
+			type: "line",
+			id,
+			lineNumber: line,
+			side: "additions",
+			align: "center",
+			behavior: "instant"
+		}) === "settled") {
+			this.stackedFlash = {
+				path: file.path,
+				line,
+				start: performance.now()
+			};
+			this.applyStackedFlash();
+		}
+	}
+	/** Marks the flashing line's row; pierre replaces rows when it re-renders, so this runs again
+	* after each render, continuing the fade where it was. */
+	applyStackedFlash() {
+		const flash = this.stackedFlash;
+		if (!flash) return;
+		const elapsed = performance.now() - flash.start;
+		if (elapsed >= 1200) {
+			this.stackedFlash = null;
+			return;
+		}
+		const host = document.querySelector(`.stacked-code-view [data-path="${CSS.escape(flash.path)}"]`);
+		const row = Array.from(host?.shadowRoot?.querySelectorAll(`[data-line="${flash.line}"]`) ?? []).find((candidate) => candidate.dataset.lineType !== "change-deletion" && !candidate.closest("[data-deletions]"));
+		if (!row || row.hasAttribute("data-searchfox-flash")) return;
+		row.toggleAttribute("data-searchfox-flash", true);
+		row.style.animationDelay = `-${elapsed}ms`;
+		setTimeout(() => {
+			row.removeAttribute("data-searchfox-flash");
+			row.style.animationDelay = "";
+		}, SEARCHFOX_FLASH_MS - elapsed);
+	}
 	clearStackedView() {
 		this.stackedItemVersion ??= 0;
 		this.stackedScrollUnsubscribe?.();
@@ -14387,8 +14443,10 @@ var StackedViewMethods = class {
 		this.stackedCodeView = null;
 		this.stackedViewOptions = null;
 		this.stackedItems = /* @__PURE__ */ new Map();
+		this.stackedInstances = /* @__PURE__ */ new Map();
+		this.stackedFlash = null;
 		this.stackedFileMetadata = /* @__PURE__ */ new Map();
-		this.stackedHydratedFiles = /* @__PURE__ */ new Set();
+		this.stackedHydrations = /* @__PURE__ */ new Map();
 		this.stackedLastRangeSelection = null;
 		this.stackedDraft = null;
 		this.stackedRenderToken = (this.stackedRenderToken ?? 0) + 1;
@@ -14446,9 +14504,12 @@ var StackedViewMethods = class {
 			onSelectedLinesChange: (selection) => this.rememberStackedSelection(selection),
 			onLineSelected: (range, context) => this.showStackedDraftFromSelection(this.pathFromCodeViewContext(context), range),
 			renderAnnotation: (annotation) => this.renderStackedAnnotation(annotation),
-			onPostRender: (node, _instance, phase, context) => {
-				if (phase !== "unmount") {
-					const path = this.pathFromCodeViewContext(context);
+			onPostRender: (node, instance, phase, context) => {
+				const path = this.pathFromCodeViewContext(context);
+				if (phase === "unmount") this.stackedInstances?.delete(path);
+				else {
+					(this.stackedInstances ??= /* @__PURE__ */ new Map()).set(path, instance);
+					this.applyStackedFlash();
 					node.dataset.path = path;
 					this.hydrateStackedFile(this.files.find((file) => file.path === path), parseDiffFromFile);
 				}
@@ -14492,9 +14553,16 @@ var StackedViewMethods = class {
 		this.stackedItems.set(file.path, item);
 		return item;
 	}
-	async hydrateStackedFile(file, parseDiffFromFile) {
-		if (!file || file.is_binary || this.stackedHydratedFiles.has(file.path)) return;
-		this.stackedHydratedFiles.add(file.path);
+	hydrateStackedFile(file, parseDiffFromFile) {
+		if (!file || file.is_binary) return Promise.resolve();
+		let hydration = this.stackedHydrations.get(file.path);
+		if (!hydration) {
+			hydration = this.loadStackedFileContents(file, parseDiffFromFile);
+			this.stackedHydrations.set(file.path, hydration);
+		}
+		return hydration;
+	}
+	async loadStackedFileContents(file, parseDiffFromFile) {
 		const renderToken = this.stackedRenderToken;
 		const generation = this.commitLoadGeneration;
 		const view = this.stackedCodeView;
@@ -15034,6 +15102,16 @@ var StackedViewMethods = class {
       }
       [data-line-annotation] { padding: 8px 12px; }
       [data-interactive-line-numbers] { cursor: pointer; }
+      [data-searchfox-flash] { animation: searchfox-flash ${SEARCHFOX_FLASH_MS}ms ease-out; }
+      @keyframes searchfox-flash {
+        from { background-color: color-mix(in srgb, var(--accent-color) 35%, transparent); }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        [data-searchfox-flash] {
+          animation: none;
+          background-color: color-mix(in srgb, var(--accent-color) 20%, transparent);
+        }
+      }
     `;
 	}
 };
@@ -15085,10 +15163,7 @@ var SearchfoxMethods = class {
 		setSearchfoxBusy(true);
 		try {
 			const resolved = await resolveSearchfox(target);
-			if (newTab) {
-				window.open(searchfoxSearchUrl(tree, resolved.query), "_blank", "noopener");
-				return;
-			}
+			if (newTab && openInNewTab(searchfoxSearchUrl(tree, resolved.query))) return;
 			const results = await searchSearchfox(resolved.query);
 			if (results.groups.length === 0) {
 				showSearchfoxToast(`No searchfox results for ${resolved.pretty ?? target.word}`);
@@ -15096,11 +15171,7 @@ var SearchfoxMethods = class {
 			}
 			if (mode === "definition") {
 				const definitions = searchfoxDefinitions(results);
-				if (definitions.length === 1) {
-					const hit = definitions[0];
-					this.goToSearchfoxHit(tree, hit.path, hit.lno);
-					return;
-				}
+				if (definitions.length === 1 && await this.goToSearchfoxHit(tree, definitions[0])) return;
 			}
 			const panel = this.openSearchfoxPanel(resolved, tree);
 			this.renderSearchfoxResults(panel.body, tree, results, panel.close);
@@ -15187,7 +15258,11 @@ var SearchfoxMethods = class {
 				]);
 				row.addEventListener("click", () => {
 					close();
-					this.goToSearchfoxHit(tree, file.path, line.lno);
+					this.goToSearchfoxHit(tree, {
+						path: file.path,
+						lno: line.lno,
+						text: line.line
+					});
 				});
 				section.appendChild(row);
 			}
@@ -15225,19 +15300,53 @@ var SearchfoxMethods = class {
 			markRange(code, line.bounds);
 		}));
 	}
-	goToSearchfoxHit(tree, path, lno) {
-		const index = this.files.findIndex((file) => file.path === path);
-		if (index === -1) window.open(searchfoxSourceUrl(tree, path, lno), "_blank", "noopener");
-		else if (this.isStacked) this.scrollToFileInStacked(index);
-		else this.loadFile(index).then(() => this.setFocusedLine("new", lno));
+	/** Shows a hit: at its line when the file is in the review, else on searchfox.org. Returns
+	* false when the browser blocked the new tab. */
+	async goToSearchfoxHit(tree, hit) {
+		const index = this.files.findIndex((file) => file.path === hit.path);
+		if (index === -1) return openInNewTab(searchfoxSourceUrl(tree, hit.path, hit.lno));
+		const { new: contents } = await this.fetchFilePair(hit.path);
+		const line = localLine(contents.split("\n"), hit);
+		if (this.isStacked) await this.revealStackedLine(index, line);
+		else {
+			await this.loadFile(index);
+			this.setFocusedLine("new", line);
+			const modified = this.editor.getModifiedEditor();
+			const flash = modified.deltaDecorations([], [{
+				range: new monaco.Range(line, 1, line, 1),
+				options: {
+					isWholeLine: true,
+					className: "searchfox-flash"
+				}
+			}]);
+			setTimeout(() => modified.deltaDecorations(flash, []), SEARCHFOX_FLASH_MS);
+		}
+		return true;
 	}
 };
 /** Hits of the "Definitions" categories of the normal (non-test, non-generated) results. */
 function searchfoxDefinitions(results) {
 	return results.groups.filter((group) => group.kind === "normal" && group.category.startsWith("Definitions")).flatMap((group) => group.files.flatMap((file) => file.lines.map((line) => ({
 		path: file.path,
-		lno: line.lno
+		lno: line.lno,
+		text: line.line
 	}))));
+}
+/** The line of `lines` nearest to the hit's line number whose text is the hit's, else that number. */
+function localLine(lines, hit) {
+	const text = hit.text.trim();
+	let best = null;
+	lines.forEach((line, index) => {
+		const lno = index + 1;
+		if (line.trim() === text && (best === null || Math.abs(lno - hit.lno) < Math.abs(best - hit.lno))) best = lno;
+	});
+	return best ?? Math.min(hit.lno, lines.length);
+}
+/** Opens `url` in a new tab; false when the browser blocked it. */
+function openInNewTab(url) {
+	const opened = window.open(url, "_blank");
+	if (opened) opened.opener = null;
+	return opened !== null;
 }
 /** DOM for pierre's highlighted hast: token spans carrying their style, and text. */
 function hastToDom(nodes) {

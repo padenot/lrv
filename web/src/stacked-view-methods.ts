@@ -27,6 +27,7 @@ import {
 import { fetchJSON } from './api';
 import {
   identifierAt,
+  SEARCHFOX_FLASH_MS,
   searchfoxClick,
   searchfoxMenuActions,
   type SearchfoxTarget,
@@ -150,9 +151,14 @@ export class StackedViewMethods {
   private stackedItemVersion: number;
   private stackedScrollUnsubscribe: (() => void) | null;
   private stackedRenderToken: number;
-  private stackedHydratedFiles: Set<string>;
+  // Full-content loads per file path, kept so callers can wait for one in flight.
+  private stackedHydrations: Map<string, Promise<void>>;
   private stackedLastRangeSelection: CodeViewLineSelection | null;
   private stackedFileScrollOffsets?: Map<string, number>;
+  // Rendered pierre instance per file path, to expand collapsed context around a line.
+  private stackedInstances?: Map<string, object>;
+  // A line reached from searchfox results that is fading out.
+  private stackedFlash: { path: string; line: number; start: number } | null;
 
   showStackedView() {
     this.resetFileView();
@@ -294,6 +300,71 @@ export class StackedViewMethods {
     anchor?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
+  async revealStackedLine(index: number, line: number) {
+    await this.scrollToFileInStacked(index);
+    const file = this.files[index];
+    const view = this.stackedCodeView;
+    if (!view || !file) {
+      return;
+    }
+    const id = this.stackedItemId(file.path);
+    const scroll = (target: Parameters<typeof view.requestScroll>[0]) =>
+      new Promise<string>((resolve) => view.requestScroll(target, resolve));
+    // The file is rendered once its scroll settles; only then is its pierre instance known.
+    // Collapsed context can only expand once the file's full contents are loaded.
+    await scroll({ type: 'item', id, align: 'start', behavior: 'instant' });
+    await this.hydrateStackedFile(file, (await loadDiffsRuntime()).parseDiffFromFile);
+    // Unchanged lines may be collapsed; diff instances expand just the region holding `line`.
+    const instance = this.stackedInstances?.get(file.path);
+    if (instance && 'revealLine' in instance && typeof instance.revealLine === 'function') {
+      instance.revealLine(line, 'additions');
+    }
+    const result = await scroll({
+      type: 'line',
+      id,
+      lineNumber: line,
+      side: 'additions',
+      align: 'center',
+      behavior: 'instant',
+    });
+    if (result === 'settled') {
+      this.stackedFlash = { path: file.path, line, start: performance.now() };
+      this.applyStackedFlash();
+    }
+  }
+
+  /** Marks the flashing line's row; pierre replaces rows when it re-renders, so this runs again
+   * after each render, continuing the fade where it was. */
+  private applyStackedFlash() {
+    const flash = this.stackedFlash;
+    if (!flash) {
+      return;
+    }
+    const elapsed = performance.now() - flash.start;
+    if (elapsed >= SEARCHFOX_FLASH_MS) {
+      this.stackedFlash = null;
+      return;
+    }
+    const host = document.querySelector<HTMLElement>(
+      `.stacked-code-view [data-path="${CSS.escape(flash.path)}"]`,
+    );
+    const row = Array.from(
+      host?.shadowRoot?.querySelectorAll<HTMLElement>(`[data-line="${flash.line}"]`) ?? [],
+    ).find(
+      (candidate) =>
+        candidate.dataset.lineType !== 'change-deletion' && !candidate.closest('[data-deletions]'),
+    );
+    if (!row || row.hasAttribute('data-searchfox-flash')) {
+      return;
+    }
+    row.toggleAttribute('data-searchfox-flash', true);
+    row.style.animationDelay = `-${elapsed}ms`;
+    setTimeout(() => {
+      row.removeAttribute('data-searchfox-flash');
+      row.style.animationDelay = '';
+    }, SEARCHFOX_FLASH_MS - elapsed);
+  }
+
   clearStackedView() {
     this.stackedItemVersion ??= 0;
     this.stackedScrollUnsubscribe?.();
@@ -302,8 +373,10 @@ export class StackedViewMethods {
     this.stackedCodeView = null;
     this.stackedViewOptions = null;
     this.stackedItems = new Map();
+    this.stackedInstances = new Map();
+    this.stackedFlash = null;
     this.stackedFileMetadata = new Map();
-    this.stackedHydratedFiles = new Set();
+    this.stackedHydrations = new Map();
     this.stackedLastRangeSelection = null;
     this.stackedDraft = null;
     this.stackedRenderToken = (this.stackedRenderToken ?? 0) + 1;
@@ -388,9 +461,13 @@ export class StackedViewMethods {
         this.renderStackedAnnotation(annotation as DiffLineAnnotation<StackedAnnotation>),
       // Expanding unmodified lines needs the full file contents, so load
       // them for every file the virtualizer renders.
-      onPostRender: (node, _instance, phase, context) => {
-        if (phase !== 'unmount') {
-          const path = this.pathFromCodeViewContext(context);
+      onPostRender: (node, instance, phase, context) => {
+        const path = this.pathFromCodeViewContext(context);
+        if (phase === 'unmount') {
+          this.stackedInstances?.delete(path);
+        } else {
+          (this.stackedInstances ??= new Map()).set(path, instance);
+          this.applyStackedFlash();
           // Pierre's file element doesn't say which file it shows; click handling reads it here.
           node.dataset.path = path;
           void this.hydrateStackedFile(
@@ -451,14 +528,22 @@ export class StackedViewMethods {
     return item;
   }
 
-  private async hydrateStackedFile(
+  private hydrateStackedFile(
     file: DiffFile | undefined,
     parseDiffFromFile: ParseDiffFromFile,
-  ) {
-    if (!file || file.is_binary || this.stackedHydratedFiles.has(file.path)) {
-      return;
+  ): Promise<void> {
+    if (!file || file.is_binary) {
+      return Promise.resolve();
     }
-    this.stackedHydratedFiles.add(file.path);
+    let hydration = this.stackedHydrations.get(file.path);
+    if (!hydration) {
+      hydration = this.loadStackedFileContents(file, parseDiffFromFile);
+      this.stackedHydrations.set(file.path, hydration);
+    }
+    return hydration;
+  }
+
+  private async loadStackedFileContents(file: DiffFile, parseDiffFromFile: ParseDiffFromFile) {
     const renderToken = this.stackedRenderToken;
     const generation = this.commitLoadGeneration;
     const view = this.stackedCodeView;
@@ -1176,6 +1261,16 @@ export class StackedViewMethods {
       }
       [data-line-annotation] { padding: 8px 12px; }
       [data-interactive-line-numbers] { cursor: pointer; }
+      [data-searchfox-flash] { animation: searchfox-flash ${SEARCHFOX_FLASH_MS}ms ease-out; }
+      @keyframes searchfox-flash {
+        from { background-color: color-mix(in srgb, var(--accent-color) 35%, transparent); }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        [data-searchfox-flash] {
+          animation: none;
+          background-color: color-mix(in srgb, var(--accent-color) 20%, transparent);
+        }
+      }
     `;
   }
 }

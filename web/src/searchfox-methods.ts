@@ -5,6 +5,7 @@ import type { RenderFileResult } from '../../node_modules/@pierre/diffs/dist/typ
 import { getStackedWorkerPool, themeTypeFor } from './stacked-view-methods';
 import {
   resolveSearchfox,
+  SEARCHFOX_FLASH_MS,
   searchSearchfox,
   searchfoxSearchUrl,
   searchfoxSourceUrl,
@@ -71,7 +72,9 @@ export class SearchfoxMethods {
   declare isStacked: AppContext['isStacked'];
   declare loadFile: AppContext['loadFile'];
   declare setFocusedLine: AppContext['setFocusedLine'];
-  declare scrollToFileInStacked: AppContext['scrollToFileInStacked'];
+  declare editor: AppContext['editor'];
+  declare fetchFilePair: AppContext['fetchFilePair'];
+  declare revealStackedLine: AppContext['revealStackedLine'];
 
   async searchfoxLookup(
     target: SearchfoxTarget,
@@ -85,8 +88,8 @@ export class SearchfoxMethods {
     setSearchfoxBusy(true);
     try {
       const resolved = await resolveSearchfox(target);
-      if (newTab) {
-        window.open(searchfoxSearchUrl(tree, resolved.query), '_blank', 'noopener');
+      // A blocked popup falls through to the panel rather than doing nothing.
+      if (newTab && openInNewTab(searchfoxSearchUrl(tree, resolved.query))) {
         return;
       }
       const results = await searchSearchfox(resolved.query);
@@ -96,9 +99,7 @@ export class SearchfoxMethods {
       }
       if (mode === 'definition') {
         const definitions = searchfoxDefinitions(results);
-        if (definitions.length === 1) {
-          const hit = definitions[0]!;
-          this.goToSearchfoxHit(tree, hit.path, hit.lno);
+        if (definitions.length === 1 && (await this.goToSearchfoxHit(tree, definitions[0]!))) {
           return;
         }
       }
@@ -178,7 +179,7 @@ export class SearchfoxMethods {
         ]);
         row.addEventListener('click', () => {
           close();
-          this.goToSearchfoxHit(tree, file.path, line.lno);
+          void this.goToSearchfoxHit(tree, { path: file.path, lno: line.lno, text: line.line });
         });
         section.appendChild(row);
       }
@@ -233,25 +234,74 @@ export class SearchfoxMethods {
     );
   }
 
-  private goToSearchfoxHit(tree: string, path: string, lno: number) {
-    const index = this.files.findIndex((file) => file.path === path);
+  /** Shows a hit: at its line when the file is in the review, else on searchfox.org. Returns
+   * false when the browser blocked the new tab. */
+  private async goToSearchfoxHit(tree: string, hit: SearchfoxHit): Promise<boolean> {
+    const index = this.files.findIndex((file) => file.path === hit.path);
     if (index === -1) {
-      window.open(searchfoxSourceUrl(tree, path, lno), '_blank', 'noopener');
-    } else if (this.isStacked) {
-      void this.scrollToFileInStacked(index);
-    } else {
-      void this.loadFile(index).then(() => this.setFocusedLine('new', lno));
+      return openInNewTab(searchfoxSourceUrl(tree, hit.path, hit.lno));
     }
+    // searchfox numbers lines at its indexed revision; find the same text in the reviewed file.
+    const { new: contents } = await this.fetchFilePair(hit.path);
+    const line = localLine(contents.split('\n'), hit);
+    if (this.isStacked) {
+      await this.revealStackedLine(index, line);
+    } else {
+      await this.loadFile(index);
+      this.setFocusedLine('new', line);
+      const modified = this.editor!.getModifiedEditor();
+      const flash = modified.deltaDecorations(
+        [],
+        [
+          {
+            range: new monaco.Range(line, 1, line, 1),
+            options: { isWholeLine: true, className: 'searchfox-flash' },
+          },
+        ],
+      );
+      setTimeout(() => modified.deltaDecorations(flash, []), SEARCHFOX_FLASH_MS);
+    }
+    return true;
   }
 }
 
 /** Hits of the "Definitions" categories of the normal (non-test, non-generated) results. */
-function searchfoxDefinitions(results: SearchfoxResults) {
+function searchfoxDefinitions(results: SearchfoxResults): SearchfoxHit[] {
   return results.groups
     .filter((group) => group.kind === 'normal' && group.category.startsWith('Definitions'))
     .flatMap((group) =>
-      group.files.flatMap((file) => file.lines.map((line) => ({ path: file.path, lno: line.lno }))),
+      group.files.flatMap((file) =>
+        file.lines.map((line) => ({ path: file.path, lno: line.lno, text: line.line })),
+      ),
     );
+}
+
+type SearchfoxHit = { path: string; lno: number; text: string };
+
+/** The line of `lines` nearest to the hit's line number whose text is the hit's, else that number. */
+function localLine(lines: string[], hit: SearchfoxHit): number {
+  const text = hit.text.trim();
+  let best: number | null = null;
+  lines.forEach((line, index) => {
+    const lno = index + 1;
+    if (
+      line.trim() === text &&
+      (best === null || Math.abs(lno - hit.lno) < Math.abs(best - hit.lno))
+    ) {
+      best = lno;
+    }
+  });
+  return best ?? Math.min(hit.lno, lines.length);
+}
+
+/** Opens `url` in a new tab; false when the browser blocked it. */
+function openInNewTab(url: string): boolean {
+  // Not 'noopener': with it, window.open always returns null and a blocked popup goes unnoticed.
+  const opened = window.open(url, '_blank');
+  if (opened) {
+    opened.opener = null;
+  }
+  return opened !== null;
 }
 
 type SearchfoxLine = SearchfoxGroup['files'][number]['lines'][number];
