@@ -53,8 +53,6 @@ const SOURCE: &str = r#"<html><body>
 
 /// The two revisions searchfox can report: `old` is the head before the reindex, `new` after.
 struct Hashes {
-    hg_old: String,
-    hg_new: String,
     git_old: String,
     git_new: String,
 }
@@ -63,42 +61,30 @@ struct Hashes {
 struct Mock {
     hashes: Hashes,
     moving: bool,
-    commit_info_reads: AtomicUsize,
+    head_reads: AtomicUsize,
     analysis_reads: AtomicUsize,
 }
 
 async fn mock_searchfox(State(mock): State<Arc<Mock>>, uri: Uri) -> Response {
     let path = uri.path();
     if path == "/firefox-main/commit-info/HEAD" {
-        let read = mock.commit_info_reads.fetch_add(1, Ordering::SeqCst);
-        let hg = if mock.moving && read == 0 {
-            &mock.hashes.hg_old
-        } else {
-            &mock.hashes.hg_new
-        };
-        // `parent` is the head's parent, which is deliberately not the indexed revision.
+        // As searchfox serves it today: no `rev`, and `parent` is the head's parent, which is
+        // deliberately not the indexed revision.
         let parent = &mock.hashes.git_old;
+        return format!(r#"[{{"header":"h","parent":"{parent}","date":"d","phab":null}}]"#)
+            .into_response();
+    }
+    if path == "/firefox-main/source/.gitignore" {
+        let read = mock.head_reads.fetch_add(1, Ordering::SeqCst);
+        let git = if mock.moving && read == 0 {
+            &mock.hashes.git_old
+        } else {
+            &mock.hashes.git_new
+        };
         return format!(
-            r#"[{{"header":"h","parent":"{parent}","date":"d","fulldiff":"https://hg.mozilla.org/mozilla-central/rev/{hg}","phab":null}}]"#
+            r#"<html><a id="panel-permalink" href="/firefox-main/rev/{git}/.gitignore" title="t"></a></html>"#
         )
         .into_response();
-    }
-    if let Some(hg) = path.strip_prefix("/firefox-main/hgrev/") {
-        let git = if hg == mock.hashes.hg_old {
-            &mock.hashes.git_old
-        } else if hg == mock.hashes.hg_new {
-            &mock.hashes.git_new
-        } else {
-            return StatusCode::NOT_FOUND.into_response();
-        };
-        return Response::builder()
-            .status(StatusCode::FOUND)
-            .header("location", format!("/firefox-main/rev/{git}/"))
-            .body(Body::empty())
-            .unwrap();
-    }
-    if path.starts_with("/firefox-main/rev/") {
-        return "revision page".into_response();
     }
     if path == format!("/firefox-main/raw-analysis/{PATH}") {
         mock.analysis_reads.fetch_add(1, Ordering::SeqCst);
@@ -118,7 +104,7 @@ async fn start_mock(hashes: Hashes, moving: bool) -> Arc<Mock> {
     let mock = Arc::new(Mock {
         hashes,
         moving,
-        commit_info_reads: AtomicUsize::new(0),
+        head_reads: AtomicUsize::new(0),
         analysis_reads: AtomicUsize::new(0),
     });
     let app = axum::Router::new()
@@ -238,13 +224,13 @@ async fn send(app: &axum::Router, request: Request<Body>) -> (StatusCode, serde_
     (status, body)
 }
 
-fn resolve_request(line: usize) -> Request<Body> {
+fn resolve_request(line: usize, text: &str) -> Request<Body> {
     let body = serde_json::json!({
         "path": PATH,
         "line": line,
         "col": 20,
         "word": "Disconnect",
-        "text": SIGNATURE,
+        "text": text,
         "side": "new",
         "commit_idx": 0,
     });
@@ -279,8 +265,6 @@ async fn searchfox_endpoints_gate_and_resolve_at_the_indexed_revision() {
     let plain = scratch_dir("plain");
     let (git_old, git_new) = indexed_repository(&repo);
     let hashes = || Hashes {
-        hg_old: "a".repeat(40),
-        hg_new: "b".repeat(40),
         git_old: git_old.clone(),
         git_new: git_new.clone(),
     };
@@ -288,10 +272,10 @@ async fn searchfox_endpoints_gate_and_resolve_at_the_indexed_revision() {
     // Gating comes first: disabled setting, then public server.
     start_mock(hashes(), false).await;
     let app = lrv::server::create_router(state(&repo, false, false), false);
-    let (status, _) = send(&app, resolve_request(3)).await;
+    let (status, _) = send(&app, resolve_request(3, SIGNATURE)).await;
     assert_eq!(status, StatusCode::CONFLICT, "disabled by default");
     let app = lrv::server::create_router(state(&repo, true, true), false);
-    let (status, _) = send(&app, resolve_request(3)).await;
+    let (status, _) = send(&app, resolve_request(3, SIGNATURE)).await;
     assert_eq!(
         status,
         StatusCode::FORBIDDEN,
@@ -305,7 +289,7 @@ async fn searchfox_endpoints_gate_and_resolve_at_the_indexed_revision() {
     // and text (from the repository) agree.
     let mock = start_mock(hashes(), true).await;
     let app = lrv::server::create_router(state(&repo, false, true), false);
-    let (status, body) = send(&app, resolve_request(3)).await;
+    let (status, body) = send(&app, resolve_request(3, SIGNATURE)).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["query"], SYMBOL_QUERY);
     assert_eq!(
@@ -319,7 +303,12 @@ async fn searchfox_endpoints_gate_and_resolve_at_the_indexed_revision() {
     );
 
     // The clicked line is unchanged in the review but not in searchfox's copy: unresolved.
-    let (status, body) = send(&app, resolve_request(1)).await;
+    let (status, body) = send(&app, resolve_request(1, "// new")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["query"], "id:Disconnect");
+
+    // A click whose text isn't the reviewed line can't place its column: unresolved.
+    let (status, body) = send(&app, resolve_request(3, "void AudioNode::Disconnect() {")).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["query"], "id:Disconnect");
 
@@ -349,7 +338,7 @@ async fn searchfox_endpoints_gate_and_resolve_at_the_indexed_revision() {
     // which is only trusted while the head is the revision.
     let mock = start_mock(hashes(), false).await;
     let app = lrv::server::create_router(state(&plain, false, true), false);
-    let (status, body) = send(&app, resolve_request(3)).await;
+    let (status, body) = send(&app, resolve_request(3, SIGNATURE)).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["query"], SYMBOL_QUERY);
     assert_eq!(mock.analysis_reads.load(Ordering::SeqCst), 1);

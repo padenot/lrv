@@ -18,6 +18,9 @@ use tokio::sync::{Mutex, OnceCell};
 
 pub const SEARCHFOX_TREE: &str = "firefox-main";
 
+/// A small file at the root of the tree, whose source page carries the head's permalink.
+const PERMALINK_PAGE: &str = ".gitignore";
+
 /// How often a lookup re-reads searchfox's head when the head moves while it is being read.
 const REVISION_ATTEMPTS: usize = 3;
 const GH_TIMEOUT: Duration = Duration::from_secs(30);
@@ -216,7 +219,11 @@ impl Searchfox {
         let Some(tokens) = file.tokens.get(&line) else {
             return Ok(unresolved);
         };
-        // Matched lines are equal, so the click's byte column applies to searchfox's copy too.
+        // The column is an offset into the clicked text, which must be the reviewed line the
+        // mapping used. Matched lines are equal, so the byte column applies to searchfox's copy.
+        if reviewed[target.line - 1] != target.text {
+            return Ok(unresolved);
+        }
         let Some(col) = byte_offset(&target.text, target.col) else {
             return Ok(unresolved);
         };
@@ -286,21 +293,23 @@ impl Searchfox {
         .await
     }
 
-    /// The git hash of searchfox's head. Its commit-info entry names the head's hg changeset, and
-    /// searchfox's hgrev redirect maps that to git. The entry's `parent` is the head's parent, so
-    /// it is never used.
+    /// The git hash of searchfox's head: the `rev` of its commit-info entry when searchfox
+    /// reports one, else the revision of a source page's permalink. The entry's `parent` is the
+    /// head's parent, so it is never used.
     async fn head_revision(&self) -> Result<String> {
         let base = self.client.base_url();
         let info = self
             .client
             .get_raw(&format!("{base}/{SEARCHFOX_TREE}/commit-info/HEAD"))
             .await?;
-        let hg = hg_revision_of_head(&info)?;
-        let final_url = self
+        if let Some(rev) = rev_of_head(&info)? {
+            return Ok(rev);
+        }
+        let page = self
             .client
-            .get_final_url(&format!("{base}/{SEARCHFOX_TREE}/hgrev/{hg}"))
+            .get_html(&format!("{base}/{SEARCHFOX_TREE}/source/{PERMALINK_PAGE}"))
             .await?;
-        git_revision_of_hgrev(&final_url, &hg)
+        permalink_revision(&page)
     }
 
     async fn ensure_head(&self, revision: &str) -> Result<()> {
@@ -380,38 +389,43 @@ where
     bail!("searchfox's revision kept changing; try again")
 }
 
-/// The HG changeset of the head's commit-info entry: the last segment of its `fulldiff` link.
-fn hg_revision_of_head(commit_info: &str) -> Result<String> {
+/// The `rev` of the head's commit-info entry, the commit's own git hash, when searchfox reports
+/// it.
+fn rev_of_head(commit_info: &str) -> Result<Option<String>> {
     let entries: Vec<Value> =
         serde_json::from_str(commit_info).context("searchfox commit-info is not JSON")?;
-    let fulldiff = entries
-        .first()
-        .and_then(|entry| entry.get("fulldiff"))
-        .and_then(Value::as_str)
-        .context("searchfox commit-info has no fulldiff link")?;
-    let hg = fulldiff.rsplit('/').next().unwrap_or_default();
+    let entry = entries.first().context("searchfox commit-info is empty")?;
+    let Some(rev) = entry.get("rev") else {
+        return Ok(None);
+    };
+    let rev = rev.as_str().unwrap_or_default();
     ensure!(
-        is_full_hash(hg),
-        "searchfox fulldiff link has no hg changeset: {fulldiff}"
+        is_full_hash(rev),
+        "searchfox commit-info rev is not a git hash: {rev}"
     );
-    Ok(hg.to_owned())
+    Ok(Some(rev.to_owned()))
 }
 
-/// The git revision of searchfox's hgrev redirect target, `.../rev/<git hash>/`. A target naming
-/// the hg changeset itself means the mapping failed, so it is rejected.
-fn git_revision_of_hgrev(final_url: &str, hg: &str) -> Result<String> {
-    let (_, after) = final_url
-        .split_once("/rev/")
-        .with_context(|| format!("hgrev did not redirect to a revision: {final_url}"))?;
-    let git = after.split('/').next().unwrap_or_default();
+/// The git hash in a searchfox source page's permalink, `/<tree>/rev/<hash>/<path>`, which names
+/// the revision the page was rendered at: searchfox's head.
+fn permalink_revision(page: &str) -> Result<String> {
+    let start = page
+        .find(r#"id="panel-permalink""#)
+        .context("searchfox source page has no permalink")?;
+    let tag = &page[start..start + page[start..].find('>').unwrap_or(0)];
+    let prefix = format!("/{SEARCHFOX_TREE}/rev/");
+    let rev = tag
+        .find(&prefix)
+        .and_then(|at| tag.get(at + prefix.len()..at + prefix.len() + 40))
+        .unwrap_or_default();
     ensure!(
-        is_full_hash(git) && git != hg,
-        "hgrev redirect names no git revision: {final_url}"
+        is_full_hash(rev),
+        "searchfox permalink names no git revision"
     );
-    Ok(git.to_owned())
+    Ok(rev.to_owned())
 }
 
-/// Whether `s` is a full 40-hex-digit hash, as git and hg name commits.
+/// Whether `s` is a full 40-hex-digit git hash.
 pub fn is_full_hash(s: &str) -> bool {
     s.len() == 40 && s.bytes().all(|b| b.is_ascii_hexdigit())
 }
@@ -620,31 +634,34 @@ mod tests {
     use super::*;
 
     #[test]
-    fn head_revision_is_the_hg_changeset_not_the_parent() {
-        let hg = "618eadc8".repeat(5);
-        let info = format!(
-            r#"[{{"header":"h","parent":"{}","date":"d","fulldiff":"https://hg.mozilla.org/mozilla-central/rev/{hg}","phab":null}}]"#,
-            "1".repeat(40)
-        );
-        assert_eq!(hg_revision_of_head(&info).unwrap(), hg);
-
-        let without_fulldiff = format!(r#"[{{"parent":"{}"}}]"#, "1".repeat(40));
-        assert!(hg_revision_of_head(&without_fulldiff).is_err());
-        assert!(hg_revision_of_head("[]").is_err());
-        assert!(hg_revision_of_head("not json").is_err());
+    fn head_revision_is_the_commits_rev_never_the_parent() {
+        let rev = "4a7b56cd".repeat(5);
+        let parent = "1".repeat(40);
+        let info = format!(r#"[{{"header":"h","rev":"{rev}","parent":"{parent}"}}]"#);
+        assert_eq!(rev_of_head(&info).unwrap(), Some(rev));
+        // Without `rev`, the parent doesn't stand in for it.
+        let info = format!(r#"[{{"header":"h","parent":"{parent}"}}]"#);
+        assert_eq!(rev_of_head(&info).unwrap(), None);
+        assert!(rev_of_head(r#"[{"rev":"HEAD"}]"#).is_err());
+        assert!(rev_of_head("[]").is_err());
+        assert!(rev_of_head("not json").is_err());
     }
 
     #[test]
-    fn hgrev_redirect_must_name_a_git_revision() {
-        let hg = "a".repeat(40);
-        let git = "b".repeat(40);
-        let target = format!("https://searchfox.org/firefox-main/rev/{git}/");
-        assert_eq!(git_revision_of_hgrev(&target, &hg).unwrap(), git);
-        // The redirect target is not a revision page: no fallback to some other revision.
-        assert!(git_revision_of_hgrev("https://searchfox.org/firefox-main/hgrev/", &hg).is_err());
-        assert!(git_revision_of_hgrev("https://searchfox.org/firefox-main/rev/xyz/", &hg).is_err());
-        // Mapping failed and the hg changeset came back.
-        assert!(git_revision_of_hgrev(&format!("https://x/rev/{hg}/"), &hg).is_err());
+    fn permalink_names_the_pages_revision() {
+        let rev = "4a7b56cd".repeat(5);
+        let page = format!(
+            r#"<a href="/firefox-main/rev/{other}/x">blame</a><a id="panel-permalink" href="/firefox-main/rev/{rev}/.gitignore" data-accel="Y">"#,
+            other = "9".repeat(40)
+        );
+        assert_eq!(permalink_revision(&page).unwrap(), rev);
+        // Other revision links on the page (blame, history) are not the page's revision.
+        let without = format!(r#"<a href="/firefox-main/rev/{rev}/x">"#);
+        assert!(permalink_revision(&without).is_err());
+        assert!(
+            permalink_revision(r#"<a id="panel-permalink" href="/firefox-main/rev/HEAD/x">"#)
+                .is_err()
+        );
     }
 
     #[test]
