@@ -11944,23 +11944,23 @@ const KEYBOARD_SHORTCUTS = [
 const SEARCHFOX_SHORTCUTS = [
 	{
 		keys: ["Mod+click"],
-		description: "Searchfox: go to definition"
+		description: "Go to definition"
 	},
 	{
 		keys: ["Mod+Alt+click"],
-		description: "Searchfox: find uses"
+		description: "Find uses"
 	},
 	{
 		keys: ["Mod+Shift+click"],
-		description: "Searchfox: open on searchfox.org in a new tab"
+		description: "Open on searchfox.org in a new tab"
 	},
 	{
 		keys: ["Right-click"],
-		description: "Searchfox: menu with Go to Definition and Find Uses"
+		description: "Menu with Go to Definition and Find Uses"
 	},
 	{
 		keys: ["Escape"],
-		description: "Searchfox: close the results panel or menu"
+		description: "Close the results panel or menu"
 	}
 ];
 //#endregion
@@ -13378,7 +13378,7 @@ var DialogMethods = class {
 		const thead = el("thead", {}, [el("tr", {}, [el("th", { text: "Shortcut" }), el("th", { text: "Action" })])]);
 		const tbody = el("tbody");
 		const table = el("table", { className: "shortcuts-table" }, [thead, tbody]);
-		(this.config.searchfox ? [...KEYBOARD_SHORTCUTS, ...SEARCHFOX_SHORTCUTS] : KEYBOARD_SHORTCUTS).forEach((shortcut) => {
+		const addRow = (shortcut) => {
 			const keys = shortcutKeys(shortcut, this.isStacked);
 			if (keys.length === 0) return;
 			const row = el("tr");
@@ -13406,7 +13406,12 @@ var DialogMethods = class {
 			row.appendChild(keysCell);
 			row.appendChild(actionCell);
 			tbody.appendChild(row);
-		});
+		};
+		KEYBOARD_SHORTCUTS.forEach(addRow);
+		if (this.config.searchfox) {
+			tbody.appendChild(el("tr", { className: "shortcuts-section" }, [el("td", { attrs: { colspan: 2 } }, [el("strong", { text: "Searchfox" }), el("span", { text: "Sends clicked identifiers and file paths to searchfox.org, and fetches searchfox’s copy of files from GitHub." })])]));
+			SEARCHFOX_SHORTCUTS.forEach(addRow);
+		}
 		body.appendChild(table);
 	}
 	showSettingsModal() {
@@ -13539,7 +13544,7 @@ var DialogMethods = class {
 			id: "searchfox",
 			name: "searchfox",
 			checked: currentSearchfox
-		} }), el("span", { text: "Go to definitions and find uses of identifiers, from searchfox.org (press ? for the shortcuts). Sends clicked identifiers and file paths to searchfox.org, and in Firefox trees fetches searchfox’s copy of files from GitHub with gh." })])]);
+		} }), el("span", { text: "searchfox integration, see keyboard shortcuts" })])]);
 		form.appendChild(themeField);
 		form.appendChild(fontField);
 		form.appendChild(splitViewField);

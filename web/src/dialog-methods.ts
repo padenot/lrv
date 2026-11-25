@@ -71,10 +71,9 @@ export class DialogMethods {
     const tbody = el('tbody');
     const table = el('table', { className: 'shortcuts-table' }, [thead, tbody]);
 
-    const shortcuts = this.config.searchfox
-      ? [...KEYBOARD_SHORTCUTS, ...SEARCHFOX_SHORTCUTS]
-      : KEYBOARD_SHORTCUTS;
-    shortcuts.forEach((shortcut) => {
+    const addRow = (
+      shortcut: (typeof KEYBOARD_SHORTCUTS)[number] | (typeof SEARCHFOX_SHORTCUTS)[number],
+    ) => {
       const keys = shortcutKeys(shortcut, this.isStacked);
       if (keys.length === 0) {
         return;
@@ -119,7 +118,21 @@ export class DialogMethods {
       row.appendChild(keysCell);
       row.appendChild(actionCell);
       tbody.appendChild(row);
-    });
+    };
+    KEYBOARD_SHORTCUTS.forEach(addRow);
+    if (this.config.searchfox) {
+      tbody.appendChild(
+        el('tr', { className: 'shortcuts-section' }, [
+          el('td', { attrs: { colspan: 2 } }, [
+            el('strong', { text: 'Searchfox' }),
+            el('span', {
+              text: 'Sends clicked identifiers and file paths to searchfox.org, and fetches searchfox’s copy of files from GitHub.',
+            }),
+          ]),
+        ]),
+      );
+      SEARCHFOX_SHORTCUTS.forEach(addRow);
+    }
 
     body.appendChild(table);
   }
@@ -320,7 +333,7 @@ export class DialogMethods {
           },
         }),
         el('span', {
-          text: 'Go to definitions and find uses of identifiers, from searchfox.org (press ? for the shortcuts). Sends clicked identifiers and file paths to searchfox.org, and in Firefox trees fetches searchfox’s copy of files from GitHub with gh.',
+          text: 'searchfox integration, see keyboard shortcuts',
         }),
       ]),
     ]);

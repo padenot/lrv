@@ -1727,6 +1727,14 @@ body {
   width: 1%;
   white-space: nowrap;
 }
+.shortcuts-table .shortcuts-section td {
+  padding-top: 10px;
+  color: var(--text-secondary);
+}
+.shortcuts-section strong {
+  margin-right: 8px;
+  color: var(--text-primary);
+}
 .help-modal {
   width: min(1100px, 94vw);
 }

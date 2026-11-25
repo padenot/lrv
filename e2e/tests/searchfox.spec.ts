@@ -539,17 +539,21 @@ test.describe('searchfox code navigation', () => {
       await page.keyboard.press('?');
       const help = page.getByRole('dialog', { name: 'Keyboard Shortcuts' });
       await expect(help.getByText('Next file')).toBeVisible();
-      const rows = help.locator('tr', { hasText: 'Searchfox:' });
+      const section = help.locator('tr.shortcuts-section');
+      const rows = help.locator('tr.shortcuts-section ~ tr');
       if (enabled) {
+        await expect(section).toContainText('Searchfox');
+        await expect(section).toContainText('searchfox.org');
+        await expect(section).toContainText('GitHub');
         await expect(rows).toHaveText([
-          /go to definition/,
-          /find uses/,
-          /open on searchfox\.org in a new tab/,
-          /menu with Go to Definition and Find Uses/,
-          /close the results panel or menu/,
+          /Go to definition/,
+          /Find uses/,
+          /Open on searchfox\.org in a new tab/,
+          /Menu with Go to Definition and Find Uses/,
+          /Close the results panel or menu/,
         ]);
       } else {
-        await expect(rows).toHaveCount(0);
+        await expect(section).toHaveCount(0);
       }
     });
   }

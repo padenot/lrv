@@ -62,12 +62,22 @@ struct Hashes {
 struct Mock {
     hashes: Hashes,
     moving: bool,
+    /// Whether the GitHub stand-in serves the indexed revision's file.
+    github: bool,
     head_reads: AtomicUsize,
     analysis_reads: AtomicUsize,
+    github_reads: AtomicUsize,
 }
 
 async fn mock_searchfox(State(mock): State<Arc<Mock>>, uri: Uri) -> Response {
     let path = uri.path();
+    if let Some(raw) = path.strip_prefix("/github/") {
+        mock.github_reads.fetch_add(1, Ordering::SeqCst);
+        if mock.github && raw == format!("{}/{PATH}", mock.hashes.git_new) {
+            return INDEXED.into_response();
+        }
+        return StatusCode::NOT_FOUND.into_response();
+    }
     if path == "/firefox-main/commit-info/HEAD" {
         // As searchfox serves it today: no `rev`, and `parent` is the head's parent, which is
         // deliberately not the indexed revision.
@@ -101,12 +111,14 @@ async fn mock_searchfox(State(mock): State<Arc<Mock>>, uri: Uri) -> Response {
 }
 
 /// Serves the mock and points searchfox clients at it. Every `Searchfox` built afterwards uses it.
-async fn start_mock(hashes: Hashes, moving: bool) -> Arc<Mock> {
+async fn start_mock(hashes: Hashes, moving: bool, github: bool) -> Arc<Mock> {
     let mock = Arc::new(Mock {
         hashes,
         moving,
+        github,
         head_reads: AtomicUsize::new(0),
         analysis_reads: AtomicUsize::new(0),
+        github_reads: AtomicUsize::new(0),
     });
     let app = axum::Router::new()
         .fallback(mock_searchfox)
@@ -115,6 +127,7 @@ async fn start_mock(hashes: Hashes, moving: bool) -> Arc<Mock> {
     let address = listener.local_addr().unwrap();
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     std::env::set_var("SEARCHFOX_BASE_URL", format!("http://{address}"));
+    std::env::set_var("LRV_GITHUB_RAW_URL", format!("http://{address}/github"));
     mock
 }
 
@@ -271,7 +284,7 @@ async fn searchfox_endpoints_gate_and_resolve_at_the_indexed_revision() {
     };
 
     // Gating comes first: disabled setting, then public server.
-    start_mock(hashes(), false).await;
+    start_mock(hashes(), false, false).await;
     let app = lrv::server::create_router(state(&repo, false, false), false);
     let (status, _) = send(&app, resolve_request(3, SIGNATURE, 20)).await;
     assert_eq!(status, StatusCode::CONFLICT, "disabled by default");
@@ -288,7 +301,7 @@ async fn searchfox_endpoints_gate_and_resolve_at_the_indexed_revision() {
     // The head moves from the old to the new revision while the first lookup reads it. The
     // lookup at the old revision is dropped and the lookup repeats at the new one, whose analysis
     // and text (from the repository) agree.
-    let mock = start_mock(hashes(), true).await;
+    let mock = start_mock(hashes(), true, false).await;
     let app = lrv::server::create_router(state(&repo, false, true), false);
     let (status, body) = send(&app, resolve_request(3, SIGNATURE, 20)).await;
     assert_eq!(status, StatusCode::OK);
@@ -345,14 +358,23 @@ async fn searchfox_endpoints_gate_and_resolve_at_the_indexed_revision() {
     let (status, _) = send(&app, line_request(2, "not-a-revision")).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
 
-    // Without a repository holding the commit, the text comes from searchfox's source page,
-    // which is only trusted while the head is the revision.
-    let mock = start_mock(hashes(), false).await;
+    // Without a repository holding the commit, the text comes from GitHub at the revision.
+    let mock = start_mock(hashes(), false, true).await;
+    let app = lrv::server::create_router(state(&plain, false, true), false);
+    let (status, body) = send(&app, resolve_request(3, SIGNATURE, 20)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["query"], SYMBOL_QUERY);
+    assert_eq!(mock.github_reads.load(Ordering::SeqCst), 1);
+
+    // When GitHub doesn't have it either, from searchfox's source page, which is only trusted
+    // while the head is the revision.
+    let mock = start_mock(hashes(), false, false).await;
     let app = lrv::server::create_router(state(&plain, false, true), false);
     let (status, body) = send(&app, resolve_request(3, SIGNATURE, 20)).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["query"], SYMBOL_QUERY);
     assert_eq!(mock.analysis_reads.load(Ordering::SeqCst), 1);
+    assert_eq!(mock.github_reads.load(Ordering::SeqCst), 1);
 
     let _ = std::fs::remove_dir_all(&repo);
     let _ = std::fs::remove_dir_all(&plain);

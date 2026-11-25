@@ -79,9 +79,9 @@ export const KEYBOARD_SHORTCUTS: KeyboardShortcut[] = [
 
 /** Searchfox mouse gestures, listed in the help only when the searchfox setting is on. */
 export const SEARCHFOX_SHORTCUTS: Array<Pick<KeyboardShortcut, 'keys' | 'description'>> = [
-  { keys: ['Mod+click'], description: 'Searchfox: go to definition' },
-  { keys: ['Mod+Alt+click'], description: 'Searchfox: find uses' },
-  { keys: ['Mod+Shift+click'], description: 'Searchfox: open on searchfox.org in a new tab' },
-  { keys: ['Right-click'], description: 'Searchfox: menu with Go to Definition and Find Uses' },
-  { keys: ['Escape'], description: 'Searchfox: close the results panel or menu' },
+  { keys: ['Mod+click'], description: 'Go to definition' },
+  { keys: ['Mod+Alt+click'], description: 'Find uses' },
+  { keys: ['Mod+Shift+click'], description: 'Open on searchfox.org in a new tab' },
+  { keys: ['Right-click'], description: 'Menu with Go to Definition and Find Uses' },
+  { keys: ['Escape'], description: 'Close the results panel or menu' },
 ];

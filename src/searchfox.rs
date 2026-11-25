@@ -23,7 +23,10 @@ const PERMALINK_PAGE: &str = ".gitignore";
 
 /// How often a lookup re-reads searchfox's head when the head moves while it is being read.
 const REVISION_ATTEMPTS: usize = 3;
-const GH_TIMEOUT: Duration = Duration::from_secs(30);
+/// GitHub's raw files of the Firefox repository, which has every revision searchfox indexes for
+/// `firefox-main`. `LRV_GITHUB_RAW_URL` points elsewhere (tests).
+const GITHUB_RAW: &str = "https://raw.githubusercontent.com/mozilla-firefox/firefox";
+const GITHUB_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub struct Searchfox {
     client: SearchfoxClient,
@@ -34,6 +37,8 @@ pub struct Searchfox {
     analyses: Memo<Option<Arc<Tokens>>>,
     /// searchfox's copy of each file per (path, revision).
     texts: Memo<Arc<Vec<String>>>,
+    github: reqwest::Client,
+    github_raw: String,
 }
 
 /// Analysis tokens (`"source":1` records) by 1-based line.
@@ -195,6 +200,11 @@ impl Searchfox {
             working_dir,
             analyses: Memo::default(),
             texts: Memo::default(),
+            github: reqwest::Client::builder()
+                .timeout(GITHUB_TIMEOUT)
+                .user_agent(concat!("lrv/", env!("CARGO_PKG_VERSION")))
+                .build()?,
+            github_raw: std::env::var("LRV_GITHUB_RAW_URL").unwrap_or_else(|_| GITHUB_RAW.into()),
         })
     }
 
@@ -357,6 +367,24 @@ impl Searchfox {
         Ok(response.error_for_status()?.json().await?)
     }
 
+    /// `path` at `revision` from GitHub, or `None` when it can't be fetched (searchfox's page is
+    /// the fallback).
+    async fn github_text(&self, path: &str, revision: &str) -> Option<String> {
+        let url = raw_url(&self.github_raw, path, revision)?;
+        let response = match self.github.get(url).send().await {
+            Ok(response) if response.status().is_success() => response,
+            Ok(response) => {
+                tracing::warn!("GitHub has no {path} at {revision}: {}", response.status());
+                return None;
+            }
+            Err(e) => {
+                tracing::warn!("Fetching {path} at {revision} from GitHub failed: {e}");
+                return None;
+            }
+        };
+        String::from_utf8(response.bytes().await.ok()?.to_vec()).ok()
+    }
+
     /// searchfox's copy of `path` at `revision`, as lines. It comes from the local repository or
     /// GitHub when either has that exact commit. Otherwise it is searchfox's source page, which
     /// only matches `revision` while the head is `revision`.
@@ -365,7 +393,7 @@ impl Searchfox {
             .get_or_try_init(path, revision, || async {
                 let text = match local_text(&self.working_dir, path, revision).await {
                     Some(text) => text,
-                    None => match github_text(&self.working_dir, path, revision).await {
+                    None => match self.github_text(path, revision).await {
                         Some(text) => text,
                         None => {
                             self.ensure_head(revision).await?;
@@ -449,32 +477,14 @@ async fn local_text(repo: &str, path: &str, revision: &str) -> Option<String> {
     git(repo, &["cat-file", "blob", &format!("{revision}:{path}")]).await
 }
 
-/// `path` at `revision` from GitHub, when the working directory's origin is the Firefox repository.
-async fn github_text(repo: &str, path: &str, revision: &str) -> Option<String> {
-    let origin = git(repo, &["remote", "get-url", "origin"]).await?;
-    let (owner, name) = crate::github::parse_github_remote(origin.trim())?;
-    if owner != "mozilla-firefox" || name != "firefox" {
-        return None;
-    }
-    let endpoint = contents_endpoint(path, revision);
-    let bytes = crate::github::run_gh(
-        &["api", "-H", "Accept: application/vnd.github.raw", &endpoint],
-        GH_TIMEOUT,
-    )
-    .await?;
-    String::from_utf8(bytes).ok()
-}
-
-/// The `gh api` endpoint of `path` at `revision` in the Firefox repository, with `path` encoded
-/// segment by segment.
-fn contents_endpoint(path: &str, revision: &str) -> String {
-    let mut url = reqwest::Url::parse("https://api.github.com/").expect("constant URL");
+/// The raw URL of `path` at `revision` under `base`, with `path` encoded segment by segment.
+fn raw_url(base: &str, path: &str, revision: &str) -> Option<reqwest::Url> {
+    let mut url = reqwest::Url::parse(base).ok()?;
     url.path_segments_mut()
-        .expect("https URLs have path segments")
-        .extend(["repos", "mozilla-firefox", "firefox", "contents"])
+        .ok()?
+        .push(revision)
         .extend(path.split('/'));
-    url.set_query(Some(&format!("ref={revision}")));
-    format!("{}?{}", url.path(), url.query().unwrap_or_default())
+    Some(url)
 }
 
 /// The stdout of `git <args>` in `repo`, or `None` when git fails or isn't a repository there.
@@ -749,14 +759,11 @@ mod tests {
     }
 
     #[test]
-    fn contents_endpoint_encodes_path_segments() {
-        let endpoint = contents_endpoint("dom/a b#c.cpp", &"b".repeat(40));
+    fn raw_url_encodes_path_segments() {
+        let rev = "b".repeat(40);
         assert_eq!(
-            endpoint,
-            format!(
-                "/repos/mozilla-firefox/firefox/contents/dom/a%20b%23c.cpp?ref={}",
-                "b".repeat(40)
-            )
+            raw_url(GITHUB_RAW, "dom/a b#c.cpp", &rev).unwrap().as_str(),
+            format!("{GITHUB_RAW}/{rev}/dom/a%20b%23c.cpp")
         );
     }
 
