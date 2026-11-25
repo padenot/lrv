@@ -73,6 +73,7 @@ fn get_project_context(cwd: Option<&PathBuf>) -> lrv::types::ProjectContext {
         phabricator_available: false,
         phabricator_revisions: Vec::new(),
         own_revisions: Vec::new(),
+        searchfox_tree: lrv::searchfox::SEARCHFOX_TREE.to_owned(),
     }
 }
 

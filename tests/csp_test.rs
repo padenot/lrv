@@ -32,6 +32,7 @@ async fn test_csp_header_present() {
         phabricator_available: false,
         phabricator_revisions: Vec::new(),
         own_revisions: Vec::new(),
+        searchfox_tree: lrv::searchfox::SEARCHFOX_TREE.to_owned(),
     };
     let (shutdown_tx, _rx) = tokio::sync::mpsc::channel::<()>(1);
     let state = lrv::server::AppState {
@@ -56,6 +57,7 @@ async fn test_csp_header_present() {
         pull_requests: Default::default(),
         store: None,
         publish: None,
+        searchfox: std::sync::Arc::new(lrv::searchfox::Searchfox::new().expect("searchfox client")),
     };
 
     let app = lrv::server::create_router(state, false);
@@ -101,6 +103,7 @@ async fn test_csp_on_assets_and_api() {
         phabricator_available: false,
         phabricator_revisions: Vec::new(),
         own_revisions: Vec::new(),
+        searchfox_tree: lrv::searchfox::SEARCHFOX_TREE.to_owned(),
     };
     let (shutdown_tx, _rx) = tokio::sync::mpsc::channel::<()>(1);
     let state = lrv::server::AppState {
@@ -125,6 +128,7 @@ async fn test_csp_on_assets_and_api() {
         pull_requests: Default::default(),
         store: None,
         publish: None,
+        searchfox: std::sync::Arc::new(lrv::searchfox::Searchfox::new().expect("searchfox client")),
     };
 
     let app = lrv::server::create_router(state, false);

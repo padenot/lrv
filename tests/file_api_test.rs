@@ -47,6 +47,7 @@ fn make_state_with_root(root: &str) -> lrv::server::AppState {
         phabricator_available: false,
         phabricator_revisions: Vec::new(),
         own_revisions: Vec::new(),
+        searchfox_tree: lrv::searchfox::SEARCHFOX_TREE.to_owned(),
     };
     let (shutdown_tx, _rx) = mpsc::channel::<()>(1);
     lrv::server::AppState {
@@ -71,6 +72,7 @@ fn make_state_with_root(root: &str) -> lrv::server::AppState {
         pull_requests: Default::default(),
         store: None,
         publish: None,
+        searchfox: std::sync::Arc::new(lrv::searchfox::Searchfox::new().expect("searchfox client")),
     }
 }
 

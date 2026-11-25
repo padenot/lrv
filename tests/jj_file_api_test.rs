@@ -88,6 +88,7 @@ fn make_jj_state(
             phabricator_available: false,
             phabricator_revisions: Vec::new(),
             own_revisions: Vec::new(),
+            searchfox_tree: lrv::searchfox::SEARCHFOX_TREE.to_owned(),
         }),
         old_caches: Arc::new(vec![tokio::sync::Mutex::new(
             std::collections::HashMap::new(),
@@ -99,6 +100,7 @@ fn make_jj_state(
         pull_requests: Default::default(),
         store: None,
         publish: None,
+        searchfox: std::sync::Arc::new(lrv::searchfox::Searchfox::new().expect("searchfox client")),
     }
 }
 
@@ -372,6 +374,7 @@ fn make_state_from_patch(repo_dir: &std::path::Path, patch: &str) -> lrv::server
             phabricator_available: false,
             phabricator_revisions: Vec::new(),
             own_revisions: Vec::new(),
+            searchfox_tree: lrv::searchfox::SEARCHFOX_TREE.to_owned(),
         }),
         old_caches: Arc::new(vec![tokio::sync::Mutex::new(
             std::collections::HashMap::new(),
@@ -383,6 +386,7 @@ fn make_state_from_patch(repo_dir: &std::path::Path, patch: &str) -> lrv::server
         pull_requests: Default::default(),
         store: None,
         publish: None,
+        searchfox: std::sync::Arc::new(lrv::searchfox::Searchfox::new().expect("searchfox client")),
     }
 }
 

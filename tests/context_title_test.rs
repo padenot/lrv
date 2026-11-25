@@ -32,6 +32,7 @@ async fn test_context_includes_title_when_set() {
         phabricator_available: false,
         phabricator_revisions: Vec::new(),
         own_revisions: Vec::new(),
+        searchfox_tree: lrv::searchfox::SEARCHFOX_TREE.to_owned(),
     };
     let (shutdown_tx, _rx) = tokio::sync::mpsc::channel::<()>(1);
     let state = lrv::server::AppState {
@@ -56,6 +57,7 @@ async fn test_context_includes_title_when_set() {
         pull_requests: Default::default(),
         store: None,
         publish: None,
+        searchfox: std::sync::Arc::new(lrv::searchfox::Searchfox::new().expect("searchfox client")),
     };
 
     let app = lrv::server::create_router(state, false);
@@ -112,6 +114,7 @@ async fn test_context_title_null_when_unset() {
         phabricator_available: false,
         phabricator_revisions: Vec::new(),
         own_revisions: Vec::new(),
+        searchfox_tree: lrv::searchfox::SEARCHFOX_TREE.to_owned(),
     };
     let (shutdown_tx, _rx) = tokio::sync::mpsc::channel::<()>(1);
     let state = lrv::server::AppState {
@@ -136,6 +139,7 @@ async fn test_context_title_null_when_unset() {
         pull_requests: Default::default(),
         store: None,
         publish: None,
+        searchfox: std::sync::Arc::new(lrv::searchfox::Searchfox::new().expect("searchfox client")),
     };
 
     let app = lrv::server::create_router(state, false);

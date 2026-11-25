@@ -1,6 +1,7 @@
 use crate::agent::{Discussion, DiscussionRequest};
 use crate::config::UserConfig;
 use crate::repository;
+use crate::searchfox;
 use crate::skill::{skill_install_paths, EMBEDDED_SKILL};
 use crate::store::CommentStore;
 use crate::themes::{load_user_themes, UserTheme};
@@ -75,6 +76,7 @@ pub struct AppState {
     pub store: Option<Arc<CommentStore>>,
     // Optional, lazily validated Phabricator publisher.
     pub publish: Option<Arc<crate::phabricator::Publisher>>,
+    pub searchfox: Arc<searchfox::Searchfox>,
 }
 
 impl AppState {
@@ -822,6 +824,8 @@ pub fn create_router(state: AppState, enable_trace: bool) -> Router {
         .route("/api/complete", post(complete_review))
         .route("/api/phabricator", get(get_phabricator))
         .route("/api/phabricator/publish", post(publish_phabricator))
+        .route("/api/searchfox/resolve", post(searchfox_resolve))
+        .route("/api/searchfox/search", get(searchfox_search))
         .layer(middleware::from_fn(security_headers))
         .with_state(state);
 
@@ -1802,6 +1806,54 @@ async fn update_config(
     crate::config::save_config(&new_config).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(StatusCode::OK)
+}
+
+/// Searchfox navigation is unavailable on public servers and until enabled in the settings.
+async fn searchfox_available(state: &AppState) -> Result<(), StatusCode> {
+    if state.context.is_public {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    if !state.config.lock().await.searchfox {
+        return Err(StatusCode::CONFLICT);
+    }
+    Ok(())
+}
+
+async fn searchfox_resolve(
+    State(state): State<AppState>,
+    Json(target): Json<searchfox::Target>,
+) -> Response {
+    if let Err(status) = searchfox_available(&state).await {
+        return status.into_response();
+    }
+    match state.searchfox.resolve(&target).await {
+        Ok(resolved) => Json(resolved).into_response(),
+        Err(e) => {
+            tracing::warn!("Searchfox lookup failed: {e:#}");
+            (StatusCode::BAD_GATEWAY, "searchfox request failed").into_response()
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct SearchfoxQuery {
+    q: String,
+}
+
+async fn searchfox_search(
+    State(state): State<AppState>,
+    Query(query): Query<SearchfoxQuery>,
+) -> Response {
+    if let Err(status) = searchfox_available(&state).await {
+        return status.into_response();
+    }
+    match state.searchfox.search(&query.q).await {
+        Ok(results) => Json(results).into_response(),
+        Err(e) => {
+            tracing::warn!("Searchfox search failed: {e:#}");
+            (StatusCode::BAD_GATEWAY, "searchfox request failed").into_response()
+        }
+    }
 }
 
 #[cfg(test)]

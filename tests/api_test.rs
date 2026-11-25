@@ -16,6 +16,7 @@ fn test_appstate_has_context_for_file_reading() {
         phabricator_available: false,
         phabricator_revisions: Vec::new(),
         own_revisions: Vec::new(),
+        searchfox_tree: lrv::searchfox::SEARCHFOX_TREE.to_owned(),
     };
 
     // This test ensures context is available in AppState
@@ -54,6 +55,7 @@ fn test_appstate_required_fields() {
         phabricator_available: false,
         phabricator_revisions: Vec::new(),
         own_revisions: Vec::new(),
+        searchfox_tree: lrv::searchfox::SEARCHFOX_TREE.to_owned(),
     };
 
     let (shutdown_tx, _rx) = tokio::sync::mpsc::channel(1);
@@ -81,6 +83,7 @@ fn test_appstate_required_fields() {
         pull_requests: Default::default(),
         store: None,
         publish: None,
+        searchfox: std::sync::Arc::new(lrv::searchfox::Searchfox::new().expect("searchfox client")),
     };
 
     // Verify context is accessible
