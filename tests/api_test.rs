@@ -67,7 +67,6 @@ fn test_appstate_required_fields() {
         agent_token: std::sync::Arc::from("test-token"),
         agent: lrv::agent::AgentChannel::new(lrv::agent::lease_from_env()),
         launcher: lrv::launch::AgentLauncher::new(),
-        raw_diffs: std::sync::Arc::new(Vec::new()),
         review_notes: std::sync::Arc::new(tokio::sync::Mutex::new(vec![])),
         shutdown_tx: std::sync::Arc::new(tokio::sync::Mutex::new(Some(shutdown_tx))),
         config: std::sync::Arc::new(tokio::sync::Mutex::new(config)),

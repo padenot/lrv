@@ -79,7 +79,8 @@ fn request_validation_and_provider_arguments() {
                     "--tools",
                     "Bash,Read,Grep,Glob,Write",
                     "--allowedTools",
-                    "Bash(lrv:*)",
+                    "Bash(lrv --listen:*)",
+                    "Bash(lrv --add-notes:*)",
                     "Read",
                     "Grep",
                     "Glob",
@@ -107,6 +108,8 @@ fn request_validation_and_provider_arguments() {
             );
             assert!(prompt.contains("commit_idx 1: file /tmp/commit-1.diff"));
             assert!(prompt.contains("Immediately run lrv --listen"));
+            assert!(prompt.contains("If your permissions allow it, read other files"));
+            assert!(prompt.contains("never a position in a diff file"));
             assert!(prompt.contains("--listen-timeout 540"));
             assert!(prompt
                 .contains("inside /tmp/lrv-agent-x (for example /tmp/lrv-agent-x/notes-1.json"));
@@ -161,4 +164,53 @@ fn stream_json_events_are_summarized() {
         serde_json::json!({"type":"assistant","message":{"content":[{"type":"text","text":long}]}}),
     );
     assert_eq!(out[0].chars().count(), 301);
+}
+
+#[test]
+fn diff_files_number_every_line_with_file_line_numbers() {
+    let diff = lrv::diff::parse_diff(
+        "commit 0123abcd\n\
+         Author: A U Thor <a@example.com>\n\
+         \n\
+         \x20   Subject\n\
+         \n\
+         diff --git a/a.rs b/a.rs\n\
+         index 1111111..2222222 100644\n\
+         --- a/a.rs\n\
+         +++ b/a.rs\n\
+         @@ -40,3 +40,4 @@ fn main() {\n\
+         \x20context\n\
+         -old\n\
+         +new\n\
+         +added\n\
+         \x20tail\n\
+         @@ -90,1 +91,1 @@\n\
+         -x\n\
+         +y\n\
+         diff --git a/b.rs b/c.rs\n\
+         similarity index 100%\n\
+         rename from b.rs\n\
+         rename to c.rs\n",
+    )
+    .unwrap();
+    let text = lrv::launch::numbered_diff(&diff);
+    assert!(text.starts_with("commit 0123abcd\n"), "{text}");
+    assert!(
+        text.contains(
+            "\nModified file a.rs:\n\
+             \x20 40   40: context\n\
+             \x20 41     : old\n\
+             \x20      41: new\n\
+             \x20      42: added\n\
+             \x20 42   43: tail\n\
+             \x20   ...\n\
+             \x20 90     : x\n\
+             \x20      91: y\n"
+        ),
+        "{text}"
+    );
+    assert!(
+        text.contains("\nRenamed file c.rs (from b.rs):\n"),
+        "{text}"
+    );
 }

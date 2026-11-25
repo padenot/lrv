@@ -26,8 +26,8 @@ use crate::output::OutputFormat;
 use crate::phabricator::{PhabricatorClient, Publisher, RevisionStatusInfo};
 use crate::server::{create_router, AppState};
 use crate::types::{
-    assign_note_ids, tag_single_commit_notes, CommentLine, DiffResponse, LineType, PrInfo,
-    ProjectContext, ReviewNote, Side,
+    assign_note_ids, tag_single_commit_notes, DiffResponse, PrInfo, ProjectContext, ReviewNote,
+    Side,
 };
 use lrv::repository;
 
@@ -269,12 +269,14 @@ struct Args {
     validate_review_notes: Option<String>,
 
     /// Add review notes to the running review for this repository (- reads stdin)
-    #[arg(long, value_name = "PATH|-")]
+    // Conflicts keep a launched agent, allowed only `lrv --add-notes` and `lrv --listen`
+    // prefixes, from also passing a diff source such as --cmd, which runs a shell.
+    #[arg(long, value_name = "PATH|-", conflicts_with_all = ["cmd", "file", "series"])]
     add_notes: Option<String>,
 
     /// Wait for discussion comments from the running review for this repository and
     /// print them (one listener per review: the read position is shared)
-    #[arg(long, conflicts_with = "add_notes")]
+    #[arg(long, conflicts_with_all = ["add_notes", "cmd", "file", "series"])]
     listen: bool,
 
     /// Seconds --listen waits before reporting that nothing happened
@@ -388,10 +390,7 @@ impl Drop for Spinner {
 
 // Fetch all diffs for a jj series in one subprocess call and parse them.
 // Returns diffs in revset order (oldest first, matching --reversed).
-fn get_series_diffs_jj(
-    revset: &str,
-    working_dir: &str,
-) -> Result<Vec<(crate::types::DiffResponse, String)>> {
+fn get_series_diffs_jj(revset: &str, working_dir: &str) -> Result<Vec<crate::types::DiffResponse>> {
     let template = concat!(
         r#"concat("Commit ID: ", commit_id, "\nAuthor: ", author.name(), "#,
         r#"" <", author.email(), "> (", author.timestamp().format("%Y-%m-%d %H:%M:%S"), ")\n\n", indent("    ", description), "\n\n")"#
@@ -427,10 +426,7 @@ fn get_series_diffs_jj(
             } else {
                 format!("Commit ID: {}", part)
             };
-            Ok((
-                diff::parse_diff(&chunk).context("Failed to parse commit diff")?,
-                chunk,
-            ))
+            diff::parse_diff(&chunk).context("Failed to parse commit diff")
         })
         .collect()
 }
@@ -691,11 +687,19 @@ async fn add_notes_to_review(path: &str) -> Result<()> {
         .await
         .with_context(|| format!("No running lrv found for {}", root.display()))?;
     check_review_auth(&response, &root, "--add-notes")?;
-    let result: serde_json::Value = response
-        .error_for_status()
-        .context("Running lrv rejected review notes")?
-        .json()
-        .await?;
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        anyhow::bail!(
+            "Running lrv rejected review notes ({status}){}",
+            if body.trim().is_empty() {
+                String::new()
+            } else {
+                format!(":\n{}", body.trim())
+            }
+        );
+    }
+    let result: serde_json::Value = response.json().await?;
     println!("{}", serde_json::to_string(&result)?);
     Ok(())
 }
@@ -953,32 +957,13 @@ fn infer_review_note_side(
         return note.side;
     };
 
-    if line_exists_in_file(file, &note.line, Side::New) {
+    if file.shows_line(&note.line, Side::New) {
         return Side::New;
     }
-    if line_exists_in_file(file, &note.line, Side::Old) {
+    if file.shows_line(&note.line, Side::Old) {
         return Side::Old;
     }
     note.side
-}
-
-fn line_exists_in_file(file: &crate::types::FileDiff, line: &CommentLine, side: Side) -> bool {
-    let (start, end) = match line {
-        CommentLine::Single(line) => (*line, *line),
-        CommentLine::Range((start, end)) => (*start, *end),
-    };
-    (start..=end).all(|target| {
-        file.hunks.iter().any(|hunk| {
-            hunk.lines.iter().any(|line| match side {
-                Side::New => {
-                    !matches!(line.line_type, LineType::Delete) && line.new_line == Some(target)
-                }
-                Side::Old => {
-                    !matches!(line.line_type, LineType::Add) && line.old_line == Some(target)
-                }
-            })
-        })
-    })
 }
 
 fn failure_lines(failures: &[store::OpenFailure]) -> Vec<String> {
@@ -1177,7 +1162,7 @@ async fn main() -> Result<()> {
     let working_dir = project_context.working_directory.clone();
 
     // Parse diffs: series mode or single commit
-    let (diffs, raw_diffs, pre_old, pre_new, is_series) = if let Some(ref revset) = args.series {
+    let (diffs, pre_old, pre_new, is_series) = if let Some(ref revset) = args.series {
         if args.cmd.is_some() || args.file.is_some() {
             anyhow::bail!("--series cannot be combined with --cmd or --file");
         }
@@ -1202,8 +1187,7 @@ async fn main() -> Result<()> {
                 let wd = working_dir.clone();
                 handles.push(tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
                     let text = get_commit_diff_text(&id, &wd)?;
-                    let d = diff::parse_diff(&text)?;
-                    Ok((i, (d, text)))
+                    Ok((i, diff::parse_diff(&text)?))
                 }));
             }
             let mut parsed_indexed = Vec::with_capacity(commits.len());
@@ -1211,13 +1195,15 @@ async fn main() -> Result<()> {
                 parsed_indexed.push(h.await.context("task join")??);
             }
             parsed_indexed.sort_by_key(|(i, _)| *i);
-            parsed_indexed.into_iter().map(|(_, d)| d).collect()
+            parsed_indexed
+                .into_iter()
+                .map(|(_, d)| d)
+                .collect::<Vec<_>>()
         };
-        let (parsed, raw): (Vec<_>, Vec<_>) = parsed.into_iter().unzip();
         let spinner = Spinner::start("Precomputing file content");
         let (pre_old, pre_new) = server::precompute_series_content(&parsed, &working_dir).await;
         spinner.finish("Ready");
-        (parsed, raw, pre_old, pre_new, true)
+        (parsed, pre_old, pre_new, true)
     } else {
         // Get diff text from stdin, file, or command
         let cmd_for_revision = args.cmd.clone();
@@ -1268,7 +1254,7 @@ async fn main() -> Result<()> {
             return Ok(());
         }
 
-        (vec![diff], vec![diff_text], vec![], vec![], false)
+        (vec![diff], vec![], vec![], false)
     };
 
     project_context.own_revisions = vec![None; diffs.len()];
@@ -1489,7 +1475,6 @@ async fn main() -> Result<()> {
         agent_token: Arc::from(agent_token.clone()),
         agent: agent::AgentChannel::new(agent::lease_from_env()),
         launcher: lrv::launch::AgentLauncher::new(),
-        raw_diffs: Arc::new(raw_diffs),
         diffs: Arc::new(diffs),
         comments: Arc::new(Mutex::new(Vec::new())),
         overall_comment: Arc::new(Mutex::new(None)),

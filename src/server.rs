@@ -55,7 +55,6 @@ struct CommitQuery {
 #[derive(Clone)]
 pub struct AppState {
     pub diffs: Arc<Vec<DiffResponse>>,
-    pub raw_diffs: Arc<Vec<String>>,
     pub launcher: Arc<crate::launch::AgentLauncher>,
     pub comments: Arc<Mutex<Vec<Comment>>>,
     pub overall_comment: Arc<Mutex<Option<String>>>,
@@ -1663,13 +1662,10 @@ async fn launch_agent(
     }) {
         return (StatusCode::FORBIDDEN, "Untrusted Host header").into_response();
     }
-    match state.launcher.launch(
-        &req,
-        &state.context,
-        &state.raw_diffs,
-        &state.diffs,
-        state.agent.clone(),
-    ) {
+    match state
+        .launcher
+        .launch(&req, &state.context, &state.diffs, state.agent.clone())
+    {
         Ok(()) => (
             StatusCode::ACCEPTED,
             Json(serde_json::json!({"launch": "running"})),
@@ -1736,6 +1732,18 @@ async fn add_review_note(
         }
     }
     tag_single_commit_notes(&mut batch, state.is_series, state.diffs.len());
+    let errors: Vec<String> = batch
+        .iter()
+        .filter(|note| note.discussion_id.is_none())
+        .filter_map(|note| note_location_error(note, &state.diffs, state.is_series))
+        .collect();
+    if !errors.is_empty() {
+        let message = format!(
+            "These notes can't be placed in the review, so none were added:\n{}",
+            errors.join("\n")
+        );
+        return (StatusCode::BAD_REQUEST, message).into_response();
+    }
     assign_note_ids(&mut batch);
     let mut added = 0;
     for note in batch {

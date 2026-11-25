@@ -50,7 +50,6 @@ fn test_app_state_construction() {
         agent_token: Arc::from("test-token"),
         agent: lrv::agent::AgentChannel::new(lrv::agent::lease_from_env()),
         launcher: lrv::launch::AgentLauncher::new(),
-        raw_diffs: std::sync::Arc::new(Vec::new()),
         review_notes: Arc::new(Mutex::new(vec![])),
         shutdown_tx: Arc::new(Mutex::new(Some(shutdown_tx))),
         config: Arc::new(Mutex::new(config)),
@@ -112,7 +111,6 @@ fn test_create_router() {
         agent_token: Arc::from("test-token"),
         agent: lrv::agent::AgentChannel::new(lrv::agent::lease_from_env()),
         launcher: lrv::launch::AgentLauncher::new(),
-        raw_diffs: std::sync::Arc::new(Vec::new()),
         review_notes: Arc::new(Mutex::new(vec![])),
         shutdown_tx: Arc::new(Mutex::new(Some(shutdown_tx))),
         config: Arc::new(Mutex::new(config)),
@@ -133,9 +131,44 @@ fn test_create_router() {
     let _router = lrv::server::create_router(state, false);
 }
 
+/// A file whose first ten lines were all added.
+fn added_file(path: &str) -> lrv::types::FileDiff {
+    lrv::types::FileDiff {
+        path: path.to_string(),
+        old_path: None,
+        status: lrv::types::FileStatus::Added,
+        hunks: vec![lrv::types::Hunk {
+            header: "@@ -0,0 +1,10 @@".to_string(),
+            old_start: 0,
+            new_start: 1,
+            lines: (1..=10)
+                .map(|line| lrv::types::DiffLine {
+                    line_type: lrv::types::LineType::Add,
+                    content: format!("line {line}"),
+                    old_line: None,
+                    new_line: Some(line),
+                })
+                .collect(),
+        }],
+        old_blob: None,
+        new_blob: None,
+        is_binary: false,
+    }
+}
+
 fn review_note_state() -> lrv::server::AppState {
     let diff_data = lrv::types::DiffResponse {
-        files: vec![],
+        files: [
+            "a",
+            "a.rs",
+            "ordinary.rs",
+            "root.rs",
+            "src/lib.rs",
+            "wrong.rs",
+        ]
+        .into_iter()
+        .map(added_file)
+        .collect(),
         stats: lrv::types::DiffStats {
             files_changed: 0,
             additions: 0,
@@ -175,7 +208,6 @@ fn review_note_state() -> lrv::server::AppState {
         agent_token: Arc::from("test-token"),
         agent: lrv::agent::AgentChannel::new(lrv::agent::lease_from_env()),
         launcher: lrv::launch::AgentLauncher::new(),
-        raw_diffs: std::sync::Arc::new(Vec::new()),
         review_notes: Arc::new(Mutex::new(vec![])),
         shutdown_tx: Arc::new(Mutex::new(Some(shutdown_tx))),
         config: Arc::new(Mutex::new(config)),
@@ -1119,4 +1151,29 @@ async fn test_request_review_api() {
         app.oneshot(request(0)).await.unwrap().status(),
         StatusCode::FORBIDDEN
     );
+}
+
+#[tokio::test]
+async fn test_review_notes_on_files_outside_the_diff_are_rejected_with_a_reason() {
+    let state = review_note_state();
+    let notes = state.review_notes.clone();
+    let app = lrv::server::create_router(state, false);
+    let response = app
+        .oneshot(reply_request(serde_json::json!([
+            {"file": "src/lib.rs", "line": 3, "side": "new", "body": "in a hunk"},
+            {"file": "src/lib.rs", "line": 40, "side": "new", "body": "past the hunk"},
+            {"file": "missing.rs", "line": 1, "side": "new", "body": "not in the diff"},
+            {"file": "(commit)", "line": 1, "side": "new", "body": "commit-level"}
+        ])))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let bytes = axum::body::to_bytes(response.into_body(), 65536)
+        .await
+        .unwrap();
+    let message = String::from_utf8(bytes.to_vec()).unwrap();
+    assert!(message.contains("missing.rs:1: file is not in the diff of commit 0"));
+    assert!(!message.contains("src/lib.rs"));
+    assert!(!message.contains("(commit)"));
+    assert!(notes.lock().await.is_empty());
 }
