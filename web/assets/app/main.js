@@ -15033,11 +15033,30 @@ var StackedViewMethods = class {
 };
 //#endregion
 //#region web/src/searchfox-methods.ts
+let pendingLookups = 0;
+let busyIndicator = null;
+/** Shows a progress cursor and a "Searching" pill while any lookup waits on searchfox. */
+function setSearchfoxBusy(busy) {
+	pendingLookups += busy ? 1 : -1;
+	const active = pendingLookups > 0;
+	document.body.classList.toggle("searchfox-busy", active);
+	if (active && !busyIndicator) {
+		busyIndicator = el("div", {
+			className: "searchfox-busy-indicator",
+			attrs: { role: "status" }
+		}, [el("span", { className: "searchfox-spinner" }), el("span", { text: "Searching searchfox…" })]);
+		document.body.appendChild(busyIndicator);
+	} else if (!active) {
+		busyIndicator?.remove();
+		busyIndicator = null;
+	}
+}
 var SearchfoxMethods = class {
 	async searchfoxLookup(target, mode, newTab) {
 		const tree = this.context.searchfox_tree;
 		if (!this.config.searchfox || !tree) return;
 		let panel = null;
+		setSearchfoxBusy(true);
 		try {
 			const resolved = await resolveSearchfox(target);
 			if (newTab) {
@@ -15046,7 +15065,7 @@ var SearchfoxMethods = class {
 			}
 			if (mode === "uses") {
 				panel = this.openSearchfoxPanel(resolved, tree);
-				this.setSearchfoxStatus(panel.body, "Searching searchfox.org…");
+				this.setSearchfoxStatus(panel.body, "Searching searchfox.org…", "busy");
 			}
 			const results = await searchSearchfox(resolved.query);
 			if (mode === "definition") {
@@ -15065,12 +15084,15 @@ var SearchfoxMethods = class {
 				pretty: null,
 				symbols: []
 			}, tree);
-			this.setSearchfoxStatus(panel.body, error.message, true);
+			this.setSearchfoxStatus(panel.body, error.message, "error");
+		} finally {
+			setSearchfoxBusy(false);
 		}
 	}
 	openSearchfoxPanel(resolved, tree) {
 		const link = el("a", {
-			text: "Open on searchfox",
+			className: "btn-secondary searchfox-open-link",
+			text: "Open on searchfox ↗",
 			attrs: {
 				href: searchfoxSearchUrl(tree, resolved.query),
 				target: "_blank",
@@ -15087,11 +15109,8 @@ var SearchfoxMethods = class {
 			close
 		};
 	}
-	setSearchfoxStatus(body, message, error = false) {
-		clearEl(body).appendChild(el("p", {
-			className: error ? "searchfox-status searchfox-error" : "searchfox-status",
-			text: message
-		}));
+	setSearchfoxStatus(body, message, kind) {
+		clearEl(body).appendChild(el("p", { className: kind === "error" ? "searchfox-status searchfox-error" : "searchfox-status" }, [kind === "busy" ? el("span", { className: "searchfox-spinner" }) : null, message]));
 	}
 	renderSearchfoxResults(body, tree, results, close) {
 		clearEl(body);

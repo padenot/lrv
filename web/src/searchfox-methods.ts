@@ -14,6 +14,30 @@ import type { AppContext } from './types/app';
 
 type SearchfoxPanel = { body: HTMLDivElement; close: () => void };
 
+let pendingLookups = 0;
+let busyIndicator: HTMLDivElement | null = null;
+
+/** Shows a progress cursor and a "Searching" pill while any lookup waits on searchfox. */
+function setSearchfoxBusy(busy: boolean) {
+  pendingLookups += busy ? 1 : -1;
+  const active = pendingLookups > 0;
+  document.body.classList.toggle('searchfox-busy', active);
+  if (active && !busyIndicator) {
+    busyIndicator = el(
+      'div',
+      { className: 'searchfox-busy-indicator', attrs: { role: 'status' } },
+      [
+        el('span', { className: 'searchfox-spinner' }),
+        el('span', { text: 'Searching searchfox…' }),
+      ],
+    );
+    document.body.appendChild(busyIndicator);
+  } else if (!active) {
+    busyIndicator?.remove();
+    busyIndicator = null;
+  }
+}
+
 export class SearchfoxMethods {
   declare context: AppContext['context'];
   declare config: AppContext['config'];
@@ -33,6 +57,7 @@ export class SearchfoxMethods {
       return;
     }
     let panel: SearchfoxPanel | null = null;
+    setSearchfoxBusy(true);
     try {
       const resolved = await resolveSearchfox(target);
       if (newTab) {
@@ -41,7 +66,7 @@ export class SearchfoxMethods {
       }
       if (mode === 'uses') {
         panel = this.openSearchfoxPanel(resolved, tree);
-        this.setSearchfoxStatus(panel.body, 'Searching searchfox.org…');
+        this.setSearchfoxStatus(panel.body, 'Searching searchfox.org…', 'busy');
       }
       const results = await searchSearchfox(resolved.query);
       if (mode === 'definition') {
@@ -56,13 +81,16 @@ export class SearchfoxMethods {
       this.renderSearchfoxResults(panel.body, tree, results, panel.close);
     } catch (error) {
       panel ??= this.openSearchfoxPanel({ query: target.word, pretty: null, symbols: [] }, tree);
-      this.setSearchfoxStatus(panel.body, (error as Error).message, true);
+      this.setSearchfoxStatus(panel.body, (error as Error).message, 'error');
+    } finally {
+      setSearchfoxBusy(false);
     }
   }
 
   private openSearchfoxPanel(resolved: SearchfoxResolved, tree: string): SearchfoxPanel {
     const link = el('a', {
-      text: 'Open on searchfox',
+      className: 'btn-secondary searchfox-open-link',
+      text: 'Open on searchfox ↗',
       attrs: {
         href: searchfoxSearchUrl(tree, resolved.query),
         target: '_blank',
@@ -77,12 +105,13 @@ export class SearchfoxMethods {
     return { body, close };
   }
 
-  private setSearchfoxStatus(body: HTMLDivElement, message: string, error = false) {
+  private setSearchfoxStatus(body: HTMLDivElement, message: string, kind?: 'busy' | 'error') {
     clearEl(body).appendChild(
-      el('p', {
-        className: error ? 'searchfox-status searchfox-error' : 'searchfox-status',
-        text: message,
-      }),
+      el(
+        'p',
+        { className: kind === 'error' ? 'searchfox-status searchfox-error' : 'searchfox-status' },
+        [kind === 'busy' ? el('span', { className: 'searchfox-spinner' }) : null, message],
+      ),
     );
   }
 

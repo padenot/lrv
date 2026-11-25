@@ -305,4 +305,33 @@ test.describe('searchfox code navigation', () => {
     expect(mock.searchQueries).toEqual([]);
     await expect(page.locator('.submit-modal-overlay')).toHaveCount(0);
   });
+
+  test('shows a progress indicator while waiting on searchfox', async ({ page }) => {
+    await isolateConfig(page, { searchfox: true });
+    await mockSearchfox(page);
+    let releaseSearch!: () => void;
+    const searchReleased = new Promise<void>((resolve) => (releaseSearch = resolve));
+    await page.route('**/api/searchfox/search?*', async (route) => {
+      await searchReleased;
+      await route.fulfill({ json: SEARCH_RESULTS });
+    });
+    const started = await startReview(root);
+    child = started.child;
+    await page.goto(started.url);
+    await expect(page.locator('#preloader-overlay')).toHaveCount(0);
+    await expect(
+      page.locator('#editor-container:not(.diff-loading) .editor.modified .view-lines'),
+    ).toContainText('Disconnect');
+
+    const point = await modifiedClickPoint(page, 2, 10);
+    await page.keyboard.down(modifier);
+    await page.mouse.click(point.x, point.y);
+    await page.keyboard.up(modifier);
+
+    await expect(page.locator('.searchfox-busy-indicator')).toBeVisible();
+    await expect(page.locator('body')).toHaveClass(/searchfox-busy/);
+    releaseSearch();
+    await expect(page.locator('.searchfox-busy-indicator')).toHaveCount(0);
+    await expect(page.locator('body')).not.toHaveClass(/searchfox-busy/);
+  });
 });
