@@ -387,7 +387,7 @@ test.describe('searchfox code navigation', () => {
       await expect(page.locator('#preloader-overlay')).toHaveCount(0);
       await expect(page.locator('.stacked-code-view')).toBeVisible();
       const stackedVoid = page
-        .locator('.stacked-code-view [data-line] span', { hasText: /^void$/ })
+        .locator('.stacked-code-view [data-line] span', { hasText: /void$/ })
         .first();
       await expect(stackedVoid).toBeAttached();
 
@@ -402,7 +402,8 @@ test.describe('searchfox code navigation', () => {
       });
 
       const resultLine = page.locator('.searchfox-line').nth(3);
-      const panelVoid = resultLine.locator('.searchfox-code span', { hasText: /^void$/ });
+      // The panel's line is indented, so pierre merges the spaces into the keyword's token.
+      const panelVoid = resultLine.locator('.searchfox-code span', { hasText: /void$/ });
       await expect(panelVoid).toBeAttached();
       const colorOf = (locator: Locator) =>
         locator.evaluate((node) => getComputedStyle(node).color);

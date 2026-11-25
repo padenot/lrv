@@ -4,6 +4,8 @@ import type {
   CodeViewOptions,
 } from '../../node_modules/@pierre/diffs/dist/components/CodeView.js';
 import type { OnDiffLineClickProps } from '../../node_modules/@pierre/diffs/dist/managers/InteractionManager.js';
+import type { SetupWorkerPoolProps } from '../../node_modules/@pierre/diffs/dist/worker/getOrCreateWorkerPoolSingleton.js';
+import type { WorkerPoolManager } from '../../node_modules/@pierre/diffs/dist/worker/WorkerPoolManager.js';
 import type {
   AnnotationSide,
   CodeViewDiffItem,
@@ -50,8 +52,8 @@ type StackedDraft = {
   textarea?: HTMLTextAreaElement;
 };
 
-export const DIFFS_THEME = { dark: 'pierre-dark', light: 'pierre-light' } as const;
-export const DIFFS_TOKENIZE_MAX_LINE_LENGTH = 1000;
+const DIFFS_THEME = { dark: 'pierre-dark', light: 'pierre-light' } as const;
+const DIFFS_TOKENIZE_MAX_LINE_LENGTH = 1000;
 
 export function themeTypeFor(themeName: string): 'light' | 'dark' {
   const base = window.UI_THEME_DEFS?.[themeName]?.base ?? themeName;
@@ -88,6 +90,26 @@ function loadDiffsRuntime(): Promise<DiffsRuntime> {
 
 function createDiffsWorker() {
   return new Worker('/assets/app/diffs-worker.js', { type: 'module' });
+}
+
+// One singleton pool for the whole app: the stacked view and the searchfox panel both use it.
+const DIFFS_POOL_SETUP: SetupWorkerPoolProps = {
+  poolOptions: {
+    workerFactory: createDiffsWorker,
+    poolSize: Math.min(Math.max(navigator.hardwareConcurrency ?? 4, 2), 6),
+    totalASTLRUCacheSize: 64,
+  },
+  highlighterOptions: {
+    theme: DIFFS_THEME,
+    lineDiffType: 'word-alt',
+    maxLineDiffLength: 1000,
+    tokenizeMaxLineLength: DIFFS_TOKENIZE_MAX_LINE_LENGTH,
+  },
+};
+
+export async function getStackedWorkerPool(): Promise<WorkerPoolManager> {
+  const { getOrCreateWorkerPoolSingleton } = await loadDiffsRuntime();
+  return getOrCreateWorkerPoolSingleton(DIFFS_POOL_SETUP);
 }
 
 export class StackedViewMethods {
@@ -344,19 +366,7 @@ export class StackedViewMethods {
       return;
     }
 
-    const workerPool = getOrCreateWorkerPoolSingleton({
-      poolOptions: {
-        workerFactory: createDiffsWorker,
-        poolSize: Math.min(Math.max(navigator.hardwareConcurrency ?? 4, 2), 6),
-        totalASTLRUCacheSize: 64,
-      },
-      highlighterOptions: {
-        theme: DIFFS_THEME,
-        lineDiffType: 'word-alt',
-        maxLineDiffLength: 1000,
-        tokenizeMaxLineLength: DIFFS_TOKENIZE_MAX_LINE_LENGTH,
-      },
-    });
+    const workerPool = getOrCreateWorkerPoolSingleton(DIFFS_POOL_SETUP);
     const options: CodeViewOptions<StackedAnnotation, undefined> = {
       diffStyle: this.stackedDiffStyle(),
       overflow: this.config.word_wrap ? 'wrap' : 'scroll',

@@ -14233,10 +14233,10 @@ function themeTypeFor(themeName) {
 let diffsRuntimePromise = null;
 function loadDiffsRuntime() {
 	diffsRuntimePromise ??= Promise.all([
-		import("./chunks/stacked-diff-ClUEWNN0.js").then((n) => n.Tt),
-		import("./chunks/stacked-diff-ClUEWNN0.js").then((n) => n.Dt),
-		import("./chunks/stacked-diff-ClUEWNN0.js").then((n) => n.Et),
-		import("./chunks/stacked-diff-ClUEWNN0.js").then((n) => n.St)
+		import("./chunks/stacked-diff-D2_0u14V.js").then((n) => n.wt),
+		import("./chunks/stacked-diff-D2_0u14V.js").then((n) => n.Et),
+		import("./chunks/stacked-diff-D2_0u14V.js").then((n) => n.Tt),
+		import("./chunks/stacked-diff-D2_0u14V.js").then((n) => n.St)
 	]).then(([codeView, patchParser, fileParser, workerPool]) => ({
 		CodeView: codeView.CodeView,
 		parsePatchFiles: patchParser.parsePatchFiles,
@@ -14247,6 +14247,23 @@ function loadDiffsRuntime() {
 }
 function createDiffsWorker() {
 	return new Worker("/assets/app/diffs-worker.js", { type: "module" });
+}
+const DIFFS_POOL_SETUP = {
+	poolOptions: {
+		workerFactory: createDiffsWorker,
+		poolSize: Math.min(Math.max(navigator.hardwareConcurrency ?? 4, 2), 6),
+		totalASTLRUCacheSize: 64
+	},
+	highlighterOptions: {
+		theme: DIFFS_THEME,
+		lineDiffType: "word-alt",
+		maxLineDiffLength: 1e3,
+		tokenizeMaxLineLength: DIFFS_TOKENIZE_MAX_LINE_LENGTH
+	}
+};
+async function getStackedWorkerPool() {
+	const { getOrCreateWorkerPoolSingleton } = await loadDiffsRuntime();
+	return getOrCreateWorkerPoolSingleton(DIFFS_POOL_SETUP);
 }
 var StackedViewMethods = class {
 	stackedCodeView;
@@ -14412,19 +14429,7 @@ var StackedViewMethods = class {
 			}));
 			return;
 		}
-		const workerPool = getOrCreateWorkerPoolSingleton({
-			poolOptions: {
-				workerFactory: createDiffsWorker,
-				poolSize: Math.min(Math.max(navigator.hardwareConcurrency ?? 4, 2), 6),
-				totalASTLRUCacheSize: 64
-			},
-			highlighterOptions: {
-				theme: DIFFS_THEME,
-				lineDiffType: "word-alt",
-				maxLineDiffLength: 1e3,
-				tokenizeMaxLineLength: DIFFS_TOKENIZE_MAX_LINE_LENGTH
-			}
-		});
+		const workerPool = getOrCreateWorkerPoolSingleton(DIFFS_POOL_SETUP);
 		const options = {
 			diffStyle: this.stackedDiffStyle(),
 			overflow: this.config.word_wrap ? "wrap" : "scroll",
@@ -15155,13 +15160,17 @@ var SearchfoxMethods = class {
 				text: "in review",
 				attrs: { title: "Part of this review" }
 			}) : null]));
+			const rows = [];
 			for (const line of file.lines) {
 				const code = el("code", {
 					className: "searchfox-code",
 					text: line.line
 				});
 				markRange(code, line.bounds);
-				this.colorizeSearchfoxLine(code, file.path, line.line).then(() => markRange(code, line.bounds));
+				rows.push({
+					line,
+					code
+				});
 				const row = el("button", {
 					className: "searchfox-line",
 					attrs: { type: "button" }
@@ -15182,19 +15191,42 @@ var SearchfoxMethods = class {
 				});
 				section.appendChild(row);
 			}
+			this.colorizeSearchfoxLines(file.path, rows);
 		}
 		return section;
 	}
-	/** Colours a result line the way the view it was opened from colours code. */
-	async colorizeSearchfoxLine(code, path, text) {
+	/**
+	* Colours a file's result lines like the view they were opened from. The lines stay plain
+	* until the colours arrive; the match marks are reapplied on top.
+	*/
+	async colorizeSearchfoxLines(path, rows) {
 		if (this.isStacked) {
-			code.classList.add("searchfox-pierre");
-			code.style.colorScheme = themeTypeFor(this.config.color_scheme);
-			code.replaceChildren(...await pierreLineSpans(path, text));
+			const pool = await getStackedWorkerPool();
+			const contents = rows.map(({ line }) => line.line).join("\n");
+			const file = {
+				name: path,
+				contents,
+				cacheKey: `searchfox:${path}:${contents}`
+			};
+			await pool.primeFileHighlightCache(file);
+			const highlighted = pool.getFileResultCache(file)?.result.code;
+			if (!highlighted) return;
+			const colorScheme = themeTypeFor(this.config.color_scheme);
+			rows.forEach(({ line, code }, index) => {
+				const hast = highlighted[index];
+				if (hast?.type !== "element") return;
+				code.classList.add("searchfox-pierre");
+				code.style.colorScheme = colorScheme;
+				code.replaceChildren(...hastToDom(hast.children));
+				markRange(code, line.bounds);
+			});
 			return;
 		}
-		code.innerHTML = await monaco.editor.colorize(text, detectLanguageFromPathAndContent(path), {});
-		code.querySelectorAll("br").forEach((br) => br.remove());
+		await Promise.all(rows.map(async ({ line, code }) => {
+			code.innerHTML = await monaco.editor.colorize(line.line, detectLanguageFromPathAndContent(path), {});
+			code.querySelectorAll("br").forEach((br) => br.remove());
+			markRange(code, line.bounds);
+		}));
 	}
 	goToSearchfoxHit(tree, path, lno) {
 		const index = this.files.findIndex((file) => file.path === path);
@@ -15210,22 +15242,17 @@ function searchfoxDefinitions(results) {
 		lno: line.lno
 	}))));
 }
-/** Token spans for one result line, highlighted like the stacked view highlights `path`. */
-async function pierreLineSpans(path, text) {
-	const { createSpanFromToken, formatCSSVariablePrefix, getFiletypeFromFileName, getSharedHighlighter } = await import("./chunks/stacked-diff-ClUEWNN0.js").then((n) => n.Ct);
-	const lang = getFiletypeFromFileName(path);
-	const { tokens } = (await getSharedHighlighter({
-		themes: Object.values(DIFFS_THEME),
-		langs: [lang]
-	})).codeToTokens(text, {
-		lang,
-		themes: DIFFS_THEME,
-		defaultColor: false,
-		cssVariablePrefix: formatCSSVariablePrefix("token"),
-		tokenizeMaxLineLength: DIFFS_TOKENIZE_MAX_LINE_LENGTH,
-		tokenizeTimeLimit: 0
+/** DOM for pierre's highlighted hast: token spans carrying their style, and text. */
+function hastToDom(nodes) {
+	return nodes.flatMap((node) => {
+		if (node.type === "text") return [document.createTextNode(node.value)];
+		if (node.type !== "element") return [];
+		const span = document.createElement("span");
+		const style = node.properties.style;
+		if (typeof style === "string") span.setAttribute("style", style);
+		span.append(...hastToDom(node.children));
+		return [span];
 	});
-	return tokens.flat().map((token) => createSpanFromToken(token, false));
 }
 /** Wraps UTF-16 offsets `bounds` of `root`'s text in <mark>s, splitting text nodes as needed. */
 function markRange(root, bounds) {

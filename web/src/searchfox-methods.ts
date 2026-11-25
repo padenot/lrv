@@ -1,7 +1,8 @@
 import { el } from './dom';
 import { openModal } from './modal';
 import { detectLanguageFromPathAndContent } from './language';
-import { DIFFS_THEME, DIFFS_TOKENIZE_MAX_LINE_LENGTH, themeTypeFor } from './stacked-view-methods';
+import type { RenderFileResult } from '../../node_modules/@pierre/diffs/dist/types.js';
+import { getStackedWorkerPool, themeTypeFor } from './stacked-view-methods';
 import {
   resolveSearchfox,
   searchSearchfox,
@@ -165,12 +166,11 @@ export class SearchfoxMethods {
             : null,
         ]),
       );
+      const rows: SearchfoxRow[] = [];
       for (const line of file.lines) {
         const code = el('code', { className: 'searchfox-code', text: line.line });
         markRange(code, line.bounds);
-        void this.colorizeSearchfoxLine(code, file.path, line.line).then(() =>
-          markRange(code, line.bounds),
-        );
+        rows.push({ line, code });
         const row = el('button', { className: 'searchfox-line', attrs: { type: 'button' } }, [
           el('span', { className: 'searchfox-lno', text: line.lno }),
           code,
@@ -182,22 +182,53 @@ export class SearchfoxMethods {
         });
         section.appendChild(row);
       }
+      void this.colorizeSearchfoxLines(file.path, rows);
     }
     return section;
   }
 
-  /** Colours a result line the way the view it was opened from colours code. */
-  private async colorizeSearchfoxLine(code: HTMLElement, path: string, text: string) {
+  /**
+   * Colours a file's result lines like the view they were opened from. The lines stay plain
+   * until the colours arrive; the match marks are reapplied on top.
+   */
+  private async colorizeSearchfoxLines(path: string, rows: SearchfoxRow[]) {
     if (this.isStacked) {
-      code.classList.add('searchfox-pierre');
-      code.style.colorScheme = themeTypeFor(this.config.color_scheme);
-      code.replaceChildren(...(await pierreLineSpans(path, text)));
+      const pool = await getStackedWorkerPool();
+      // One file so the grammar sees the lines in order; the cache key holds the contents.
+      const contents = rows.map(({ line }) => line.line).join('\n');
+      const file = { name: path, contents, cacheKey: `searchfox:${path}:${contents}` };
+      await pool.primeFileHighlightCache(file);
+      const highlighted = pool.getFileResultCache(file)?.result.code;
+      // Plain-text files are not highlighted, so their lines keep the text they have.
+      if (!highlighted) {
+        return;
+      }
+      const colorScheme = themeTypeFor(this.config.color_scheme);
+      rows.forEach(({ line, code }, index) => {
+        const hast = highlighted[index];
+        if (hast?.type !== 'element') {
+          return;
+        }
+        code.classList.add('searchfox-pierre');
+        code.style.colorScheme = colorScheme;
+        code.replaceChildren(...hastToDom(hast.children));
+        markRange(code, line.bounds);
+      });
       return;
     }
-    const html = await monaco.editor.colorize(text, detectLanguageFromPathAndContent(path), {});
-    // Monaco escapes the text; its markup is token spans and a trailing <br>.
-    code.innerHTML = html;
-    code.querySelectorAll('br').forEach((br) => br.remove());
+    await Promise.all(
+      rows.map(async ({ line, code }) => {
+        const html = await monaco.editor.colorize(
+          line.line,
+          detectLanguageFromPathAndContent(path),
+          {},
+        );
+        // Monaco escapes the text; its markup is token spans and a trailing <br>.
+        code.innerHTML = html;
+        code.querySelectorAll('br').forEach((br) => br.remove());
+        markRange(code, line.bounds);
+      }),
+    );
   }
 
   private goToSearchfoxHit(tree: string, path: string, lno: number) {
@@ -221,29 +252,27 @@ function searchfoxDefinitions(results: SearchfoxResults) {
     );
 }
 
-/** Token spans for one result line, highlighted like the stacked view highlights `path`. */
-async function pierreLineSpans(path: string, text: string): Promise<HTMLSpanElement[]> {
-  const {
-    createSpanFromToken,
-    formatCSSVariablePrefix,
-    getFiletypeFromFileName,
-    getSharedHighlighter,
-  } = await import('../../node_modules/@pierre/diffs/dist/index.js');
-  const lang = getFiletypeFromFileName(path);
-  // Shares the highlighter the stacked view's worker pool already loaded on the main thread.
-  const highlighter = await getSharedHighlighter({
-    themes: Object.values(DIFFS_THEME),
-    langs: [lang],
+type SearchfoxLine = SearchfoxGroup['files'][number]['lines'][number];
+type SearchfoxRow = { line: SearchfoxLine; code: HTMLElement };
+type HastContent = RenderFileResult['result']['code'][number];
+
+/** DOM for pierre's highlighted hast: token spans carrying their style, and text. */
+function hastToDom(nodes: HastContent[]): Node[] {
+  return nodes.flatMap((node): Node[] => {
+    if (node.type === 'text') {
+      return [document.createTextNode(node.value)];
+    }
+    if (node.type !== 'element') {
+      return [];
+    }
+    const span = document.createElement('span');
+    const style = node.properties.style;
+    if (typeof style === 'string') {
+      span.setAttribute('style', style);
+    }
+    span.append(...hastToDom(node.children));
+    return [span];
   });
-  const { tokens } = highlighter.codeToTokens(text, {
-    lang,
-    themes: DIFFS_THEME,
-    defaultColor: false,
-    cssVariablePrefix: formatCSSVariablePrefix('token'),
-    tokenizeMaxLineLength: DIFFS_TOKENIZE_MAX_LINE_LENGTH,
-    tokenizeTimeLimit: 0,
-  });
-  return tokens.flat().map((token) => createSpanFromToken(token, false));
 }
 
 /** Wraps UTF-16 offsets `bounds` of `root`'s text in <mark>s, splitting text nodes as needed. */
