@@ -30,7 +30,8 @@ export class NavigationMethods {
   declare focusedLineDecorationsOld: AppContext['focusedLineDecorationsOld'];
   declare loadFile: (index: number) => Promise<void>;
   declare scrollToFileInStacked: AppContext['scrollToFileInStacked'];
-  declare showStackedFocus: (focus: FocusedLine, align: 'nearest' | 'center') => void;
+  declare showStackedFocus: (path: string, focus: FocusedLine, align: 'nearest' | 'center') => void;
+  declare stackedFocusFileIndex: () => number | null;
   declare clearStackedFocus: () => void;
   declare openStackedDraft: (file: string, lineNumber: number, side: Side) => void;
   declare updateStackedDiffStyle: () => void;
@@ -43,6 +44,22 @@ export class NavigationMethods {
 
   private getCurrentFile() {
     return this.files[this.currentFileIndex]!;
+  }
+
+  /**
+   * The file keyboard navigation acts on. In the stacked view that is the focused line's file
+   * while the reader is still at it; the file on screen otherwise, which can differ.
+   */
+  private navigationFileIndex() {
+    if (this.isStacked) {
+      const focused = this.stackedFocusFileIndex();
+      if (focused !== null) {
+        return focused;
+      }
+      // Scrolled away from the focus: start over in the file on screen.
+      this.clearStackedFocus();
+    }
+    return this.currentFileIndex;
   }
 
   /** The file's changed ranges. The stacked view never loads a file, so they may not exist yet. */
@@ -278,7 +295,8 @@ export class NavigationMethods {
       return;
     }
     void this.scrollToFileInStacked(index).then(() => {
-      if (!this.isStacked || this.currentFileIndex !== index) {
+      // The scroll sync may name another file current; the focus keeps its own.
+      if (!this.isStacked) {
         return;
       }
       const file = this.files[index]!;
@@ -295,6 +313,7 @@ export class NavigationMethods {
       // The file's top is already in view; centring a line near it would move the file header
       // out of view and make the scroll sync pick the previous file.
       this.showStackedFocus(
+        file.path,
         at === 'last' ? { side: hunk.side, line: hunk.end } : hunkStartFocus(hunk),
         'nearest',
       );
@@ -311,19 +330,19 @@ export class NavigationMethods {
 
   /** Shift+J/K: the adjacent hunk, or the adjacent file past the file's first or last hunk. */
   private jumpHunk(delta: 1 | -1) {
-    const file = this.getCurrentFile();
+    const fileIndex = this.navigationFileIndex();
+    const file = this.files[fileIndex]!;
     const step = stepHunk(this.hunksOf(file), this.currentHunkIndex[file.path] ?? 0, delta);
     if (!step) {
-      if (delta > 0) {
-        this.nextFile();
-      } else {
-        this.previousFile();
+      const next = fileIndex + delta;
+      if (next >= 0 && next < this.files.length) {
+        this.openFile(next);
       }
       return;
     }
     this.currentHunkIndex[file.path] = step.hunkIndex;
     if (this.isStacked) {
-      this.showStackedFocus(step.focus, 'center');
+      this.showStackedFocus(file.path, step.focus, 'center');
     } else {
       this.jumpToHunk(step.hunkIndex);
     }
@@ -437,12 +456,13 @@ export class NavigationMethods {
   }
 
   moveLine(delta: 1 | -1) {
-    const file = this.getCurrentFile();
+    const fileIndex = this.navigationFileIndex();
+    const file = this.files[fileIndex]!;
     const hunkIndex = this.currentHunkIndex[file.path] ?? 0;
     const step = stepFocus(this.hunksOf(file), hunkIndex, this.currentFocusedLine, delta);
     if (!step) {
       // Past a file's first or last line, the stacked view continues into the neighbouring file.
-      const next = this.currentFileIndex + delta;
+      const next = fileIndex + delta;
       if (this.isStacked && next >= 0 && next < this.files.length) {
         this.openFile(next, delta > 0 ? 'first' : 'last');
       }
@@ -451,7 +471,7 @@ export class NavigationMethods {
     this.currentHunkIndex[file.path] = step.hunkIndex;
     const hunkChanged = step.hunkIndex !== hunkIndex;
     if (this.isStacked) {
-      this.showStackedFocus(step.focus, hunkChanged ? 'center' : 'nearest');
+      this.showStackedFocus(file.path, step.focus, hunkChanged ? 'center' : 'nearest');
       return;
     }
     if (hunkChanged) {
@@ -462,11 +482,12 @@ export class NavigationMethods {
 
   /** h/l: focus the changed line opposite the focused one, on `side`. */
   moveSide(side: Side) {
+    // Resolving the file first drops a focus the reader has scrolled away from.
+    const file = this.files[this.navigationFileIndex()]!;
     const focus = this.currentFocusedLine;
     if (!focus || focus.side === side) {
       return;
     }
-    const file = this.getCurrentFile();
     const target = counterpartLine(file.hunks, focus);
     if (!target) {
       return;
@@ -478,7 +499,7 @@ export class NavigationMethods {
       this.currentHunkIndex[file.path] = hunkIndex;
     }
     if (this.isStacked) {
-      this.showStackedFocus(target, 'nearest');
+      this.showStackedFocus(file.path, target, 'nearest');
       return;
     }
     this.setFocusedLine(target.side, target.line, true);
@@ -501,7 +522,7 @@ export class NavigationMethods {
   }
 
   openCommentOnCurrentFocus() {
-    const file = this.getCurrentFile();
+    const file = this.files[this.navigationFileIndex()]!;
     const hunk = this.hunksOf(file)[this.currentHunkIndex[file.path] ?? 0];
     // Without a focused line, comment on the first line of the current hunk.
     const target = this.currentFocusedLine ?? (hunk ? hunkStartFocus(hunk) : null);

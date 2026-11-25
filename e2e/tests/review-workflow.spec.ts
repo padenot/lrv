@@ -2401,6 +2401,63 @@ test.describe('Review Workflow E2E', () => {
       await expectStackedFocus(page, 20, 'old');
     });
 
+    test('holding j walks every changed line of every file, in order, without looping', async ({
+      page,
+    }) => {
+      if (!testRepoPath) {
+        throw new Error('Test repo not initialized');
+      }
+      // Long files with changes far from their tops, so that focusing them scrolls each file's
+      // header out of view (the scroll sync then names a neighbouring file current).
+      const long = (name: string) => Array.from({ length: 300 }, (_, i) => `${name} ${i + 1}`);
+      const first = long('first');
+      const second = long('second');
+      fs.writeFileSync(path.join(testRepoPath, 'a-first.txt'), first.join('\n') + '\n');
+      fs.writeFileSync(path.join(testRepoPath, 'b-second.txt'), second.join('\n') + '\n');
+      await execAsync(
+        `cd "${testRepoPath}" && git add a-first.txt b-second.txt && git commit -q -m long`,
+      );
+      first[279] = 'first changed';
+      second[249] = 'second changed';
+      fs.writeFileSync(path.join(testRepoPath, 'a-first.txt'), first.join('\n') + '\n');
+      fs.writeFileSync(path.join(testRepoPath, 'b-second.txt'), second.join('\n') + '\n');
+      await stopServer();
+      await startServer();
+      await page.setViewportSize({ width: 1200, height: 600 });
+      await openStackedView(page);
+      await page.locator('.header .wordmark').click();
+
+      const visited: string[] = [];
+      for (let i = 0; i < 30; i++) {
+        await page.keyboard.press('j');
+        const row = focusedStackedRow(page);
+        await expect(row).toHaveCount(1);
+        const file = await row.evaluate(
+          (element) => (element.getRootNode() as ShadowRoot).host.getAttribute('data-path') ?? '',
+        );
+        visited.push(`${file}:${await row.getAttribute('data-line')}`);
+      }
+      // Each file's hunk (3 lines of context around the change, old and new side), then on to
+      // the next file; never back to the first.
+      const firstFile = visited.filter((v) => v.startsWith('a-first.txt'));
+      const secondFile = visited.filter((v) => v.startsWith('b-second.txt'));
+      expect(visited.slice(0, firstFile.length)).toEqual(firstFile);
+      expect(secondFile.length).toBeGreaterThan(0);
+      expect(visited.slice(firstFile.length).every((v) => !v.startsWith('a-first.txt'))).toBe(true);
+      expect(secondFile[0]).toBe('b-second.txt:247');
+      // And k goes back across the boundary to the first file's last changed line.
+      for (let i = 0; i < visited.length - firstFile.length; i++) {
+        await page.keyboard.press('k');
+      }
+      const row = focusedStackedRow(page);
+      await expect(row).toHaveAttribute('data-line', '280');
+      expect(
+        await row.evaluate((element) =>
+          (element.getRootNode() as ShadowRoot).host.getAttribute('data-path'),
+        ),
+      ).toBe('a-first.txt');
+    });
+
     test('Shift+J past the last hunk focuses the next file', async ({ page }) => {
       await openHunksFixture(page);
       await page.locator('.header .wordmark').click();

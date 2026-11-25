@@ -165,6 +165,9 @@ export class StackedViewMethods {
   private stackedFileScrollOffsets?: Map<string, number>;
   // Rendered pierre instance per file path, to expand collapsed context around a line.
   private stackedInstances?: Map<string, object>;
+  // The keyboard-focused line's file, and how many focus scrolls are still running.
+  private stackedFocusPath: string | null;
+  private stackedFocusScrolls?: number;
   // A line reached from searchfox results that is fading out.
   private stackedFlash: { path: string; line: number; start: number } | null;
 
@@ -352,22 +355,23 @@ export class StackedViewMethods {
     ).find((row) => isDeletionRow(row) === (side === 'old'));
   }
 
-  /** Focuses a changed line of the current file and scrolls it to `align`. */
-  showStackedFocus(focus: FocusedLine, align: 'nearest' | 'center') {
+  /** Focuses a changed line of `path` and scrolls it to `align`. */
+  showStackedFocus(path: string, focus: FocusedLine, align: 'nearest' | 'center') {
     this.clearStackedFocusMarks();
     this.currentFocusedLine = focus;
+    this.stackedFocusPath = path;
     this.applyStackedFocus();
     const view = this.stackedCodeView;
-    const file = this.files[this.currentFileIndex];
-    if (!view || !file) {
+    if (!view) {
       return;
     }
     // Rows are one line tall; before the row renders, assume a typical line height.
-    const lineHeight = this.findStackedRow(file.path, focus.line, focus.side)?.offsetHeight || 20;
+    const lineHeight = this.findStackedRow(path, focus.line, focus.side)?.offsetHeight || 20;
+    this.stackedFocusScrolls = (this.stackedFocusScrolls ?? 0) + 1;
     view.requestScroll(
       {
         type: 'line',
-        id: this.stackedItemId(file.path),
+        id: this.stackedItemId(path),
         lineNumber: focus.line,
         side: this.toAnnotationSide(focus.side),
         align,
@@ -376,26 +380,47 @@ export class StackedViewMethods {
         behavior: prefersReducedMotion() ? 'instant' : 'smooth',
       },
       // The scroll may have rendered the line after the mark above; re-mark once it has settled.
-      () => this.applyStackedFocus(),
+      () => {
+        this.stackedFocusScrolls = (this.stackedFocusScrolls ?? 1) - 1;
+        this.applyStackedFocus();
+      },
     );
   }
 
   clearStackedFocus() {
     this.clearStackedFocusMarks();
     this.currentFocusedLine = null;
+    this.stackedFocusPath = null;
+  }
+
+  /**
+   * The index of the focused line's file while the reader is still at it: the line is on
+   * screen, or a focus scroll is on its way to it. Null once they have scrolled it out of view,
+   * so that j/k start over in the file on screen.
+   */
+  stackedFocusFileIndex(): number | null {
+    const path = this.stackedFocusPath;
+    const focus = this.currentFocusedLine;
+    const index = path ? this.files.findIndex((file) => file.path === path) : -1;
+    if (!focus || index === -1) {
+      return null;
+    }
+    if ((this.stackedFocusScrolls ?? 0) > 0) {
+      return index;
+    }
+    const row = this.findStackedRow(path!, focus.line, focus.side)?.getBoundingClientRect();
+    const view = document.querySelector('.stacked-code-view')?.getBoundingClientRect();
+    return row && view && row.bottom > view.top && row.top < view.bottom ? index : null;
   }
 
   /** Marks the focused row. Pierre replaces rows on re-render, so this runs after each one. */
   private applyStackedFocus() {
     const focus = this.currentFocusedLine;
-    const file = this.files[this.currentFileIndex];
-    if (!focus || !file || this.currentFileIsCommit) {
+    const path = this.stackedFocusPath;
+    if (!focus || !path || this.currentFileIsCommit) {
       return;
     }
-    this.findStackedRow(file.path, focus.line, focus.side)?.toggleAttribute(
-      'data-stacked-focus',
-      true,
-    );
+    this.findStackedRow(path, focus.line, focus.side)?.toggleAttribute('data-stacked-focus', true);
   }
 
   private clearStackedFocusMarks() {
@@ -443,6 +468,7 @@ export class StackedViewMethods {
     this.stackedInstances = new Map();
     this.stackedFlash = null;
     this.currentFocusedLine = null;
+    this.stackedFocusPath = null;
     this.stackedFileMetadata = new Map();
     this.stackedHydrations = new Map();
     this.stackedLastRangeSelection = null;
@@ -1162,8 +1188,9 @@ export class StackedViewMethods {
       bestTop = top;
       bestIdx = index;
     });
+    // The keyboard focus keeps its own file (`stackedFocusPath`): a focus scroll often leaves
+    // the previous file's header as the one on top.
     if (bestIdx !== this.currentFileIndex) {
-      this.clearStackedFocus();
       this.currentFileIndex = bestIdx;
       this.currentFileIsCommit = false;
       this.renderFileList();
