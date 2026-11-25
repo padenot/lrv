@@ -52,4 +52,6 @@ export const SEARCHFOX_SHORTCUTS: Array<Pick<KeyboardShortcut, 'keys' | 'descrip
   { keys: ['Mod+click'], description: 'Searchfox: go to definition' },
   { keys: ['Mod+Alt+click'], description: 'Searchfox: find uses' },
   { keys: ['Mod+Shift+click'], description: 'Searchfox: open on searchfox.org in a new tab' },
+  { keys: ['Right-click'], description: 'Searchfox: menu with Go to Definition and Find Uses' },
+  { keys: ['Escape'], description: 'Searchfox: close the results panel or menu' },
 ];

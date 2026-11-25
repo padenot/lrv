@@ -525,4 +525,32 @@ test.describe('searchfox code navigation', () => {
     const colorOf = (locator: Locator) => locator.evaluate((node) => getComputedStyle(node).color);
     expect(await colorOf(panelVoid)).toBe(await colorOf(stackedVoid));
   });
+
+  for (const enabled of [true, false]) {
+    test(`the shortcuts help lists the searchfox shortcuts only when enabled (${enabled})`, async ({
+      page,
+    }) => {
+      await isolateConfig(page, { searchfox: enabled });
+      const started = await startReview(root);
+      child = started.child;
+      await page.goto(started.url);
+      await expect(page.locator('#preloader-overlay')).toHaveCount(0);
+      await page.locator('.header .wordmark').click();
+      await page.keyboard.press('?');
+      const help = page.getByRole('dialog', { name: 'Keyboard Shortcuts' });
+      await expect(help.getByText('Next file')).toBeVisible();
+      const rows = help.locator('tr', { hasText: 'Searchfox:' });
+      if (enabled) {
+        await expect(rows).toHaveText([
+          /go to definition/,
+          /find uses/,
+          /open on searchfox\.org in a new tab/,
+          /menu with Go to Definition and Find Uses/,
+          /close the results panel or menu/,
+        ]);
+      } else {
+        await expect(rows).toHaveCount(0);
+      }
+    });
+  }
 });

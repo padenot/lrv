@@ -303,7 +303,7 @@ export class DialogMethods {
     ]);
 
     const searchfoxField = el('div', { className: 'settings-field' }, [
-      el('label', { attrs: { for: 'searchfox' }, text: 'Searchfox' }),
+      el('label', { attrs: { for: 'searchfox' }, text: 'Searchfox support' }),
       el('div', { className: 'checkbox-wrapper' }, [
         el('input', {
           attrs: {
@@ -314,7 +314,7 @@ export class DialogMethods {
           },
         }),
         el('span', {
-          text: 'Mod+click identifiers to find definitions and uses on searchfox.org (sends identifiers and file paths to searchfox.org)',
+          text: 'Go to definitions and find uses of identifiers, from searchfox.org (press ? for the shortcuts). Sends clicked identifiers and file paths to searchfox.org, and in Firefox trees fetches searchfox’s copy of files from GitHub with gh.',
         }),
       ]),
     ]);
