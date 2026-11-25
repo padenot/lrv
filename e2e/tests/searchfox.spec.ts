@@ -436,6 +436,7 @@ test.describe('searchfox code navigation', () => {
       const started = await startReview(root);
       child = started.child;
       await page.goto(started.url);
+      await page.waitForFunction(() => (window as any).__APP_READY === true);
       await expect(page.locator('#preloader-overlay')).toHaveCount(0);
       await expect(page.locator('.stacked-code-view')).toBeVisible();
       const stackedVoid = page
@@ -500,6 +501,7 @@ test.describe('searchfox code navigation', () => {
     const started = await startReview(root);
     child = started.child;
     await page.goto(started.url);
+    await page.waitForFunction(() => (window as any).__APP_READY === true);
     await expect(page.locator('#preloader-overlay')).toHaveCount(0);
     await expect(page.locator('.stacked-code-view')).toBeVisible();
     const stackedVoid = page
