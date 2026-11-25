@@ -23,6 +23,7 @@ import {
   type ReviewComment,
 } from './comments';
 import { fetchJSON } from './api';
+import { identifierAt, searchfoxClick, type SearchfoxTarget } from './searchfox';
 import type { ReviewNote } from './review-notes';
 import type { AppConfig, AppContext, DiffFile, DiffLine, Side } from './types/app';
 
@@ -109,6 +110,7 @@ export class StackedViewMethods {
   declare fetchFilePair: AppContext['fetchFilePair'];
   declare fileCacheKey: AppContext['fileCacheKey'];
   declare resetFileView: AppContext['resetFileView'];
+  declare searchfoxLookup: AppContext['searchfoxLookup'];
 
   private stackedCodeView: CodeView<StackedAnnotation> | null;
   // CodeView.setOptions replaces every option, so keep the full set to change one.
@@ -308,6 +310,7 @@ export class StackedViewMethods {
     }
 
     const codeViewRoot = el('div', { className: 'stacked-code-view' });
+    codeViewRoot.addEventListener('mousedown', (event) => this.handleStackedSearchfoxClick(event));
     container.appendChild(codeViewRoot);
     const binaryFiles = this.files.filter((file) => file.is_binary);
 
@@ -365,9 +368,11 @@ export class StackedViewMethods {
         this.renderStackedAnnotation(annotation as DiffLineAnnotation<StackedAnnotation>),
       // Expanding unmodified lines needs the full file contents, so load
       // them for every file the virtualizer renders.
-      onPostRender: (_node, _instance, phase, context) => {
+      onPostRender: (node, _instance, phase, context) => {
         if (phase !== 'unmount') {
           const path = this.pathFromCodeViewContext(context);
+          // Pierre's file element doesn't say which file it shows; click handling reads it here.
+          node.dataset.path = path;
           void this.hydrateStackedFile(
             this.files.find((file) => file.path === path),
             parseDiffFromFile,
@@ -1050,6 +1055,60 @@ export class StackedViewMethods {
 
   private stackedItemId(path: string) {
     return `file:${path}`;
+  }
+
+  private handleStackedSearchfoxClick(event: MouseEvent) {
+    const click = this.config.searchfox ? searchfoxClick(event) : null;
+    if (!click) {
+      return;
+    }
+    const target = this.stackedSearchfoxTarget(event);
+    if (!target) {
+      return;
+    }
+    event.preventDefault();
+    void this.searchfoxLookup(target, click.mode, click.newTab);
+  }
+
+  /** The identifier under a click on a code line; null on gutters, annotations, headers and separators. */
+  private stackedSearchfoxTarget(event: MouseEvent): SearchfoxTarget | null {
+    const nodes = event.composedPath();
+    const line = nodes.find(
+      (node): node is HTMLElement => node instanceof HTMLElement && node.hasAttribute('data-line'),
+    );
+    const fileElement = nodes.find(
+      (node): node is HTMLElement => node instanceof HTMLElement && node.dataset.path !== undefined,
+    );
+    if (!line || !fileElement) {
+      return null;
+    }
+    const caret = document.caretPositionFromPoint(event.clientX, event.clientY, {
+      shadowRoots: [line.getRootNode() as ShadowRoot],
+    });
+    if (!caret || !line.contains(caret.offsetNode)) {
+      return null;
+    }
+    const beforeCaret = document.createRange();
+    beforeCaret.setStart(line, 0);
+    beforeCaret.setEnd(caret.offsetNode, caret.offset);
+    const col = beforeCaret.toString().length;
+    const text = line.textContent ?? '';
+    const identifier = identifierAt(text, col);
+    if (!identifier) {
+      return null;
+    }
+    // Deleted lines, in unified or in the deletions column of split, are on the old side.
+    const deleted =
+      line.getAttribute('data-line-type') === 'change-deletion' ||
+      line.closest('[data-deletions]') !== null;
+    const file = this.fileForPath(fileElement.dataset.path!);
+    return {
+      path: deleted ? (file.old_path ?? file.path) : file.path,
+      line: Number(line.dataset.line),
+      col,
+      word: identifier.word,
+      text,
+    };
   }
 
   private pathFromCodeViewContext(context: unknown): string {

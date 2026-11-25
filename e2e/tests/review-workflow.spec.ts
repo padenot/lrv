@@ -1,5 +1,5 @@
 import { commentDraftCount } from '../comment-draft-helpers';
-import { test, expect, Page } from '@playwright/test';
+import { test, expect, Locator, Page } from '@playwright/test';
 import { isolateConfig } from '../test-config';
 import { spawn, ChildProcess } from 'child_process';
 import { promisify } from 'util';
@@ -1454,6 +1454,157 @@ test.describe('Review Workflow E2E', () => {
 
     await expect(page.locator('.stacked-comment-form')).toHaveCount(0);
     await expect(page.locator('#comment-count')).toHaveText('0');
+  });
+
+  test.describe('stacked searchfox clicks', () => {
+    // Each line is "const <word> ...", so the second character of the word is column 7.
+    const base = 'const context = 1;\nconst filler = 4;\nconst removed = 2;\n';
+    const changed = 'const context = 1;\nconst filler = 4;\nconst added = 3;\n';
+
+    async function setupSearchfoxRepo(renamedTo?: string) {
+      if (!testRepoPath) {
+        throw new Error('Test repo not initialized');
+      }
+      fs.writeFileSync(path.join(testRepoPath, 'searchfox.txt'), base);
+      await execAsync(
+        `cd "${testRepoPath}" && git add searchfox.txt && git commit -q -m searchfox`,
+      );
+      const newPath = renamedTo ?? 'searchfox.txt';
+      if (renamedTo) {
+        await execAsync(`cd "${testRepoPath}" && git mv searchfox.txt "${renamedTo}"`);
+      }
+      fs.writeFileSync(path.join(testRepoPath, newPath), changed);
+      await stopServer();
+      await startServer();
+    }
+
+    async function mockSearchfox(page: Page) {
+      const resolves: unknown[] = [];
+      await page.route('**/api/searchfox/resolve', (route) => {
+        resolves.push(route.request().postDataJSON());
+        return route.fulfill({ json: { query: 'id:x', pretty: null, symbols: [] } });
+      });
+      await page.route('**/api/searchfox/search', (route) =>
+        route.fulfill({ json: { query: 'id:x', groups: [] } }),
+      );
+      return resolves;
+    }
+
+    // Left quarter of the second character of `word`, so the caret lands before that character.
+    async function wordPosition(line: Locator, word: string) {
+      return line.evaluate((element, word) => {
+        const start = (element.textContent ?? '').indexOf(word) + 1;
+        const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+        let node = walker.nextNode() as Text;
+        let offset = start;
+        while (offset >= node.length) {
+          offset -= node.length;
+          node = walker.nextNode() as Text;
+        }
+        const range = document.createRange();
+        range.setStart(node, offset);
+        range.setEnd(node, offset + 1);
+        const glyph = range.getBoundingClientRect();
+        const box = element.getBoundingClientRect();
+        return {
+          x: glyph.left - box.left + glyph.width / 4,
+          y: glyph.top - box.top + glyph.height / 2,
+        };
+      }, word);
+    }
+
+    const lineWords = [
+      ['[data-line][data-line-type="change-addition"]', 'added'],
+      ['[data-line][data-line-type="change-deletion"]', 'removed'],
+      ['[data-line][data-line-type="context"]', 'context'],
+    ] as const;
+
+    const lookups = (oldPath: string, newPath: string) => [
+      { path: newPath, line: 3, col: 7, word: 'added', text: 'const added = 3;' },
+      { path: oldPath, line: 3, col: 7, word: 'removed', text: 'const removed = 2;' },
+      { path: newPath, line: 1, col: 7, word: 'context', text: 'const context = 1;' },
+    ];
+
+    for (const view of ['side-by-side', 'inline'] as const) {
+      test(`Mod+click on added, deleted and context lines sends lookups in ${view} view`, async ({
+        page,
+      }) => {
+        await setupSearchfoxRepo();
+        await isolateConfig(page, { searchfox: true });
+        const resolves = await mockSearchfox(page);
+        await openStackedView(page);
+        if (view === 'inline') {
+          await page.locator('#toggle-view').click();
+        }
+        const file = page.locator('.stacked-code-view diffs-container', { hasText: 'searchfox' });
+        for (const [selector, word] of lineWords) {
+          const line = file.locator(selector).first();
+          await line.click({
+            modifiers: ['ControlOrMeta'],
+            position: await wordPosition(line, word),
+          });
+        }
+        await expect.poll(() => resolves.length).toBe(3);
+        expect(resolves).toEqual(lookups('searchfox.txt', 'searchfox.txt'));
+      });
+    }
+
+    test('Mod+click on a deleted line of a renamed file uses the old path', async ({ page }) => {
+      await setupSearchfoxRepo('searchfox-renamed.txt');
+      await isolateConfig(page, { searchfox: true });
+      const resolves = await mockSearchfox(page);
+      await openStackedView(page);
+      const file = page.locator('.stacked-code-view diffs-container', { hasText: 'searchfox' });
+      // Context is clicked in the additions column, so it is on the new side.
+      const renamedLines = [
+        ['[data-line][data-line-type="change-addition"]', 'added'],
+        ['[data-line][data-line-type="change-deletion"]', 'removed'],
+        ['[data-additions] [data-line][data-line-type="context"]', 'context'],
+      ] as const;
+      for (const [selector, word] of renamedLines) {
+        const line = file.locator(selector).first();
+        await line.click({
+          modifiers: ['ControlOrMeta'],
+          position: await wordPosition(line, word),
+        });
+      }
+      await expect.poll(() => resolves.length).toBe(3);
+      expect(resolves).toEqual(lookups('searchfox.txt', 'searchfox-renamed.txt'));
+    });
+
+    test('Mod+click sends no lookup with the searchfox setting off', async ({ page }) => {
+      await setupSearchfoxRepo();
+      await isolateConfig(page, { searchfox: false });
+      const resolves = await mockSearchfox(page);
+      await openStackedView(page);
+      const line = page
+        .locator('.stacked-code-view diffs-container', { hasText: 'searchfox' })
+        .locator('[data-line][data-line-type="change-addition"]')
+        .first();
+      await line.click({
+        modifiers: ['ControlOrMeta'],
+        position: await wordPosition(line, 'added'),
+      });
+      // Lookups are sent immediately, so a short wait is enough to see one.
+      await page.waitForTimeout(300);
+      expect(resolves).toEqual([]);
+    });
+
+    test('a plain click on a word sends no lookup', async ({ page }) => {
+      await setupSearchfoxRepo();
+      await isolateConfig(page, { searchfox: true });
+      const resolves = await mockSearchfox(page);
+      await openStackedView(page);
+      const line = page
+        .locator('.stacked-code-view diffs-container', { hasText: 'searchfox' })
+        .locator('[data-line][data-line-type="change-addition"]')
+        .first();
+      const dbgPos = await wordPosition(line, 'added');
+      await line.click({ position: await wordPosition(line, 'added') });
+      await page.waitForTimeout(300);
+      expect(resolves).toEqual([]);
+      await expect(page.locator('.stacked-comment-form')).toHaveCount(0);
+    });
   });
 
   test('stacked mode can expand unmodified lines in the last file', async ({ page }) => {

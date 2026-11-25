@@ -14055,6 +14055,30 @@ var SeriesMethods = class {
 	}
 };
 //#endregion
+//#region web/src/searchfox.ts
+/** Mod+click: definition; Mod+Alt+click: uses; add Shift to open
+* searchfox.org in a new tab. Returns null when Mod isn't held. */
+function searchfoxClick(event) {
+	if (!(IS_MAC ? event.metaKey : event.ctrlKey)) return null;
+	return {
+		mode: event.altKey ? "uses" : "definition",
+		newTab: event.shiftKey
+	};
+}
+const IDENTIFIER_CHAR = /[\p{L}\p{N}_$]/u;
+/** The identifier of `text` covering offset `col`, or null. */
+function identifierAt(text, col) {
+	let start = col;
+	while (start > 0 && IDENTIFIER_CHAR.test(text.charAt(start - 1))) start--;
+	let end = col;
+	while (end < text.length && IDENTIFIER_CHAR.test(text.charAt(end))) end++;
+	if (start === end || /\p{N}/u.test(text.charAt(start))) return null;
+	return {
+		word: text.slice(start, end),
+		start
+	};
+}
+//#endregion
 //#region web/src/stacked-view-methods.ts
 const DIFFS_THEME = {
 	dark: "pierre-dark",
@@ -14228,6 +14252,7 @@ var StackedViewMethods = class {
 		const { CodeView, parsePatchFiles, parseDiffFromFile, getOrCreateWorkerPoolSingleton } = await loadDiffsRuntime();
 		if (!this.isStacked || !container.isConnected || renderToken !== this.stackedRenderToken || generation !== this.commitLoadGeneration) return;
 		const codeViewRoot = el("div", { className: "stacked-code-view" });
+		codeViewRoot.addEventListener("mousedown", (event) => this.handleStackedSearchfoxClick(event));
 		container.appendChild(codeViewRoot);
 		const binaryFiles = this.files.filter((file) => file.is_binary);
 		const items = this.files.map((file) => this.buildCodeViewItem(file, parsePatchFiles)).filter((item) => !!item);
@@ -14273,9 +14298,10 @@ var StackedViewMethods = class {
 			onSelectedLinesChange: (selection) => this.rememberStackedSelection(selection),
 			onLineSelected: (range, context) => this.showStackedDraftFromSelection(this.pathFromCodeViewContext(context), range),
 			renderAnnotation: (annotation) => this.renderStackedAnnotation(annotation),
-			onPostRender: (_node, _instance, phase, context) => {
+			onPostRender: (node, _instance, phase, context) => {
 				if (phase !== "unmount") {
 					const path = this.pathFromCodeViewContext(context);
+					node.dataset.path = path;
 					this.hydrateStackedFile(this.files.find((file) => file.path === path), parseDiffFromFile);
 				}
 			},
@@ -14790,6 +14816,39 @@ var StackedViewMethods = class {
 	}
 	stackedItemId(path) {
 		return `file:${path}`;
+	}
+	handleStackedSearchfoxClick(event) {
+		const click = this.config.searchfox ? searchfoxClick(event) : null;
+		if (!click) return;
+		const target = this.stackedSearchfoxTarget(event);
+		if (!target) return;
+		event.preventDefault();
+		this.searchfoxLookup(target, click.mode, click.newTab);
+	}
+	/** The identifier under a click on a code line; null on gutters, annotations, headers and separators. */
+	stackedSearchfoxTarget(event) {
+		const nodes = event.composedPath();
+		const line = nodes.find((node) => node instanceof HTMLElement && node.hasAttribute("data-line"));
+		const fileElement = nodes.find((node) => node instanceof HTMLElement && node.dataset.path !== void 0);
+		if (!line || !fileElement) return null;
+		const caret = document.caretPositionFromPoint(event.clientX, event.clientY, { shadowRoots: [line.getRootNode()] });
+		if (!caret || !line.contains(caret.offsetNode)) return null;
+		const beforeCaret = document.createRange();
+		beforeCaret.setStart(line, 0);
+		beforeCaret.setEnd(caret.offsetNode, caret.offset);
+		const col = beforeCaret.toString().length;
+		const text = line.textContent ?? "";
+		const identifier = identifierAt(text, col);
+		if (!identifier) return null;
+		const deleted = line.getAttribute("data-line-type") === "change-deletion" || line.closest("[data-deletions]") !== null;
+		const file = this.fileForPath(fileElement.dataset.path);
+		return {
+			path: deleted ? file.old_path ?? file.path : file.path,
+			line: Number(line.dataset.line),
+			col,
+			word: identifier.word,
+			text
+		};
 	}
 	pathFromCodeViewContext(context) {
 		const id = context?.item?.id ?? "";
