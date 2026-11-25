@@ -83,7 +83,9 @@ fn test_appstate_required_fields() {
         pull_requests: Default::default(),
         store: None,
         publish: None,
-        searchfox: std::sync::Arc::new(lrv::searchfox::Searchfox::new().expect("searchfox client")),
+        searchfox: std::sync::Arc::new(
+            lrv::searchfox::Searchfox::new("/tmp".to_owned()).expect("searchfox client"),
+        ),
     };
 
     // Verify context is accessible

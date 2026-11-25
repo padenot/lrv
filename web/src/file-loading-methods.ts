@@ -479,19 +479,27 @@ export class FileLoadingMethods {
         }
       }),
 
-      modifiedEditor.onMouseDown((e) => this.searchfoxMouseDown(e, modifiedEditor, filePath)),
-      originalEditor.onMouseDown((e) => this.searchfoxMouseDown(e, originalEditor, originalPath)),
+      modifiedEditor.onMouseDown((e) =>
+        this.searchfoxMouseDown(e, modifiedEditor, filePath, 'new'),
+      ),
+      originalEditor.onMouseDown((e) =>
+        this.searchfoxMouseDown(e, originalEditor, originalPath, 'old'),
+      ),
     );
 
     if (this.config.searchfox) {
       this.editorClickDisposables.push(
-        ...this.searchfoxContextActions(modifiedEditor, filePath),
-        ...this.searchfoxContextActions(originalEditor, originalPath),
+        ...this.searchfoxContextActions(modifiedEditor, filePath, 'new'),
+        ...this.searchfoxContextActions(originalEditor, originalPath, 'old'),
       );
     }
   }
 
-  private searchfoxContextActions(targetEditor: editor.IStandaloneCodeEditor, path: string) {
+  private searchfoxContextActions(
+    targetEditor: editor.IStandaloneCodeEditor,
+    path: string,
+    side: 'old' | 'new',
+  ) {
     return searchfoxMenuActions.map(({ label, mode }) =>
       targetEditor.addAction({
         id: `searchfox.${mode}`,
@@ -499,7 +507,7 @@ export class FileLoadingMethods {
         contextMenuGroupId: 'navigation',
         run: () => {
           const position = targetEditor.getPosition();
-          const target = position && this.searchfoxTargetAt(targetEditor, path, position);
+          const target = position && this.searchfoxTargetAt(targetEditor, path, side, position);
           if (target) {
             void this.searchfoxLookup(target, mode, false);
           }
@@ -512,6 +520,7 @@ export class FileLoadingMethods {
     e: editor.IEditorMouseEvent,
     targetEditor: editor.IStandaloneCodeEditor,
     path: string,
+    side: 'old' | 'new',
   ) {
     const click = searchfoxClick(e.event.browserEvent);
     if (
@@ -522,7 +531,7 @@ export class FileLoadingMethods {
     ) {
       return;
     }
-    const target = this.searchfoxTargetAt(targetEditor, path, e.target.position);
+    const target = this.searchfoxTargetAt(targetEditor, path, side, e.target.position);
     if (!target) {
       return;
     }
@@ -534,6 +543,7 @@ export class FileLoadingMethods {
   private searchfoxTargetAt(
     targetEditor: editor.IStandaloneCodeEditor,
     path: string,
+    side: 'old' | 'new',
     position: { lineNumber: number; column: number },
   ): SearchfoxTarget | null {
     const model = targetEditor.getModel();
@@ -546,7 +556,15 @@ export class FileLoadingMethods {
     if (!identifier) {
       return null;
     }
-    return { path, line: position.lineNumber, col, word: identifier.word, text };
+    return {
+      path,
+      line: position.lineNumber,
+      col,
+      word: identifier.word,
+      text,
+      side,
+      commit_idx: this.currentCommitIdx,
+    };
   }
 
   private beginEditorGutterGesture(

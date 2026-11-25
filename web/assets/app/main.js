@@ -11294,8 +11294,18 @@ function resolveSearchfox(target) {
 function searchSearchfox(query) {
 	return fetchJSON(`/api/searchfox/search?q=${encodeURIComponent(query)}`);
 }
-function searchfoxSourceUrl(tree, path, line) {
-	return `https://searchfox.org/${tree}/source/${path}${line ? `#${line}` : ""}`;
+/** Maps a hit's line, at its searchfox revision, onto the new side of `commitIdx`. */
+function revealSearchfoxLine(hit, commitIdx) {
+	return fetchJSON(`/api/searchfox/line?${new URLSearchParams({
+		path: hit.path,
+		line: String(hit.lno),
+		commit_idx: String(commitIdx),
+		revision: hit.revision
+	})}`);
+}
+/** The source of `path` at `revision`, so `line` is the line searchfox numbered. */
+function searchfoxSourceUrl(tree, revision, path, line) {
+	return `https://searchfox.org/${tree}/rev/${revision}/${path}#${line}`;
 }
 function searchfoxSearchUrl(tree, query) {
 	return `https://searchfox.org/${tree}/search?q=${encodeURIComponent(query)}`;
@@ -11647,31 +11657,31 @@ var FileLoadingMethods = class {
 			if (this.isCommentGutterTarget(e) && e.target.position) this.beginEditorGutterGesture(filePath, modifiedEditor, e.target.position.lineNumber, "new");
 		}), originalEditor.onMouseDown((e) => {
 			if (this.isCommentGutterTarget(e) && e.target.position) this.beginEditorGutterGesture(filePath, originalEditor, e.target.position.lineNumber, "old");
-		}), modifiedEditor.onMouseDown((e) => this.searchfoxMouseDown(e, modifiedEditor, filePath)), originalEditor.onMouseDown((e) => this.searchfoxMouseDown(e, originalEditor, originalPath)));
-		if (this.config.searchfox) this.editorClickDisposables.push(...this.searchfoxContextActions(modifiedEditor, filePath), ...this.searchfoxContextActions(originalEditor, originalPath));
+		}), modifiedEditor.onMouseDown((e) => this.searchfoxMouseDown(e, modifiedEditor, filePath, "new")), originalEditor.onMouseDown((e) => this.searchfoxMouseDown(e, originalEditor, originalPath, "old")));
+		if (this.config.searchfox) this.editorClickDisposables.push(...this.searchfoxContextActions(modifiedEditor, filePath, "new"), ...this.searchfoxContextActions(originalEditor, originalPath, "old"));
 	}
-	searchfoxContextActions(targetEditor, path) {
+	searchfoxContextActions(targetEditor, path, side) {
 		return searchfoxMenuActions.map(({ label, mode }) => targetEditor.addAction({
 			id: `searchfox.${mode}`,
 			label,
 			contextMenuGroupId: "navigation",
 			run: () => {
 				const position = targetEditor.getPosition();
-				const target = position && this.searchfoxTargetAt(targetEditor, path, position);
+				const target = position && this.searchfoxTargetAt(targetEditor, path, side, position);
 				if (target) this.searchfoxLookup(target, mode, false);
 			}
 		}));
 	}
-	searchfoxMouseDown(e, targetEditor, path) {
+	searchfoxMouseDown(e, targetEditor, path, side) {
 		const click = searchfoxClick(e.event.browserEvent);
 		if (!click || !this.config.searchfox || e.target.type !== monaco.editor.MouseTargetType.CONTENT_TEXT || !e.target.position) return;
-		const target = this.searchfoxTargetAt(targetEditor, path, e.target.position);
+		const target = this.searchfoxTargetAt(targetEditor, path, side, e.target.position);
 		if (!target) return;
 		e.event.preventDefault();
 		e.event.stopPropagation();
 		this.searchfoxLookup(target, click.mode, click.newTab);
 	}
-	searchfoxTargetAt(targetEditor, path, position) {
+	searchfoxTargetAt(targetEditor, path, side, position) {
 		const model = targetEditor.getModel();
 		if (!model) return null;
 		const text = model.getLineContent(position.lineNumber);
@@ -11683,7 +11693,9 @@ var FileLoadingMethods = class {
 			line: position.lineNumber,
 			col,
 			word: identifier.word,
-			text
+			text,
+			side,
+			commit_idx: this.currentCommitIdx
 		};
 	}
 	beginEditorGutterGesture(filePath, targetEditor, downLine, side) {
@@ -15073,7 +15085,9 @@ var StackedViewMethods = class {
 			line: Number(line.dataset.line),
 			col,
 			word: identifier.word,
-			text
+			text,
+			side: deleted ? "old" : "new",
+			commit_idx: this.currentCommitIdx
 		};
 	}
 	pathFromCodeViewContext(context) {
@@ -15209,9 +15223,9 @@ var SearchfoxMethods = class {
 		};
 	}
 	renderSearchfoxResults(body, tree, results, close) {
-		for (const group of results.groups) body.appendChild(this.searchfoxGroupNode(tree, group, close));
+		for (const group of results.groups) body.appendChild(this.searchfoxGroupNode(tree, results.revision, group, close));
 	}
-	searchfoxGroupNode(tree, group, close) {
+	searchfoxGroupNode(tree, revision, group, close) {
 		const heading = el("h3", {
 			className: "searchfox-category",
 			text: group.category
@@ -15261,7 +15275,7 @@ var SearchfoxMethods = class {
 					this.goToSearchfoxHit(tree, {
 						path: file.path,
 						lno: line.lno,
-						text: line.line
+						revision
 					});
 				});
 				section.appendChild(row);
@@ -15304,9 +15318,11 @@ var SearchfoxMethods = class {
 	* false when the browser blocked the new tab. */
 	async goToSearchfoxHit(tree, hit) {
 		const index = this.files.findIndex((file) => file.path === hit.path);
-		if (index === -1) return openInNewTab(searchfoxSourceUrl(tree, hit.path, hit.lno));
-		const { new: contents } = await this.fetchFilePair(hit.path);
-		const line = localLine(contents.split("\n"), hit);
+		if (index === -1) return openInNewTab(searchfoxSourceUrl(tree, hit.revision, hit.path, hit.lno));
+		const mapped = await revealSearchfoxLine(hit, this.currentCommitIdx);
+		if (mapped.line === null) showSearchfoxToast("No line of this file is unchanged since searchfox's revision");
+		else if (!mapped.exact) showSearchfoxToast("Line changed since searchfox's revision; showing the nearest unchanged line");
+		const line = mapped.line ?? 1;
 		if (this.isStacked) await this.revealStackedLine(index, line);
 		else {
 			await this.loadFile(index);
@@ -15329,18 +15345,8 @@ function searchfoxDefinitions(results) {
 	return results.groups.filter((group) => group.kind === "normal" && group.category.startsWith("Definitions")).flatMap((group) => group.files.flatMap((file) => file.lines.map((line) => ({
 		path: file.path,
 		lno: line.lno,
-		text: line.line
+		revision: results.revision
 	}))));
-}
-/** The line of `lines` nearest to the hit's line number whose text is the hit's, else that number. */
-function localLine(lines, hit) {
-	const text = hit.text.trim();
-	let best = null;
-	lines.forEach((line, index) => {
-		const lno = index + 1;
-		if (line.trim() === text && (best === null || Math.abs(lno - hit.lno) < Math.abs(best - hit.lno))) best = lno;
-	});
-	return best ?? Math.min(hit.lno, lines.length);
 }
 /** Opens `url` in a new tab; false when the browser blocked it. */
 function openInNewTab(url) {

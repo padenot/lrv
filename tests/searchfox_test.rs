@@ -1,23 +1,28 @@
 use axum::{
     body::Body,
+    extract::State,
     http::{Request, StatusCode, Uri},
     response::{IntoResponse, Response},
 };
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tower::util::ServiceExt;
 
 const PATH: &str = "dom/media/webaudio/AudioNode.cpp";
 const SIGNATURE: &str = "void AudioNode::Disconnect(ErrorResult& aRv) {";
+const SYMBOL_QUERY: &str = "symbol:_ZN7mozilla3dom9AudioNode10DisconnectERNS_11ErrorResultE";
 
-const SOURCE: &str = r#"<html><body>
-<code role="cell" class="source-line">int x;
-</code>
-<code role="cell" class="source-line"><span class="syn_type">void</span> AudioNode::<span data-symbols="_ZN7mozilla3dom9AudioNode10DisconnectERNS_11ErrorResultE">Disconnect</span>(ErrorResult&amp; aRv) {
-</code>
-<code role="cell" class="source-line">}
-</code>
-</body></html>"#;
+/// What searchfox indexed: a file whose lines are `INDEXED`.
+const INDEXED: &str = "int x;\nvoid AudioNode::Disconnect(ErrorResult& aRv) {\n}\n";
+/// The commit before the indexed one, with different text: a lookup that used its parent (or a
+/// stale revision) would map lines onto it.
+const PARENT: &str = "unrelated();\n";
+/// The reviewed new side: `INDEXED` with a line added above it.
+const REVIEWED: &str = "// new\nint x;\nvoid AudioNode::Disconnect(ErrorResult& aRv) {\n}\n";
 
 const ANALYSIS: &str = concat!(
     r#"{"loc":"00001:0","source":1,"syntax":"def,file","pretty":"file dom/media/webaudio/AudioNode.cpp","sym":"FILE_dom/media/webaudio/AudioNode@2Ecpp"}"#,
@@ -36,28 +41,138 @@ const SEARCH: &str = r#"{
     "*timedout*": false
 }"#;
 
-/// Stands in for searchfox.org: serves the analysis and source of one file and a search.
-async fn mock_searchfox(uri: Uri) -> Response {
-    match uri.path() {
-        "/firefox-main/raw-analysis/dom/media/webaudio/AudioNode.cpp" => ANALYSIS.into_response(),
-        "/firefox-main/source/dom/media/webaudio/AudioNode.cpp" => SOURCE.into_response(),
-        "/firefox-main/search" => SEARCH.into_response(),
-        _ => StatusCode::NOT_FOUND.into_response(),
-    }
+/// The source page searchfox serves for the head, for lookups without a local copy.
+const SOURCE: &str = r#"<html><body>
+<code role="cell" class="source-line">int x;
+</code>
+<code role="cell" class="source-line"><span class="syn_type">void</span> AudioNode::<span data-symbols="_ZN7mozilla3dom9AudioNode10DisconnectERNS_11ErrorResultE">Disconnect</span>(ErrorResult&amp; aRv) {
+</code>
+<code role="cell" class="source-line">}
+</code>
+</body></html>"#;
+
+/// The two revisions searchfox can report: `old` is the head before the reindex, `new` after.
+struct Hashes {
+    hg_old: String,
+    hg_new: String,
+    git_old: String,
+    git_new: String,
 }
 
-async fn start_mock() -> String {
-    let app = axum::Router::new().fallback(mock_searchfox);
+/// Stands in for searchfox.org. While `moving`, the first read of the head is the old revision.
+struct Mock {
+    hashes: Hashes,
+    moving: bool,
+    commit_info_reads: AtomicUsize,
+    analysis_reads: AtomicUsize,
+}
+
+async fn mock_searchfox(State(mock): State<Arc<Mock>>, uri: Uri) -> Response {
+    let path = uri.path();
+    if path == "/firefox-main/commit-info/HEAD" {
+        let read = mock.commit_info_reads.fetch_add(1, Ordering::SeqCst);
+        let hg = if mock.moving && read == 0 {
+            &mock.hashes.hg_old
+        } else {
+            &mock.hashes.hg_new
+        };
+        // `parent` is the head's parent, which is deliberately not the indexed revision.
+        let parent = &mock.hashes.git_old;
+        return format!(
+            r#"[{{"header":"h","parent":"{parent}","date":"d","fulldiff":"https://hg.mozilla.org/mozilla-central/rev/{hg}","phab":null}}]"#
+        )
+        .into_response();
+    }
+    if let Some(hg) = path.strip_prefix("/firefox-main/hgrev/") {
+        let git = if hg == mock.hashes.hg_old {
+            &mock.hashes.git_old
+        } else if hg == mock.hashes.hg_new {
+            &mock.hashes.git_new
+        } else {
+            return StatusCode::NOT_FOUND.into_response();
+        };
+        return Response::builder()
+            .status(StatusCode::FOUND)
+            .header("location", format!("/firefox-main/rev/{git}/"))
+            .body(Body::empty())
+            .unwrap();
+    }
+    if path.starts_with("/firefox-main/rev/") {
+        return "revision page".into_response();
+    }
+    if path == format!("/firefox-main/raw-analysis/{PATH}") {
+        mock.analysis_reads.fetch_add(1, Ordering::SeqCst);
+        return ANALYSIS.into_response();
+    }
+    if path == format!("/firefox-main/source/{PATH}") {
+        return SOURCE.into_response();
+    }
+    if path == "/firefox-main/search" {
+        return SEARCH.into_response();
+    }
+    StatusCode::NOT_FOUND.into_response()
+}
+
+/// Serves the mock and points searchfox clients at it. Every `Searchfox` built afterwards uses it.
+async fn start_mock(hashes: Hashes, moving: bool) -> Arc<Mock> {
+    let mock = Arc::new(Mock {
+        hashes,
+        moving,
+        commit_info_reads: AtomicUsize::new(0),
+        analysis_reads: AtomicUsize::new(0),
+    });
+    let app = axum::Router::new()
+        .fallback(mock_searchfox)
+        .with_state(Arc::clone(&mock));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-    format!("http://{address}")
+    std::env::set_var("SEARCHFOX_BASE_URL", format!("http://{address}"));
+    mock
 }
 
-fn state(is_public: bool) -> lrv::server::AppState {
+fn git(dir: &Path, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .env("GIT_AUTHOR_NAME", "lrv")
+        .env("GIT_AUTHOR_EMAIL", "lrv@example.invalid")
+        .env("GIT_COMMITTER_NAME", "lrv")
+        .env("GIT_COMMITTER_EMAIL", "lrv@example.invalid")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "git {args:?} failed");
+    String::from_utf8(output.stdout).unwrap().trim().to_owned()
+}
+
+/// A repository whose head commit is what searchfox indexed, with its parent differing.
+fn indexed_repository(dir: &Path) -> (String, String) {
+    std::fs::create_dir_all(dir.join("dom/media/webaudio")).unwrap();
+    git(dir, &["init", "-q"]);
+    std::fs::write(dir.join(PATH), PARENT).unwrap();
+    git(dir, &["add", "."]);
+    git(dir, &["commit", "-q", "-m", "parent"]);
+    let git_old = git(dir, &["rev-parse", "HEAD"]);
+    std::fs::write(dir.join(PATH), INDEXED).unwrap();
+    git(dir, &["commit", "-q", "-a", "-m", "indexed"]);
+    let git_new = git(dir, &["rev-parse", "HEAD"]);
+    (git_old, git_new)
+}
+
+fn scratch_dir(name: &str) -> PathBuf {
+    let dir =
+        std::env::temp_dir().join(format!("lrv-searchfox-test-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+fn state(working_dir: &Path, is_public: bool, searchfox: bool) -> lrv::server::AppState {
+    let working_dir = working_dir.to_string_lossy().into_owned();
     let (shutdown_tx, _rx) = tokio::sync::mpsc::channel::<()>(1);
     let context = lrv::types::ProjectContext {
-        working_directory: "/tmp".to_string(),
+        working_directory: working_dir.clone(),
         git_branch: None,
         title: None,
         is_public,
@@ -69,8 +184,25 @@ fn state(is_public: bool) -> lrv::server::AppState {
         own_revisions: Vec::new(),
         searchfox_tree: lrv::searchfox::SEARCHFOX_TREE.to_owned(),
     };
+    let diff = lrv::types::DiffResponse {
+        files: vec![],
+        stats: lrv::types::DiffStats {
+            files_changed: 0,
+            additions: 0,
+            deletions: 0,
+        },
+        commit_hash: None,
+        commit_author: None,
+        commit_date: None,
+        commit_message: None,
+        jj_change_id: None,
+    };
+    let config = lrv::config::UserConfig {
+        searchfox,
+        ..Default::default()
+    };
     lrv::server::AppState {
-        diffs: Arc::new(Vec::new()),
+        diffs: Arc::new(vec![diff]),
         comments: Arc::new(Mutex::new(vec![])),
         overall_comment: Arc::new(Mutex::new(None)),
         notes_version: Arc::new(tokio::sync::watch::channel(0).0),
@@ -79,15 +211,20 @@ fn state(is_public: bool) -> lrv::server::AppState {
         launcher: lrv::launch::AgentLauncher::new(),
         review_notes: Arc::new(Mutex::new(vec![])),
         shutdown_tx: Arc::new(Mutex::new(Some(shutdown_tx))),
-        config: Arc::new(Mutex::new(lrv::config::UserConfig::default())),
+        config: Arc::new(Mutex::new(config)),
         context: Arc::new(context),
-        old_caches: Arc::new(vec![Mutex::new(Default::default())]),
-        new_caches: Arc::new(vec![Mutex::new(Default::default())]),
+        // The reviewed new side is served from the cache, so the working directory need not
+        // hold the file.
+        old_caches: Arc::new(vec![Mutex::new(HashMap::new())]),
+        new_caches: Arc::new(vec![Mutex::new(HashMap::from([(
+            PATH.to_owned(),
+            REVIEWED.to_owned(),
+        )]))]),
         is_series: false,
         pull_requests: Default::default(),
         store: None,
         publish: None,
-        searchfox: Arc::new(lrv::searchfox::Searchfox::new().expect("searchfox client")),
+        searchfox: Arc::new(lrv::searchfox::Searchfox::new(working_dir).expect("searchfox client")),
     }
 }
 
@@ -101,19 +238,30 @@ async fn send(app: &axum::Router, request: Request<Body>) -> (StatusCode, serde_
     (status, body)
 }
 
-fn resolve_request(path: &str) -> Request<Body> {
+fn resolve_request(line: usize) -> Request<Body> {
     let body = serde_json::json!({
-        "path": path,
-        "line": 3,
+        "path": PATH,
+        "line": line,
         "col": 20,
         "word": "Disconnect",
         "text": SIGNATURE,
+        "side": "new",
+        "commit_idx": 0,
     });
     Request::builder()
         .method("POST")
         .uri("/api/searchfox/resolve")
         .header("content-type", "application/json")
         .body(Body::from(body.to_string()))
+        .unwrap()
+}
+
+fn line_request(line: usize, revision: &str) -> Request<Body> {
+    Request::builder()
+        .uri(format!(
+            "/api/searchfox/line?path={PATH}&line={line}&commit_idx=0&revision={revision}"
+        ))
+        .body(Body::empty())
         .unwrap()
 }
 
@@ -124,39 +272,61 @@ fn search_request() -> Request<Body> {
         .unwrap()
 }
 
-// One test, because the mock's URL is passed to every client through SEARCHFOX_BASE_URL.
+// One test, because the mock's URL is shared through SEARCHFOX_BASE_URL.
 #[tokio::test]
-async fn searchfox_endpoints_gate_and_resolve() {
-    std::env::set_var("SEARCHFOX_BASE_URL", start_mock().await);
+async fn searchfox_endpoints_gate_and_resolve_at_the_indexed_revision() {
+    let repo = scratch_dir("repo");
+    let plain = scratch_dir("plain");
+    let (git_old, git_new) = indexed_repository(&repo);
+    let hashes = || Hashes {
+        hg_old: "a".repeat(40),
+        hg_new: "b".repeat(40),
+        git_old: git_old.clone(),
+        git_new: git_new.clone(),
+    };
 
-    let app = lrv::server::create_router(state(false), false);
-    let (status, _) = send(&app, resolve_request(PATH)).await;
+    // Gating comes first: disabled setting, then public server.
+    start_mock(hashes(), false).await;
+    let app = lrv::server::create_router(state(&repo, false, false), false);
+    let (status, _) = send(&app, resolve_request(3)).await;
     assert_eq!(status, StatusCode::CONFLICT, "disabled by default");
-    let (status, _) = send(&app, search_request()).await;
-    assert_eq!(status, StatusCode::CONFLICT, "disabled by default");
-
-    let enabled = state(false);
-    enabled.config.lock().await.searchfox = true;
-    let app = lrv::server::create_router(enabled, false);
-
-    let (status, body) = send(&app, resolve_request(PATH)).await;
-    assert_eq!(status, StatusCode::OK);
+    let app = lrv::server::create_router(state(&repo, true, true), false);
+    let (status, _) = send(&app, resolve_request(3)).await;
     assert_eq!(
-        body["query"],
-        "symbol:_ZN7mozilla3dom9AudioNode10DisconnectERNS_11ErrorResultE"
+        status,
+        StatusCode::FORBIDDEN,
+        "public servers never look up"
     );
+    let (status, _) = send(&app, search_request()).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // The head moves from the old to the new revision while the first lookup reads it. The
+    // lookup at the old revision is dropped and the lookup repeats at the new one, whose analysis
+    // and text (from the repository) agree.
+    let mock = start_mock(hashes(), true).await;
+    let app = lrv::server::create_router(state(&repo, false, true), false);
+    let (status, body) = send(&app, resolve_request(3)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["query"], SYMBOL_QUERY);
     assert_eq!(
         body["pretty"],
         "function mozilla::dom::AudioNode::Disconnect"
     );
+    assert_eq!(
+        mock.analysis_reads.load(Ordering::SeqCst),
+        2,
+        "retried once"
+    );
 
-    let (status, body) = send(&app, resolve_request("dom/media/webaudio/Missing.cpp")).await;
+    // The clicked line is unchanged in the review but not in searchfox's copy: unresolved.
+    let (status, body) = send(&app, resolve_request(1)).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["query"], "id:Disconnect");
-    assert_eq!(body["pretty"], serde_json::Value::Null);
 
+    // Search reports the revision its line numbers are at.
     let (status, body) = send(&app, search_request()).await;
     assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["revision"], git_new);
     assert_eq!(body["groups"][0]["kind"], "normal");
     assert_eq!(body["groups"][0]["category"], "Definitions");
     assert_eq!(
@@ -164,11 +334,26 @@ async fn searchfox_endpoints_gate_and_resolve() {
         serde_json::json!([16, 26])
     );
 
-    let public_state = state(true);
-    public_state.config.lock().await.searchfox = true;
-    let app = lrv::server::create_router(public_state, false);
-    let (status, _) = send(&app, resolve_request(PATH)).await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
-    let (status, _) = send(&app, search_request()).await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
+    // searchfox line 2 is the signature, which the review has as line 3.
+    let (status, body) = send(&app, line_request(2, &git_new)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, serde_json::json!({"line": 3, "exact": true}));
+    // Past the end of searchfox's copy: the last unchanged line.
+    let (status, body) = send(&app, line_request(99, &git_new)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, serde_json::json!({"line": 4, "exact": false}));
+    let (status, _) = send(&app, line_request(2, "not-a-revision")).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    // Without a repository holding the commit, the text comes from searchfox's source page,
+    // which is only trusted while the head is the revision.
+    let mock = start_mock(hashes(), false).await;
+    let app = lrv::server::create_router(state(&plain, false, true), false);
+    let (status, body) = send(&app, resolve_request(3)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["query"], SYMBOL_QUERY);
+    assert_eq!(mock.analysis_reads.load(Ordering::SeqCst), 1);
+
+    let _ = std::fs::remove_dir_all(&repo);
+    let _ = std::fs::remove_dir_all(&plain);
 }

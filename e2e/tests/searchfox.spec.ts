@@ -17,8 +17,11 @@ const RESOLVED = {
   symbols: ['AudioNode::Disconnect'],
 };
 
+const REVISION = 'c'.repeat(40);
+
 const SEARCH_RESULTS = {
   query: RESOLVED.query,
+  revision: REVISION,
   groups: [
     {
       kind: 'normal',
@@ -61,10 +64,14 @@ const SEARCH_RESULTS = {
   ],
 };
 
-type SearchfoxMock = { resolveBodies: unknown[]; searchQueries: string[] };
+type SearchfoxMock = {
+  resolveBodies: unknown[];
+  searchQueries: string[];
+  lineQueries: Record<string, string>[];
+};
 
 async function mockSearchfox(page: Page): Promise<SearchfoxMock> {
-  const mock: SearchfoxMock = { resolveBodies: [], searchQueries: [] };
+  const mock: SearchfoxMock = { resolveBodies: [], searchQueries: [], lineQueries: [] };
   await page.route('**/api/context', async (route) => {
     const response = await route.fetch();
     await route.fulfill({
@@ -79,6 +86,12 @@ async function mockSearchfox(page: Page): Promise<SearchfoxMock> {
   await page.route('**/api/searchfox/search?*', async (route) => {
     mock.searchQueries.push(new URL(route.request().url()).searchParams.get('q') ?? '');
     await route.fulfill({ json: SEARCH_RESULTS });
+  });
+  // searchfox's line 2 is the reviewed line 2 here.
+  await page.route('**/api/searchfox/line?*', async (route) => {
+    const params = new URL(route.request().url()).searchParams;
+    mock.lineQueries.push(Object.fromEntries(params));
+    await route.fulfill({ json: { line: 2, exact: true } });
   });
   return mock;
 }
@@ -184,6 +197,8 @@ test.describe('searchfox code navigation', () => {
       col: 9,
       word: 'Disconnect',
       text: CALL_LINE,
+      side: 'new',
+      commit_idx: 0,
     });
     await expect.poll(() => mock.searchQueries).toEqual([RESOLVED.query]);
     await expect(page.locator('.submit-modal-overlay')).toHaveCount(0);
@@ -200,7 +215,7 @@ test.describe('searchfox code navigation', () => {
     page,
   }) => {
     await isolateConfig(page, { searchfox: true });
-    await mockSearchfox(page);
+    const mock = await mockSearchfox(page);
     const started = await startReview(root);
     child = started.child;
     await page.goto(started.url);
@@ -242,6 +257,40 @@ test.describe('searchfox code navigation', () => {
     await expect(
       page.locator('#editor-container:not(.diff-loading) .editor.modified .view-lines'),
     ).toContainText('beta target line');
+    await expect(page.locator('.focused-line')).toBeVisible();
+    expect(mock.lineQueries).toEqual([
+      { path: 'b.txt', line: '2', commit_idx: '0', revision: REVISION },
+    ]);
+    await expect(page.locator('.searchfox-toast')).toHaveCount(0);
+  });
+
+  test('a hit whose line changed since searchfox revision reveals the nearest unchanged line and says so', async ({
+    page,
+  }) => {
+    await isolateConfig(page, { searchfox: true });
+    await mockSearchfox(page);
+    await page.route('**/api/searchfox/line?*', (route) =>
+      route.fulfill({ json: { line: 1, exact: false } }),
+    );
+    const started = await startReview(root);
+    child = started.child;
+    await page.goto(started.url);
+    await expect(page.locator('#preloader-overlay')).toHaveCount(0);
+
+    const point = await modifiedClickPoint(page, 2, 10);
+    await page.keyboard.down(modifier);
+    await page.keyboard.down('Alt');
+    await page.mouse.click(point.x, point.y);
+    await page.keyboard.up('Alt');
+    await page.keyboard.up(modifier);
+    await page
+      .locator('.searchfox-modal .searchfox-line', { hasText: 'beta target line' })
+      .last()
+      .click();
+
+    await expect(page.locator('.searchfox-toast')).toHaveText(
+      "Line changed since searchfox's revision; showing the nearest unchanged line",
+    );
     await expect(page.locator('.focused-line')).toBeVisible();
   });
 

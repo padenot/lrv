@@ -1526,9 +1526,33 @@ test.describe('Review Workflow E2E', () => {
     ] as const;
 
     const lookups = (oldPath: string, newPath: string) => [
-      { path: newPath, line: 3, col: 7, word: 'added', text: 'const added = 3;' },
-      { path: oldPath, line: 3, col: 7, word: 'removed', text: 'const removed = 2;' },
-      { path: newPath, line: 1, col: 7, word: 'context', text: 'const context = 1;' },
+      {
+        path: newPath,
+        line: 3,
+        col: 7,
+        word: 'added',
+        text: 'const added = 3;',
+        side: 'new',
+        commit_idx: 0,
+      },
+      {
+        path: oldPath,
+        line: 3,
+        col: 7,
+        word: 'removed',
+        text: 'const removed = 2;',
+        side: 'old',
+        commit_idx: 0,
+      },
+      {
+        path: newPath,
+        line: 1,
+        col: 7,
+        word: 'context',
+        text: 'const context = 1;',
+        side: 'new',
+        commit_idx: 0,
+      },
     ];
 
     for (const view of ['side-by-side', 'inline'] as const) {
@@ -1552,7 +1576,12 @@ test.describe('Review Workflow E2E', () => {
           await expectNoResultsToast(page);
         }
         await expect.poll(() => resolves.length).toBe(3);
-        expect(resolves).toEqual(lookups('searchfox.txt', 'searchfox.txt'));
+        const expected = lookups('searchfox.txt', 'searchfox.txt');
+        // Side-by-side, the first context line is in the left pane, which shows the old side.
+        if (view === 'side-by-side') {
+          expected[2]!.side = 'old';
+        }
+        expect(resolves).toEqual(expected);
       });
     }
 
@@ -1673,11 +1702,16 @@ test.describe('Review Workflow E2E', () => {
       await page.route('**/api/searchfox/resolve', (route) =>
         route.fulfill({ json: { query: 'id:target', pretty: null, symbols: [] } }),
       );
-      // searchfox's revision has the definition 5 lines higher than the reviewed file.
+      // searchfox's revision has the definition 5 lines higher than the reviewed file, so the
+      // server's mapping of the hit onto the reviewed file is mocked here.
+      await page.route('**/api/searchfox/line?*', (route) =>
+        route.fulfill({ json: { line: 50, exact: true } }),
+      );
       await page.route('**/api/searchfox/search?*', (route) =>
         route.fulfill({
           json: {
             query: 'id:target',
+            revision: 'c'.repeat(40),
             groups: [
               {
                 kind: 'normal',

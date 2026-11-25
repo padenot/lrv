@@ -57,7 +57,9 @@ async fn test_csp_header_present() {
         pull_requests: Default::default(),
         store: None,
         publish: None,
-        searchfox: std::sync::Arc::new(lrv::searchfox::Searchfox::new().expect("searchfox client")),
+        searchfox: std::sync::Arc::new(
+            lrv::searchfox::Searchfox::new("/tmp".to_owned()).expect("searchfox client"),
+        ),
     };
 
     let app = lrv::server::create_router(state, false);
@@ -128,7 +130,9 @@ async fn test_csp_on_assets_and_api() {
         pull_requests: Default::default(),
         store: None,
         publish: None,
-        searchfox: std::sync::Arc::new(lrv::searchfox::Searchfox::new().expect("searchfox client")),
+        searchfox: std::sync::Arc::new(
+            lrv::searchfox::Searchfox::new("/tmp".to_owned()).expect("searchfox client"),
+        ),
     };
 
     let app = lrv::server::create_router(state, false);

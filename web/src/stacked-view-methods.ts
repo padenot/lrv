@@ -1230,6 +1230,8 @@ export class StackedViewMethods {
       col,
       word: identifier.word,
       text,
+      side: deleted ? 'old' : 'new',
+      commit_idx: this.currentCommitIdx,
     };
   }
 

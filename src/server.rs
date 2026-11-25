@@ -826,6 +826,7 @@ pub fn create_router(state: AppState, enable_trace: bool) -> Router {
         .route("/api/phabricator/publish", post(publish_phabricator))
         .route("/api/searchfox/resolve", post(searchfox_resolve))
         .route("/api/searchfox/search", get(searchfox_search))
+        .route("/api/searchfox/line", get(searchfox_line))
         .layer(middleware::from_fn(security_headers))
         .with_state(state);
 
@@ -1038,6 +1039,17 @@ async fn get_file_content(
     Query(query): Query<FileQuery>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let commit_idx = state.clamp_commit(query.commit.unwrap_or(0));
+    let content = file_content(&state, commit_idx, &query.path, &query.side).await?;
+    Ok(Json(serde_json::json!({ "content": content })))
+}
+
+/// The full text of `path` on `side` ("old" or "new") of commit `commit_idx`, as the review shows it.
+async fn file_content(
+    state: &AppState,
+    commit_idx: usize,
+    path: &str,
+    side: &str,
+) -> Result<String, StatusCode> {
     let diff = &state.diffs[commit_idx];
 
     // Base path is the working directory; we resolve old/new lazily from VCS or diff
@@ -1047,7 +1059,7 @@ async fn get_file_content(
         std::fs::canonicalize(base_path).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // Basic path validation on input path
-    let rel_path = Path::new(&query.path);
+    let rel_path = Path::new(path);
     if rel_path.is_absolute()
         || rel_path
             .components()
@@ -1059,18 +1071,17 @@ async fn get_file_content(
     // For the "new" side we require the file to exist on disk and stay under root.
     // For the "old" side we first try to reconstruct from the parsed diff hunks
     // (works for jj or any stdin-provided diff), and only then fall back to VCS.
-    let content = match query.side.as_str() {
+    match side {
         "new" => {
             // Check precomputed new_caches first (populated synchronously at startup)
             if let Some(cached) = {
                 let cache = state.new_caches[commit_idx].lock().await;
-                cache.get(&query.path).cloned()
+                cache.get(path).cloned()
             } {
-                return Ok(Json(serde_json::json!({ "content": cached })));
+                return Ok(cached);
             }
 
             let repo = &state.context.working_directory;
-            let path = &query.path;
             let mut content_new = String::new();
 
             // For jj repos with a known commit hash, fetch directly from jj.
@@ -1078,7 +1089,7 @@ async fn get_file_content(
                 if let Some(hash) = &diff.commit_hash {
                     let out = std::process::Command::new("jj")
                         .current_dir(repo)
-                        .args(["file", "show", "-r", hash, "--", path.as_str()])
+                        .args(["file", "show", "-r", hash, "--", path])
                         .output()
                         .unwrap_or_else(|_| failed_output());
                     if out.status.success() {
@@ -1089,7 +1100,7 @@ async fn get_file_content(
 
             if content_new.is_empty() {
                 // Try Git blob OID from diff if present, fallback to filesystem.
-                content_new = if let Some(fe) = find_file(&diff.files, &query.path) {
+                content_new = if let Some(fe) = find_file(&diff.files, path) {
                     let mut content = String::new();
 
                     if let Some(oid) = &fe.new_blob {
@@ -1134,27 +1145,24 @@ async fn get_file_content(
                 };
             }
 
-            content_new
+            Ok(content_new)
         }
         "old" => {
             // Cache check first
             if let Some(cached) = {
                 let cache = state.old_caches[commit_idx].lock().await;
-                cache.get(&query.path).cloned()
+                cache.get(path).cloned()
             } {
-                cached
+                Ok(cached)
             } else {
-                let content =
-                    resolve_old_content(diff, &state.context.working_directory, &query.path);
+                let content = resolve_old_content(diff, &state.context.working_directory, path);
                 let mut cache = state.old_caches[commit_idx].lock().await;
-                cache.insert(query.path.clone(), content.clone());
-                content
+                cache.insert(path.to_owned(), content.clone());
+                Ok(content)
             }
         }
-        _ => return Err(StatusCode::BAD_REQUEST),
-    };
-
-    Ok(Json(serde_json::json!({ "content": content })))
+        _ => Err(StatusCode::BAD_REQUEST),
+    }
 }
 
 async fn get_file_raw(
@@ -1826,10 +1834,54 @@ async fn searchfox_resolve(
     if let Err(status) = searchfox_available(&state).await {
         return status.into_response();
     }
-    match state.searchfox.resolve(&target).await {
+    let commit_idx = state.clamp_commit(target.commit_idx);
+    let reviewed = match file_content(&state, commit_idx, &target.path, target.side.as_str()).await
+    {
+        Ok(text) => text,
+        Err(status) => return status.into_response(),
+    };
+    match state.searchfox.resolve(&target, &reviewed).await {
         Ok(resolved) => Json(resolved).into_response(),
         Err(e) => {
             tracing::warn!("Searchfox lookup failed: {e:#}");
+            (StatusCode::BAD_GATEWAY, "searchfox request failed").into_response()
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct SearchfoxLineQuery {
+    path: String,
+    /// The line in searchfox's copy at `revision`.
+    line: usize,
+    commit_idx: usize,
+    revision: String,
+}
+
+/// Where a line of searchfox's `revision` is in the new side of commit `commit_idx`.
+async fn searchfox_line(
+    State(state): State<AppState>,
+    Query(query): Query<SearchfoxLineQuery>,
+) -> Response {
+    if let Err(status) = searchfox_available(&state).await {
+        return status.into_response();
+    }
+    if !searchfox::is_full_hash(&query.revision) {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+    let commit_idx = state.clamp_commit(query.commit_idx);
+    let reviewed = match file_content(&state, commit_idx, &query.path, "new").await {
+        Ok(text) => text,
+        Err(status) => return status.into_response(),
+    };
+    match state
+        .searchfox
+        .hit_line(&query.path, &query.revision, &reviewed, query.line)
+        .await
+    {
+        Ok(line) => Json(line).into_response(),
+        Err(e) => {
+            tracing::warn!("Searchfox line mapping failed: {e:#}");
             (StatusCode::BAD_GATEWAY, "searchfox request failed").into_response()
         }
     }

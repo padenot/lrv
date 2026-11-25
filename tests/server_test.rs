@@ -65,7 +65,9 @@ fn test_app_state_construction() {
         pull_requests: Default::default(),
         store: None,
         publish: None,
-        searchfox: std::sync::Arc::new(lrv::searchfox::Searchfox::new().expect("searchfox client")),
+        searchfox: std::sync::Arc::new(
+            lrv::searchfox::Searchfox::new("/tmp".to_owned()).expect("searchfox client"),
+        ),
     };
 }
 
@@ -128,7 +130,9 @@ fn test_create_router() {
         pull_requests: Default::default(),
         store: None,
         publish: None,
-        searchfox: std::sync::Arc::new(lrv::searchfox::Searchfox::new().expect("searchfox client")),
+        searchfox: std::sync::Arc::new(
+            lrv::searchfox::Searchfox::new("/tmp".to_owned()).expect("searchfox client"),
+        ),
     };
 
     // Should not panic
@@ -227,7 +231,9 @@ fn review_note_state() -> lrv::server::AppState {
         pull_requests: Default::default(),
         store: None,
         publish: None,
-        searchfox: std::sync::Arc::new(lrv::searchfox::Searchfox::new().expect("searchfox client")),
+        searchfox: std::sync::Arc::new(
+            lrv::searchfox::Searchfox::new("/tmp".to_owned()).expect("searchfox client"),
+        ),
     }
 }
 

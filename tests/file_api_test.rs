@@ -72,7 +72,9 @@ fn make_state_with_root(root: &str) -> lrv::server::AppState {
         pull_requests: Default::default(),
         store: None,
         publish: None,
-        searchfox: std::sync::Arc::new(lrv::searchfox::Searchfox::new().expect("searchfox client")),
+        searchfox: std::sync::Arc::new(
+            lrv::searchfox::Searchfox::new("/tmp".to_owned()).expect("searchfox client"),
+        ),
     }
 }
 

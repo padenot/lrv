@@ -100,7 +100,9 @@ fn make_jj_state(
         pull_requests: Default::default(),
         store: None,
         publish: None,
-        searchfox: std::sync::Arc::new(lrv::searchfox::Searchfox::new().expect("searchfox client")),
+        searchfox: std::sync::Arc::new(
+            lrv::searchfox::Searchfox::new("/tmp".to_owned()).expect("searchfox client"),
+        ),
     }
 }
 
@@ -386,7 +388,9 @@ fn make_state_from_patch(repo_dir: &std::path::Path, patch: &str) -> lrv::server
         pull_requests: Default::default(),
         store: None,
         publish: None,
-        searchfox: std::sync::Arc::new(lrv::searchfox::Searchfox::new().expect("searchfox client")),
+        searchfox: std::sync::Arc::new(
+            lrv::searchfox::Searchfox::new("/tmp".to_owned()).expect("searchfox client"),
+        ),
     }
 }
 

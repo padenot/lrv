@@ -1489,7 +1489,7 @@ async fn main() -> Result<()> {
         pull_requests: Arc::new(pull_requests),
         store,
         publish: publisher,
-        searchfox: Arc::new(searchfox::Searchfox::new()?),
+        searchfox: Arc::new(searchfox::Searchfox::new(working_dir)?),
     };
 
     // Create router (we'll clone per listener)

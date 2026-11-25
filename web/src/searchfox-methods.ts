@@ -5,11 +5,13 @@ import type { RenderFileResult } from '../../node_modules/@pierre/diffs/dist/typ
 import { getStackedWorkerPool, themeTypeFor } from './stacked-view-methods';
 import {
   resolveSearchfox,
+  revealSearchfoxLine,
   SEARCHFOX_FLASH_MS,
   searchSearchfox,
   searchfoxSearchUrl,
   searchfoxSourceUrl,
   type SearchfoxGroup,
+  type SearchfoxHit,
   type SearchfoxResolved,
   type SearchfoxResults,
   type SearchfoxTarget,
@@ -73,7 +75,7 @@ export class SearchfoxMethods {
   declare loadFile: AppContext['loadFile'];
   declare setFocusedLine: AppContext['setFocusedLine'];
   declare editor: AppContext['editor'];
-  declare fetchFilePair: AppContext['fetchFilePair'];
+  declare currentCommitIdx: AppContext['currentCommitIdx'];
   declare revealStackedLine: AppContext['revealStackedLine'];
 
   async searchfoxLookup(
@@ -143,11 +145,16 @@ export class SearchfoxMethods {
     close: () => void,
   ) {
     for (const group of results.groups) {
-      body.appendChild(this.searchfoxGroupNode(tree, group, close));
+      body.appendChild(this.searchfoxGroupNode(tree, results.revision, group, close));
     }
   }
 
-  private searchfoxGroupNode(tree: string, group: SearchfoxGroup, close: () => void) {
+  private searchfoxGroupNode(
+    tree: string,
+    revision: string,
+    group: SearchfoxGroup,
+    close: () => void,
+  ) {
     const heading = el('h3', { className: 'searchfox-category', text: group.category });
     if (group.kind !== 'normal') {
       heading.appendChild(el('span', { className: 'searchfox-kind', text: group.kind }));
@@ -179,7 +186,7 @@ export class SearchfoxMethods {
         ]);
         row.addEventListener('click', () => {
           close();
-          void this.goToSearchfoxHit(tree, { path: file.path, lno: line.lno, text: line.line });
+          void this.goToSearchfoxHit(tree, { path: file.path, lno: line.lno, revision });
         });
         section.appendChild(row);
       }
@@ -239,11 +246,18 @@ export class SearchfoxMethods {
   private async goToSearchfoxHit(tree: string, hit: SearchfoxHit): Promise<boolean> {
     const index = this.files.findIndex((file) => file.path === hit.path);
     if (index === -1) {
-      return openInNewTab(searchfoxSourceUrl(tree, hit.path, hit.lno));
+      return openInNewTab(searchfoxSourceUrl(tree, hit.revision, hit.path, hit.lno));
     }
-    // searchfox numbers lines at its indexed revision; find the same text in the reviewed file.
-    const { new: contents } = await this.fetchFilePair(hit.path);
-    const line = localLine(contents.split('\n'), hit);
+    // searchfox numbers lines at its revision; the server maps them onto the reviewed file.
+    const mapped = await revealSearchfoxLine(hit, this.currentCommitIdx);
+    if (mapped.line === null) {
+      showSearchfoxToast("No line of this file is unchanged since searchfox's revision");
+    } else if (!mapped.exact) {
+      showSearchfoxToast(
+        "Line changed since searchfox's revision; showing the nearest unchanged line",
+      );
+    }
+    const line = mapped.line ?? 1;
     if (this.isStacked) {
       await this.revealStackedLine(index, line);
     } else {
@@ -271,27 +285,13 @@ function searchfoxDefinitions(results: SearchfoxResults): SearchfoxHit[] {
     .filter((group) => group.kind === 'normal' && group.category.startsWith('Definitions'))
     .flatMap((group) =>
       group.files.flatMap((file) =>
-        file.lines.map((line) => ({ path: file.path, lno: line.lno, text: line.line })),
+        file.lines.map((line) => ({
+          path: file.path,
+          lno: line.lno,
+          revision: results.revision,
+        })),
       ),
     );
-}
-
-type SearchfoxHit = { path: string; lno: number; text: string };
-
-/** The line of `lines` nearest to the hit's line number whose text is the hit's, else that number. */
-function localLine(lines: string[], hit: SearchfoxHit): number {
-  const text = hit.text.trim();
-  let best: number | null = null;
-  lines.forEach((line, index) => {
-    const lno = index + 1;
-    if (
-      line.trim() === text &&
-      (best === null || Math.abs(lno - hit.lno) < Math.abs(best - hit.lno))
-    ) {
-      best = lno;
-    }
-  });
-  return best ?? Math.min(hit.lno, lines.length);
 }
 
 /** Opens `url` in a new tab; false when the browser blocked it. */

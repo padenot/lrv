@@ -35,6 +35,7 @@ reqwest = { version = "0.13", default-features = false, features = ["form", "jso
 rusqlite = { version = "0.40", features = ["bundled"] }
 sha1_smol = "1.0.1"
 searchfox-lib = "0.21.2"
+similar = "2.7"
 
 [[bin]]
 name = "lrv"

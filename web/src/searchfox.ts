@@ -2,14 +2,16 @@ import { fetchJSON } from './api';
 import { IS_MAC } from './platform';
 
 /** A click on an identifier, in either view. `line` is 1-based in the file
- * shown on the clicked side; `col` is the 0-based UTF-16 offset of the click
- * within `text`, the full text of that line. */
+ * shown on the clicked side of commit `commit_idx`; `col` is the 0-based UTF-16
+ * offset of the click within `text`, the full text of that line. */
 export type SearchfoxTarget = {
   path: string;
   line: number;
   col: number;
   word: string;
   text: string;
+  side: 'old' | 'new';
+  commit_idx: number;
 };
 
 /** `query` is `symbol:A,B` when the token was matched against searchfox's
@@ -37,8 +39,17 @@ export type SearchfoxGroup = {
 
 export type SearchfoxResults = {
   query: string;
+  /** The git revision searchfox's line numbers in `groups` refer to. */
+  revision: string;
   groups: SearchfoxGroup[];
 };
+
+/** A line of searchfox's `revision`, and the reviewed line it corresponds to. */
+export type SearchfoxHit = { path: string; lno: number; revision: string };
+
+/** `line` is the reviewed new-side line; `exact` is false when the hit's line changed since
+ * `revision`, so `line` is the nearest unchanged line before it. Null when none is unchanged. */
+export type RevealedLine = { line: number | null; exact: boolean };
 
 export function resolveSearchfox(target: SearchfoxTarget): Promise<SearchfoxResolved> {
   return fetchJSON('/api/searchfox/resolve', {
@@ -52,8 +63,25 @@ export function searchSearchfox(query: string): Promise<SearchfoxResults> {
   return fetchJSON(`/api/searchfox/search?q=${encodeURIComponent(query)}`);
 }
 
-export function searchfoxSourceUrl(tree: string, path: string, line?: number): string {
-  return `https://searchfox.org/${tree}/source/${path}${line ? `#${line}` : ''}`;
+/** Maps a hit's line, at its searchfox revision, onto the new side of `commitIdx`. */
+export function revealSearchfoxLine(hit: SearchfoxHit, commitIdx: number): Promise<RevealedLine> {
+  const params = new URLSearchParams({
+    path: hit.path,
+    line: String(hit.lno),
+    commit_idx: String(commitIdx),
+    revision: hit.revision,
+  });
+  return fetchJSON(`/api/searchfox/line?${params}`);
+}
+
+/** The source of `path` at `revision`, so `line` is the line searchfox numbered. */
+export function searchfoxSourceUrl(
+  tree: string,
+  revision: string,
+  path: string,
+  line: number,
+): string {
+  return `https://searchfox.org/${tree}/rev/${revision}/${path}#${line}`;
 }
 
 export function searchfoxSearchUrl(tree: string, query: string): string {

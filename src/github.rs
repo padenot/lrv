@@ -296,7 +296,7 @@ fn gh_bin() -> String {
 }
 
 /// Run `gh <args>` and return its stdout, or `None` if it is missing, fails or exceeds `timeout`.
-async fn run_gh(args: &[&str], timeout: Duration) -> Option<Vec<u8>> {
+pub(crate) async fn run_gh(args: &[&str], timeout: Duration) -> Option<Vec<u8>> {
     let mut cmd = Command::new(gh_bin());
     cmd.args(args)
         .stdin(std::process::Stdio::null())
