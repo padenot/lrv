@@ -286,6 +286,82 @@ test.describe('Series mode E2E', () => {
     await expect(commits).toHaveCount(2, { timeout: 5000 });
   });
 
+  test('Phabricator strip waits for status and shows accepted, closed and other reviewers', async ({
+    page,
+  }) => {
+    await page.route('**/api/context', async (route) => {
+      const response = await route.fetch();
+      await route.fulfill({
+        response,
+        json: {
+          ...(await response.json()),
+          phabricator_available: true,
+          phabricator_revisions: ['D122', 'D123'],
+        },
+      });
+    });
+    let releaseStatus!: () => void;
+    const statusReady = new Promise<void>((resolve) => {
+      releaseStatus = resolve;
+    });
+    await page.route('**/api/phabricator', async (route) => {
+      await statusReady;
+      await route.fulfill({
+        json: {
+          user: 'reviewer',
+          revisions: [
+            {
+              id: 'D122',
+              title: 'First',
+              url: 'https://phab.example/D122',
+              commit_idxs: [0],
+              own: false,
+              closed: true,
+              status: 'accepted',
+              status_name: 'Accepted',
+              my_review: 'done',
+              via_group: false,
+              reviewers_pending: 0,
+              publishable: true,
+              published: false,
+            },
+            {
+              id: 'D123',
+              title: 'Second',
+              url: 'https://phab.example/D123',
+              commit_idxs: [1],
+              own: false,
+              closed: false,
+              status: 'needs-review',
+              status_name: 'Needs Review',
+              my_review: 'none',
+              via_group: false,
+              reviewers_pending: 2,
+              publishable: true,
+              published: false,
+            },
+          ],
+        },
+      });
+    });
+    await openApp(page);
+    await expect(page.locator('.series-revision-id')).toHaveText(['D122', 'D123']);
+    await expect(page.locator('.series-review-summary')).toHaveCount(0);
+    await expect(page.locator('.series-revision-status')).toHaveCount(0);
+    releaseStatus();
+    await expect(page.locator('.series-review-summary')).toHaveText(
+      '0 need your review · 1 accepted · 1 other',
+    );
+    await expect(page.locator('.series-waiting-jump')).toBeDisabled();
+    await expect(page.locator('.series-revision-status.revision-accepted')).toHaveText('Accepted');
+    await expect(page.locator('.series-review-icon')).toHaveCount(0);
+    await expect(page.locator('.series-commit').nth(0)).toHaveClass(/revision-closed/);
+    await page.locator('.series-commit').nth(1).click();
+    await expect(page.locator('#commit-revision')).toContainText(
+      'Needs Review · waiting on 2 others',
+    );
+  });
+
   test('Publish follows the selected commit and Finish excludes its published comments', async ({
     page,
   }) => {
@@ -312,6 +388,11 @@ test.describe('Series mode E2E', () => {
               commit_idxs: [1],
               own: false,
               closed: false,
+              status: 'needs-review',
+              status_name: 'Needs Review',
+              my_review: 'waiting',
+              via_group: true,
+              reviewers_pending: 1,
               publishable: true,
               published: false,
             },
@@ -330,12 +411,25 @@ test.describe('Series mode E2E', () => {
       await route.fulfill({ status: 200 });
     });
     await openApp(page);
-    await expect(page.locator('.series-revision-badge')).toHaveText('D123');
+    await expect(page.locator('.series-revision-id')).toHaveText(['D123']);
+    await expect(page.locator('.series-revision-status')).toHaveText('Needs Review');
+    await expect(page.locator('.series-review-icon')).toHaveAttribute(
+      'title',
+      'Waiting on your review (via group)',
+    );
+    await expect(page.locator('.series-review-summary')).toHaveText(
+      '1 needs your review · 0 accepted · 0 other',
+    );
     await expect(page.locator('#publish-commit')).toBeHidden();
-    await page.locator('.series-commit').nth(1).click();
+    await page.locator('.series-waiting-jump').click();
     await expect(page.locator('#publish-commit')).toHaveText('Publish');
     await expect(page.locator('#publish-commit')).toHaveAccessibleName('Publish D123');
-    await expect(page.locator('#commit-revision')).toContainText('D123');
+    await expect(page.locator('#commit-revision')).toContainText(
+      'D123 · Needs Review · waiting on your review',
+    );
+    await page.locator('.series-commit').nth(0).click();
+    await page.locator('.series-waiting-jump').click();
+    await expect(page.locator('.series-commit').nth(1)).toHaveClass(/active/);
     await page.evaluate(() =>
       window.__APP!.commentManager.addComment({
         file: '(commit)',
@@ -355,7 +449,7 @@ test.describe('Series mode E2E', () => {
     expect(published.comments[0].commit_idx).toBe(1);
     await expect(page.locator('#publish-commit')).toHaveText('Published ✓');
     await expect(page.locator('#publish-commit')).toBeDisabled();
-    await expect(page.locator('.series-revision-badge')).toHaveText('D123 ✓');
+    await expect(page.locator('.series-revision-id')).toHaveText(['D123 ✓']);
     await page.locator('.series-commit').nth(0).click();
     await expect(page.locator('#publish-commit')).toBeHidden();
     await page.locator('#submit-review').click();

@@ -1,10 +1,17 @@
+import { REVISION_STATE_CLASSES, reviewWaitingLabel } from './phabricator-status';
 import { acceptedBody } from './review-notes';
 import { el } from './dom';
 import { openModal } from './modal';
 import { fetchJSON } from './api';
 import { commentKey } from './dialog-methods';
 import { type ReviewComment } from './comments';
-import type { AppContext, PhabStatus, PublishState, ReviewAction } from './types/app';
+import type {
+  AppContext,
+  PhabStatus,
+  PhabPublishResponse,
+  PublishState,
+  ReviewAction,
+} from './types/app';
 
 // Phabricator status values: green when accepted, blue when it needs review, grey while
 // waiting on the author.
@@ -21,14 +28,6 @@ function externalLinkIcon(): SVGSVGElement {
   svg.appendChild(path);
   return svg;
 }
-
-const REVISION_STATE_CLASSES: Record<string, string> = {
-  accepted: 'revision-accepted',
-  'needs-review': 'revision-needs-review',
-  'needs-revision': 'revision-waiting',
-  'changes-planned': 'revision-waiting',
-  draft: 'revision-waiting',
-};
 
 export class PublishDialogMethods {
   declare reviewNoteManager: AppContext['reviewNoteManager'];
@@ -115,6 +114,10 @@ export class PublishDialogMethods {
       chip.replaceChildren(label);
       if (revision?.status_name) {
         chip.append(` · ${revision.status_name}`);
+      }
+      const waiting = revision && reviewWaitingLabel(revision);
+      if (waiting) {
+        chip.append(` · ${waiting}`);
       }
     }
     // The revision id is shown by the chip beside the button; screen readers still get it.
@@ -343,12 +346,21 @@ export class PublishDialogMethods {
           if (!response.ok) {
             throw new Error((await response.text()).trim() || `HTTP ${response.status}`);
           }
-          revision.published = true;
+          const { revision: updated } = (await response.json()) as PhabPublishResponse;
+          if (updated) {
+            const existing = this.phabRevisionStatus?.revisions.find((r) => r.id === updated.id);
+            if (existing) {
+              Object.assign(existing, updated);
+            }
+          } else {
+            revision.published = true;
+          }
           comments.forEach((c) => this.publishedCommentKeys.add(commentKey(c)));
           publishableNotes(revision.id).forEach((note) => this.publishedNoteIds.add(note.id!));
           this.publishedRevisionIds.add(revision.id);
           this.renderReviewNotes();
           this.renderSeriesNav();
+          this.updatePublishButton();
           close();
         } catch (error) {
           tabState.error = `Failed to publish review: ${error instanceof Error ? error.message : error}`;

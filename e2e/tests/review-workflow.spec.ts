@@ -774,6 +774,11 @@ test.describe('Review Workflow E2E', () => {
         },
       });
     });
+    await page.route('**/api/series', async (route) => {
+      const response = await route.fetch();
+      const series = await response.json();
+      await route.fulfill({ response, json: { ...series, is_series: true } });
+    });
     await page.route('**/api/phabricator', (route) =>
       route.fulfill({
         json: {
@@ -782,6 +787,11 @@ test.describe('Review Workflow E2E', () => {
             {
               id: 'D123',
               title: 'First revision',
+              status: 'needs-review',
+              status_name: 'Needs Review',
+              my_review: 'waiting',
+              via_group: false,
+              reviewers_pending: 1,
               url: 'https://phab.example/D123',
               commit_idxs: [0],
               own: false,
@@ -820,11 +830,33 @@ test.describe('Review Workflow E2E', () => {
       await route.fulfill(
         bodies.length === 1
           ? { status: 502, body: 'boom' }
-          : { json: { url: 'https://phab.example/D123' } },
+          : {
+              json: {
+                url: 'https://phab.example/D123',
+                revision: {
+                  id: 'D123',
+                  title: 'First revision',
+                  url: 'https://phab.example/D123',
+                  commit_idxs: [0],
+                  own: false,
+                  closed: false,
+                  publishable: true,
+                  published: true,
+                  status: 'needs-revision',
+                  status_name: 'Needs Revision',
+                  my_review: 'done',
+                  via_group: false,
+                  reviewers_pending: 0,
+                },
+              },
+            },
       );
     });
     await openApp(page);
     await expect(page.locator('#submit-review')).toHaveText('Finish');
+    await expect(page.locator('#commit-revision')).toContainText('Needs Review');
+    await expect(page.locator('.series-review-icon')).toHaveCount(1);
+    await expect(page.locator('.series-revision-status')).toHaveText('Needs Review');
     await page.locator('#publish-commit').click();
     const dialog = page.locator('.publish-dialog');
     await expect(dialog.getByRole('tab')).toHaveCount(0);
@@ -845,6 +877,10 @@ test.describe('Review Workflow E2E', () => {
     await expect(dialog).toHaveCount(0);
     await expect(page.locator('#publish-commit')).toHaveText('Published ✓');
     await expect(page.locator('#publish-commit')).toBeDisabled();
+    await expect(page.locator('#commit-revision')).toContainText('Needs Revision');
+    await expect(page.locator('#commit-revision')).not.toContainText('waiting on your review');
+    await expect(page.locator('.series-revision-status')).toHaveText('Needs Revision');
+    await expect(page.locator('.series-review-icon')).toHaveCount(0);
     expect(bodies[1].action).toBe('request-changes');
     expect(bodies[1].overall_comment).toBe('Overall for D123');
     await expect(page.locator('#submit-review')).toBeEnabled();

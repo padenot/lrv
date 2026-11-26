@@ -58,12 +58,17 @@ export type PhabRevisionStatus = {
   closed: boolean;
   status?: string | null;
   status_name?: string | null;
+  my_review: 'waiting' | 'done' | 'none';
+  via_group: boolean;
+  reviewers_pending: number;
   publishable: boolean;
   reason?: string;
   published: boolean;
 };
 
 export type PhabStatus = { user: string; error?: string; revisions: PhabRevisionStatus[] };
+export type PhabPublishResponse = { url: string; revision?: PhabRevisionStatus };
+
 export type PublishState = {
   action: ReviewAction;
   overall: string;
