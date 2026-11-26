@@ -7,6 +7,25 @@ import {
   saveCommentDraft,
   syncCommentDraftToServer,
 } from '../web/src/comment-draft-storage';
+import { identifierAt } from '../web/src/searchfox';
+import { counterpartLine, stepFocus, stepHunk } from '../web/src/diff-utils';
+
+test('identifierAt finds the identifier covering a click, including at its edges', () => {
+  const text = 'AudioNode::Disconnect(x) + $y';
+  assert.deepEqual(identifierAt(text, 11), { word: 'Disconnect', start: 11 });
+  assert.deepEqual(identifierAt(text, 15), { word: 'Disconnect', start: 11 });
+  assert.deepEqual(identifierAt(text, 21), { word: 'Disconnect', start: 11 });
+  assert.deepEqual(identifierAt(text, 0), { word: 'AudioNode', start: 0 });
+  assert.deepEqual(identifierAt(text, 28), { word: '$y', start: 27 });
+});
+
+test('identifierAt rejects punctuation, whitespace and numeric literals', () => {
+  assert.equal(identifierAt('a + b', 2), null);
+  assert.equal(identifierAt('a + b', 3), null);
+  assert.equal(identifierAt('123abc', 0), null);
+  assert.deepEqual(identifierAt('x1 = 0x1F', 1), { word: 'x1', start: 0 });
+  assert.deepEqual(identifierAt('héllo', 4), { word: 'héllo', start: 0 });
+});
 
 const original: ReviewNote = {
   id: 'finding',
@@ -144,4 +163,69 @@ test('SQLite mirror receives the edited note body', async () => {
   } finally {
     globalThis.fetch = previous;
   }
+});
+
+test('stepFocus walks each hunk range, then crosses into the neighbouring range', () => {
+  const hunks = [
+    { side: 'new' as const, start: 2, end: 4 },
+    { side: 'old' as const, start: 7, end: 8 },
+  ];
+  assert.deepEqual(stepFocus(hunks, 0, null, 1), { hunkIndex: 0, focus: { side: 'new', line: 2 } });
+  assert.deepEqual(stepFocus(hunks, 0, { side: 'new', line: 3 }, 1), {
+    hunkIndex: 0,
+    focus: { side: 'new', line: 4 },
+  });
+  assert.deepEqual(stepFocus(hunks, 0, { side: 'new', line: 4 }, 1), {
+    hunkIndex: 1,
+    focus: { side: 'old', line: 7 },
+  });
+  assert.deepEqual(stepFocus(hunks, 1, { side: 'old', line: 7 }, -1), {
+    hunkIndex: 0,
+    focus: { side: 'new', line: 4 },
+  });
+  assert.equal(stepFocus(hunks, 1, { side: 'old', line: 8 }, 1), null);
+  assert.equal(stepFocus(hunks, 0, { side: 'new', line: 2 }, -1), null);
+  assert.equal(stepFocus([], 0, null, 1), null);
+});
+
+test('stepHunk lands on the adjacent range start and stops at the file edges', () => {
+  const hunks = [
+    { side: 'new' as const, start: 2, end: 4 },
+    { side: 'old' as const, start: 7, end: 8 },
+  ];
+  assert.deepEqual(stepHunk(hunks, 0, 1), { hunkIndex: 1, focus: { side: 'old', line: 7 } });
+  assert.equal(stepHunk(hunks, 1, 1), null);
+  assert.equal(stepHunk(hunks, 0, -1), null);
+  assert.equal(stepHunk([], 0, 1), null);
+});
+
+test('counterpartLine pairs the deleted and added lines of a change block by position', () => {
+  // Old lines 2-3 replaced by new lines 2-4; old 6 kept as new 7; new 9 added.
+  const hunks = [
+    {
+      lines: [
+        { type: 'context', old_line: 1, new_line: 1 },
+        { type: 'delete', old_line: 2, new_line: null },
+        { type: 'delete', old_line: 3, new_line: null },
+        { type: 'add', old_line: null, new_line: 2 },
+        { type: 'add', old_line: null, new_line: 3 },
+        { type: 'add', old_line: null, new_line: 4 },
+        { type: 'context', old_line: 4, new_line: 5 },
+      ],
+    },
+    {
+      lines: [
+        { type: 'context', old_line: 6, new_line: 7 },
+        { type: 'add', old_line: null, new_line: 9 },
+      ],
+    },
+  ];
+  assert.deepEqual(counterpartLine(hunks, { side: 'old', line: 2 }), { side: 'new', line: 2 });
+  assert.deepEqual(counterpartLine(hunks, { side: 'old', line: 3 }), { side: 'new', line: 3 });
+  assert.deepEqual(counterpartLine(hunks, { side: 'new', line: 3 }), { side: 'old', line: 3 });
+  // Past the shorter side: its last line.
+  assert.deepEqual(counterpartLine(hunks, { side: 'new', line: 4 }), { side: 'old', line: 3 });
+  // Unchanged lines, and an addition with nothing deleted opposite it.
+  assert.equal(counterpartLine(hunks, { side: 'new', line: 1 }), null);
+  assert.equal(counterpartLine(hunks, { side: 'new', line: 9 }), null);
 });

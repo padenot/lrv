@@ -10,7 +10,7 @@ mod themes;
 
 use anyhow::{Context, Result};
 use clap::{ArgAction, Parser};
-use lrv::{agent, discovery, launch, netutil, output, types};
+use lrv::{agent, discovery, launch, netutil, output, searchfox, types};
 use moz_cli_version_check::VersionChecker;
 use std::collections::HashMap;
 use std::env;
@@ -72,6 +72,7 @@ fn get_project_context() -> ProjectContext {
         phabricator_available: false,
         phabricator_revisions: Vec::new(),
         own_revisions: Vec::new(),
+        searchfox_tree: searchfox::SEARCHFOX_TREE.to_owned(),
     }
 }
 
@@ -1488,6 +1489,7 @@ async fn main() -> Result<()> {
         pull_requests: Arc::new(pull_requests),
         store,
         publish: publisher,
+        searchfox: Arc::new(searchfox::Searchfox::new(working_dir)?),
     };
 
     // Create router (we'll clone per listener)

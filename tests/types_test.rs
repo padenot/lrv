@@ -67,6 +67,7 @@ fn test_project_context() {
         phabricator_available: false,
         phabricator_revisions: Vec::new(),
         own_revisions: Vec::new(),
+        searchfox_tree: lrv::searchfox::SEARCHFOX_TREE.to_owned(),
     };
 
     assert_eq!(context.working_directory, "/home/user/project");

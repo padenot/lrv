@@ -9,6 +9,7 @@ export const DEFAULT_APP_CONFIG: AppConfig = {
   word_wrap: false,
   ligatures: false,
   auto_fetch_comments: false,
+  searchfox: false,
 };
 
 export function resolveAppConfig(input: AppConfigInput): AppConfig {
@@ -21,5 +22,6 @@ export function resolveAppConfig(input: AppConfigInput): AppConfig {
     word_wrap: input.word_wrap ?? DEFAULT_APP_CONFIG.word_wrap,
     ligatures: input.ligatures ?? DEFAULT_APP_CONFIG.ligatures,
     auto_fetch_comments: input.auto_fetch_comments ?? DEFAULT_APP_CONFIG.auto_fetch_comments,
+    searchfox: input.searchfox ?? DEFAULT_APP_CONFIG.searchfox,
   };
 }

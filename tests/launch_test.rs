@@ -5,7 +5,8 @@ use std::path::{Path, PathBuf};
 fn context() -> ProjectContext {
     serde_json::from_value(serde_json::json!({
         "working_directory": "/tmp/review repo", "git_branch": null, "title": null,
-        "is_public": false, "claude_skill_installed": false, "comment_store_error": null
+        "is_public": false, "claude_skill_installed": false, "comment_store_error": null,
+        "searchfox_tree": "firefox-main"
     }))
     .unwrap()
 }

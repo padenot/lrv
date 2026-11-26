@@ -5,6 +5,8 @@ export type KeyboardAction =
   | 'previousHunk'
   | 'lineDown'
   | 'lineUp'
+  | 'oldSide'
+  | 'newSide'
   | 'toggleView'
   | 'openComment'
   | 'clearFocus'
@@ -17,24 +19,52 @@ export type KeyboardAction =
 
 export type KeyboardShortcut = {
   keys: string[];
+  /** Keys in the stacked view, when they differ from `keys`; empty hides the shortcut there. */
+  stackedKeys?: string[];
   action: KeyboardAction;
   description: string;
 };
+
+/** The keys that trigger `shortcut` in the given view. */
+export function shortcutKeys(
+  shortcut: Pick<KeyboardShortcut, 'keys' | 'stackedKeys'>,
+  stacked: boolean,
+): string[] {
+  return stacked && shortcut.stackedKeys ? shortcut.stackedKeys : shortcut.keys;
+}
 
 export const KEYBOARD_SHORTCUTS: KeyboardShortcut[] = [
   { keys: ['Mod+ArrowDown', 'Mod+J'], action: 'nextFile', description: 'Next file' },
   { keys: ['Mod+ArrowUp', 'Mod+K'], action: 'previousFile', description: 'Previous file' },
   { keys: ['Shift+ArrowDown', 'Shift+J'], action: 'nextHunk', description: 'Next hunk' },
   { keys: ['Shift+ArrowUp', 'Shift+K'], action: 'previousHunk', description: 'Previous hunk' },
-  { keys: ['ArrowDown', 'j'], action: 'lineDown', description: 'Next changed line' },
-  { keys: ['ArrowUp', 'k'], action: 'lineUp', description: 'Previous changed line' },
+  {
+    keys: ['ArrowDown', 'j'],
+    stackedKeys: ['j'],
+    action: 'lineDown',
+    description: 'Next changed line',
+  },
+  {
+    keys: ['ArrowUp', 'k'],
+    stackedKeys: ['k'],
+    action: 'lineUp',
+    description: 'Previous changed line',
+  },
+  { keys: ['h'], action: 'oldSide', description: 'Deleted line opposite the focused line' },
+  { keys: ['l'], action: 'newSide', description: 'Added line opposite the focused line' },
   { keys: ['s'], action: 'toggleView', description: 'Toggle inline/side-by-side' },
   { keys: ['Enter'], action: 'openComment', description: 'Comment on focused line' },
   { keys: ['Escape'], action: 'clearFocus', description: 'Clear focus' },
   { keys: ['Mod+Shift+Enter'], action: 'submitReview', description: 'Finish review' },
   { keys: ['Mod+Enter'], action: 'submitLgtm', description: 'LGTM' },
   { keys: ['?'], action: 'showHelp', description: 'Show keyboard shortcuts' },
-  { keys: ['Mod+F'], action: 'findStackedDiff', description: 'Find in stacked diff' },
+  // Mod+F is left to Monaco's own find in the editor view.
+  {
+    keys: [],
+    stackedKeys: ['Mod+F'],
+    action: 'findStackedDiff',
+    description: 'Find in stacked diff',
+  },
   {
     keys: ['Alt+ArrowDown', 'Mod+Shift+ArrowRight', 'Mod+Shift+L'],
     action: 'nextCommit',
@@ -45,4 +75,13 @@ export const KEYBOARD_SHORTCUTS: KeyboardShortcut[] = [
     action: 'previousCommit',
     description: 'Previous commit (series mode)',
   },
+];
+
+/** Searchfox mouse gestures, listed in the help only when the searchfox setting is on. */
+export const SEARCHFOX_SHORTCUTS: Array<Pick<KeyboardShortcut, 'keys' | 'description'>> = [
+  { keys: ['Mod+click'], description: 'Go to definition' },
+  { keys: ['Mod+Alt+click'], description: 'Find uses' },
+  { keys: ['Mod+Shift+click'], description: 'Open on searchfox.org in a new tab' },
+  { keys: ['Right-click'], description: 'Menu with Go to Definition and Find Uses' },
+  { keys: ['Escape'], description: 'Close the results panel or menu' },
 ];

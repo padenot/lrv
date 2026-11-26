@@ -31,6 +31,7 @@ import { PublishDialogMethods } from './publish-dialog-methods';
 import { DialogMethods } from './dialog-methods';
 import { SeriesMethods } from './series-methods';
 import { StackedViewMethods } from './stacked-view-methods';
+import { SearchfoxMethods } from './searchfox-methods';
 import type {
   AgentState,
   PhabStatus,
@@ -771,6 +772,7 @@ applyMixin(MonacoApp, DiscussionMethods);
 applyMixin(MonacoApp, DialogMethods);
 applyMixin(MonacoApp, SeriesMethods);
 applyMixin(MonacoApp, StackedViewMethods);
+applyMixin(MonacoApp, SearchfoxMethods);
 
 applyMixin(MonacoApp, PublishDialogMethods);
 

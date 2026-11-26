@@ -1,0 +1,562 @@
+import { test, expect, type Locator, type Page } from '@playwright/test';
+import { execFileSync, spawn, type ChildProcess } from 'child_process';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { isolateConfig } from '../test-config';
+import type { AppContext } from '../../web/src/types/app';
+
+const binary = process.env.LRV_BIN || path.resolve(__dirname, '../../target/debug/lrv');
+const TREE = 'mozilla-central';
+const CALL_LINE = '  return Disconnect(count);';
+const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
+
+const RESOLVED = {
+  query: 'symbol:AudioNode::Disconnect',
+  pretty: 'AudioNode::Disconnect',
+  symbols: ['AudioNode::Disconnect'],
+};
+
+const REVISION = 'c'.repeat(40);
+
+const SEARCH_RESULTS = {
+  query: RESOLVED.query,
+  revision: REVISION,
+  groups: [
+    {
+      kind: 'normal',
+      category: 'Definitions (AudioNode::Disconnect)',
+      files: [
+        {
+          path: 'b.txt',
+          lines: [{ lno: 2, line: 'beta target line', bounds: [5, 11], context: null }],
+        },
+      ],
+    },
+    {
+      kind: 'normal',
+      category: 'Uses (AudioNode::Disconnect)',
+      files: [
+        {
+          path: 'a.txt',
+          lines: [{ lno: 2, line: CALL_LINE, bounds: [9, 19], context: 'int main()' }],
+        },
+        {
+          path: 'b.txt',
+          lines: [{ lno: 2, line: 'beta target line', bounds: [5, 11], context: null }],
+        },
+        {
+          path: 'dom/media/Other.cpp',
+          lines: [{ lno: 40, line: '  void Disconnect(out);', bounds: [7, 17], context: null }],
+        },
+      ],
+    },
+    {
+      kind: 'test',
+      category: 'Uses (AudioNode::Disconnect)',
+      files: [
+        {
+          path: 'dom/media/test_disconnect.js',
+          lines: [{ lno: 7, line: 'node.Disconnect();', bounds: [5, 15], context: null }],
+        },
+      ],
+    },
+  ],
+};
+
+type SearchfoxMock = {
+  resolveBodies: unknown[];
+  searchQueries: string[];
+  lineQueries: Record<string, string>[];
+};
+
+async function mockSearchfox(page: Page): Promise<SearchfoxMock> {
+  const mock: SearchfoxMock = { resolveBodies: [], searchQueries: [], lineQueries: [] };
+  await page.route('**/api/context', async (route) => {
+    const response = await route.fetch();
+    await route.fulfill({
+      response,
+      json: { ...(await response.json()), searchfox_tree: TREE },
+    });
+  });
+  await page.route('**/api/searchfox/resolve', async (route) => {
+    mock.resolveBodies.push(route.request().postDataJSON());
+    await route.fulfill({ json: RESOLVED });
+  });
+  await page.route('**/api/searchfox/search?*', async (route) => {
+    mock.searchQueries.push(new URL(route.request().url()).searchParams.get('q') ?? '');
+    await route.fulfill({ json: SEARCH_RESULTS });
+  });
+  // searchfox's line 2 is the reviewed line 2 here.
+  await page.route('**/api/searchfox/line?*', async (route) => {
+    const params = new URL(route.request().url()).searchParams;
+    mock.lineQueries.push(Object.fromEntries(params));
+    await route.fulfill({ json: { line: 2, exact: true } });
+  });
+  return mock;
+}
+
+async function startReview(root: string): Promise<{ url: string; child: ChildProcess }> {
+  const diffPath = path.join(root, 'review.diff');
+  fs.writeFileSync(path.join(root, 'a.txt'), `int main() {\n${CALL_LINE}\n}\n`);
+  fs.writeFileSync(path.join(root, 'b.txt'), 'first\nbeta target line\nthird\n');
+  fs.mkdirSync(path.join(root, 'dom/media'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'dom/media/Node.cpp'), 'void Disconnect(int out);\n// end\n');
+  fs.writeFileSync(
+    diffPath,
+    'diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1,1 +1,3 @@\n-old a\n' +
+      `+int main() {\n+${CALL_LINE}\n+}\n` +
+      'diff --git a/b.txt b/b.txt\n--- a/b.txt\n+++ b/b.txt\n@@ -1,1 +1,3 @@\n-old b\n' +
+      '+first\n+beta target line\n+third\n' +
+      'diff --git a/dom/media/Node.cpp b/dom/media/Node.cpp\n--- a/dom/media/Node.cpp\n+++ b/dom/media/Node.cpp\n@@ -1,1 +1,2 @@\n-old node\n+void Disconnect(int out);\n+// end\n',
+  );
+  const child = spawn(binary, ['--file', diffPath, '--no-open'], {
+    cwd: root,
+    env: {
+      ...process.env,
+      LRV_SERVER_DIR: path.join(root, 'servers'),
+      LRV_COMMENT_DB: path.join(root, 'comments.db'),
+      XDG_CONFIG_HOME: path.join(root, 'config'),
+    },
+  });
+  const url = await new Promise<string>((resolve, reject) => {
+    let output = '';
+    const timer = setTimeout(() => reject(new Error(`Server startup timeout: ${output}`)), 15000);
+    child.stderr?.on('data', (data: Buffer) => {
+      output += data.toString();
+      const match = output.match(/http:\/\/127\.0\.0\.1:\d+/);
+      if (match) {
+        clearTimeout(timer);
+        resolve(match[0]);
+      }
+    });
+    child.on('error', (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.on('exit', (code) => {
+      clearTimeout(timer);
+      reject(new Error(`Server exited ${code}: ${output}`));
+    });
+  });
+  return { url, child };
+}
+
+// Screen coordinates of the caret boundary before `column` in the modified editor.
+// A click just right of that boundary lands on the character at `column`.
+async function modifiedClickPoint(page: Page, lineNumber: number, column: number) {
+  return page.evaluate(
+    ({ lineNumber, column }) => {
+      const diff = monaco.editor.getDiffEditors()[0]!;
+      const modified = diff.getModifiedEditor();
+      const pos = modified.getScrolledVisiblePosition({ lineNumber, column });
+      const rect = modified.getDomNode()!.getBoundingClientRect();
+      return { x: rect.left + pos!.left + 2, y: rect.top + pos!.top + pos!.height / 2 };
+    },
+    { lineNumber, column },
+  );
+}
+
+test.describe('searchfox code navigation', () => {
+  let root: string;
+  let child: ChildProcess | null = null;
+
+  test.beforeEach(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'lrv-searchfox-'));
+    execFileSync('git', ['init', '-q', root]);
+  });
+
+  test.afterEach(() => {
+    child?.kill();
+    child = null;
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  test('Mod+click resolves the identifier and jumps to its single definition in the review', async ({
+    page,
+  }) => {
+    await isolateConfig(page, { searchfox: true });
+    const mock = await mockSearchfox(page);
+    const started = await startReview(root);
+    child = started.child;
+    await page.goto(started.url);
+    await expect(page.locator('#preloader-overlay')).toHaveCount(0);
+    await expect(
+      page.locator('#editor-container:not(.diff-loading) .editor.modified .view-lines'),
+    ).toContainText('Disconnect');
+
+    const point = await modifiedClickPoint(page, 2, 10);
+    await page.keyboard.down(modifier);
+    await page.mouse.click(point.x, point.y);
+    await page.keyboard.up(modifier);
+
+    await expect.poll(() => mock.resolveBodies.length).toBe(1);
+    expect(mock.resolveBodies[0]).toEqual({
+      path: 'a.txt',
+      line: 2,
+      col: 9,
+      word: 'Disconnect',
+      text: CALL_LINE,
+      side: 'new',
+      commit_idx: 0,
+    });
+    await expect.poll(() => mock.searchQueries).toEqual([RESOLVED.query]);
+    await expect(page.locator('.submit-modal-overlay')).toHaveCount(0);
+    await expect(
+      page.locator('#editor-container:not(.diff-loading) .editor.modified .view-lines'),
+    ).toContainText('beta target line');
+    await expect(page.locator('.focused-line')).toBeVisible();
+    // The line flashes briefly, then the flash is removed.
+    await expect(page.locator('.searchfox-flash')).toBeVisible();
+    await expect(page.locator('.searchfox-flash')).toHaveCount(0);
+  });
+
+  test('Mod+Alt+click opens the results panel; a hit in the review opens that file at the line', async ({
+    page,
+  }) => {
+    await isolateConfig(page, { searchfox: true });
+    const mock = await mockSearchfox(page);
+    const started = await startReview(root);
+    child = started.child;
+    await page.goto(started.url);
+    await expect(page.locator('#preloader-overlay')).toHaveCount(0);
+    await expect(
+      page.locator('#editor-container:not(.diff-loading) .editor.modified .view-lines'),
+    ).toContainText('Disconnect');
+
+    const point = await modifiedClickPoint(page, 2, 10);
+    await page.keyboard.down(modifier);
+    await page.keyboard.down('Alt');
+    await page.mouse.click(point.x, point.y);
+    await page.keyboard.up('Alt');
+    await page.keyboard.up(modifier);
+
+    const panel = page.locator('.searchfox-modal');
+    await expect(panel).toBeVisible();
+    await expect(panel.locator('h2')).toHaveText('AudioNode::Disconnect');
+    await expect(panel.locator('.searchfox-category')).toHaveCount(3);
+    await expect(panel.locator('.searchfox-category').nth(0)).toContainText('Definitions');
+    await expect(panel.locator('.searchfox-kind')).toHaveText('test');
+    await expect(panel.locator('.searchfox-line')).toHaveCount(5);
+    await expect(panel.locator('.searchfox-line').nth(1).locator('mark')).toHaveText('Disconnect');
+    // Lines are syntax highlighted by Monaco, with the match still marked.
+    const cppLine = panel.locator('.searchfox-line').nth(3).locator('.searchfox-code');
+    await expect(cppLine.locator('span[class^="mtk"]').first()).toBeAttached();
+    await expect(cppLine.locator('mark')).toHaveText('Disconnect');
+    await expect(panel.locator('.searchfox-in-review')).toHaveCount(3);
+    await expect(panel.locator('.searchfox-file', { hasText: 'Other.cpp' })).not.toContainText(
+      'in review',
+    );
+    await expect(panel.getByRole('link', { name: 'Open on searchfox' })).toHaveAttribute(
+      'href',
+      `https://searchfox.org/${TREE}/search?q=${encodeURIComponent(RESOLVED.query)}`,
+    );
+
+    await panel.locator('.searchfox-line', { hasText: 'beta target line' }).last().click();
+    await expect(page.locator('.submit-modal-overlay')).toHaveCount(0);
+    await expect(
+      page.locator('#editor-container:not(.diff-loading) .editor.modified .view-lines'),
+    ).toContainText('beta target line');
+    await expect(page.locator('.focused-line')).toBeVisible();
+    expect(mock.lineQueries).toEqual([
+      { path: 'b.txt', line: '2', commit_idx: '0', revision: REVISION },
+    ]);
+    await expect(page.locator('.searchfox-toast')).toHaveCount(0);
+  });
+
+  test('a hit whose line changed since searchfox revision reveals the nearest unchanged line and says so', async ({
+    page,
+  }) => {
+    await isolateConfig(page, { searchfox: true });
+    await mockSearchfox(page);
+    await page.route('**/api/searchfox/line?*', (route) =>
+      route.fulfill({ json: { line: 1, exact: false } }),
+    );
+    const started = await startReview(root);
+    child = started.child;
+    await page.goto(started.url);
+    await expect(page.locator('#preloader-overlay')).toHaveCount(0);
+
+    const point = await modifiedClickPoint(page, 2, 10);
+    await page.keyboard.down(modifier);
+    await page.keyboard.down('Alt');
+    await page.mouse.click(point.x, point.y);
+    await page.keyboard.up('Alt');
+    await page.keyboard.up(modifier);
+    await page
+      .locator('.searchfox-modal .searchfox-line', { hasText: 'beta target line' })
+      .last()
+      .click();
+
+    await expect(page.locator('.searchfox-toast')).toHaveText(
+      "Line changed since searchfox's revision; showing the nearest unchanged line",
+    );
+    await expect(page.locator('.focused-line')).toBeVisible();
+  });
+
+  test('editor context menu looks up the identifier under the cursor', async ({ page }) => {
+    await isolateConfig(page, { searchfox: true });
+    const mock = await mockSearchfox(page);
+    const started = await startReview(root);
+    child = started.child;
+    await page.goto(started.url);
+    await expect(page.locator('#preloader-overlay')).toHaveCount(0);
+    await expect(
+      page.locator('#editor-container:not(.diff-loading) .editor.modified .view-lines'),
+    ).toContainText('Disconnect');
+
+    const point = await modifiedClickPoint(page, 2, 10);
+    await page.mouse.click(point.x, point.y, { button: 'right' });
+    await expect(page.getByRole('menuitem', { name: 'Searchfox: Go to Definition' })).toBeVisible();
+    await expect(page.getByRole('menuitem', { name: 'Searchfox: Find Uses' })).toBeVisible();
+    // Synthetic clicks and keys don't activate Monaco menu items under Playwright, so run the
+    // registered action directly, as the menu would.
+    await page.evaluate(() => {
+      monaco.editor.getDiffEditors()[0]!.getModifiedEditor().getAction('searchfox.uses')!.run();
+    });
+
+    await expect(page.locator('.searchfox-modal')).toBeVisible();
+    await expect.poll(() => mock.resolveBodies.length).toBe(1);
+    expect(mock.resolveBodies[0]).toMatchObject({ path: 'a.txt', line: 2, col: 9 });
+    expect(mock.searchQueries).toEqual([RESOLVED.query]);
+  });
+
+  test('Escape closes the results panel', async ({ page }) => {
+    await isolateConfig(page, { searchfox: true });
+    await mockSearchfox(page);
+    const started = await startReview(root);
+    child = started.child;
+    await page.goto(started.url);
+    await expect(page.locator('#preloader-overlay')).toHaveCount(0);
+    await expect(
+      page.locator('#editor-container:not(.diff-loading) .editor.modified .view-lines'),
+    ).toContainText('Disconnect');
+
+    const point = await modifiedClickPoint(page, 2, 10);
+    await page.keyboard.down(modifier);
+    await page.keyboard.down('Alt');
+    await page.mouse.click(point.x, point.y);
+    await page.keyboard.up('Alt');
+    await page.keyboard.up(modifier);
+
+    await expect(page.locator('.searchfox-modal')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.submit-modal-overlay')).toHaveCount(0);
+  });
+
+  test('with the searchfox setting off, Mod+click sends nothing', async ({ page }) => {
+    await isolateConfig(page);
+    const mock = await mockSearchfox(page);
+    const started = await startReview(root);
+    child = started.child;
+    await page.goto(started.url);
+    await expect(page.locator('#preloader-overlay')).toHaveCount(0);
+    await expect(
+      page.locator('#editor-container:not(.diff-loading) .editor.modified .view-lines'),
+    ).toContainText('Disconnect');
+
+    const point = await modifiedClickPoint(page, 2, 10);
+    await page.keyboard.down(modifier);
+    await page.mouse.click(point.x, point.y);
+    await page.keyboard.up(modifier);
+
+    await page.waitForTimeout(500);
+    expect(mock.resolveBodies).toEqual([]);
+    expect(mock.searchQueries).toEqual([]);
+    await expect(page.locator('.submit-modal-overlay')).toHaveCount(0);
+  });
+
+  test('shows a progress indicator while waiting on searchfox', async ({ page }) => {
+    await isolateConfig(page, { searchfox: true });
+    await mockSearchfox(page);
+    let releaseSearch!: () => void;
+    const searchReleased = new Promise<void>((resolve) => (releaseSearch = resolve));
+    await page.route('**/api/searchfox/search?*', async (route) => {
+      await searchReleased;
+      await route.fulfill({ json: SEARCH_RESULTS });
+    });
+    const started = await startReview(root);
+    child = started.child;
+    await page.goto(started.url);
+    await expect(page.locator('#preloader-overlay')).toHaveCount(0);
+    await expect(
+      page.locator('#editor-container:not(.diff-loading) .editor.modified .view-lines'),
+    ).toContainText('Disconnect');
+
+    const point = await modifiedClickPoint(page, 2, 10);
+    await page.keyboard.down(modifier);
+    await page.keyboard.down('Alt');
+    await page.mouse.click(point.x, point.y);
+    await page.keyboard.up('Alt');
+    await page.keyboard.up(modifier);
+
+    await expect(page.locator('.searchfox-busy-indicator')).toBeVisible();
+    await expect(page.locator('body')).toHaveClass(/searchfox-busy/);
+    // The panel only opens once there are results to show.
+    await expect(page.locator('.searchfox-modal')).toHaveCount(0);
+    releaseSearch();
+    await expect(page.locator('.searchfox-modal')).toBeVisible();
+    await expect(page.locator('.searchfox-busy-indicator')).toHaveCount(0);
+    await expect(page.locator('body')).not.toHaveClass(/searchfox-busy/);
+  });
+
+  test('shows a toast instead of the panel when searchfox has no results', async ({ page }) => {
+    await isolateConfig(page, { searchfox: true });
+    await mockSearchfox(page);
+    await page.route('**/api/searchfox/search?*', (route) =>
+      route.fulfill({ json: { query: RESOLVED.query, groups: [] } }),
+    );
+    const started = await startReview(root);
+    child = started.child;
+    await page.goto(started.url);
+    await expect(page.locator('#preloader-overlay')).toHaveCount(0);
+    await expect(
+      page.locator('#editor-container:not(.diff-loading) .editor.modified .view-lines'),
+    ).toContainText('Disconnect');
+
+    const point = await modifiedClickPoint(page, 2, 10);
+    await page.keyboard.down(modifier);
+    await page.keyboard.down('Alt');
+    await page.mouse.click(point.x, point.y);
+    await page.keyboard.up('Alt');
+    await page.keyboard.up(modifier);
+
+    const toast = page.locator('.searchfox-toast');
+    await expect(toast).toHaveText('No searchfox results for AudioNode::Disconnect');
+    await expect(page.locator('.searchfox-modal')).toHaveCount(0);
+    await expect(toast).toHaveCount(0, { timeout: 5000 });
+  });
+
+  for (const scheme of ['firefox-devtools-dark', 'github-light']) {
+    test(`colours result tokens like the stacked view when the review starts there (${scheme})`, async ({
+      page,
+    }) => {
+      await isolateConfig(page, { searchfox: true, stacked_view: true, color_scheme: scheme });
+      await mockSearchfox(page);
+      const started = await startReview(root);
+      child = started.child;
+      await page.goto(started.url);
+      await page.waitForFunction(() => (window as any).__APP_READY === true);
+      await expect(page.locator('#preloader-overlay')).toHaveCount(0);
+      await expect(page.locator('.stacked-code-view')).toBeVisible();
+      const stackedVoid = page
+        .locator('.stacked-code-view [data-line] span', { hasText: /void$/ })
+        .first();
+      await expect(stackedVoid).toBeAttached();
+
+      await page.evaluate(() => {
+        const app = window.__APP as unknown as Pick<AppContext, 'searchfoxLookup'>;
+        const text = '  return Disconnect(count);';
+        void app.searchfoxLookup(
+          { path: 'a.txt', line: 2, col: 9, word: 'Disconnect', text },
+          'uses',
+          false,
+        );
+      });
+
+      const resultLine = page.locator('.searchfox-line').nth(3);
+      // The panel's line is indented, so pierre merges the spaces into the keyword's token.
+      const panelVoid = resultLine.locator('.searchfox-code span', { hasText: /void$/ });
+      await expect(panelVoid).toBeAttached();
+      const colorOf = (locator: Locator) =>
+        locator.evaluate((node) => getComputedStyle(node).color);
+      const keywordColor = await colorOf(panelVoid);
+      expect(keywordColor).not.toBe(await colorOf(resultLine));
+      expect(keywordColor).toBe(await colorOf(stackedVoid));
+    });
+  }
+
+  test('highlights each stacked-view result line on its own', async ({ page }) => {
+    await isolateConfig(page, { searchfox: true, stacked_view: true });
+    await mockSearchfox(page);
+    const line = (lno: number, text: string) => ({
+      lno,
+      line: text,
+      bounds: [text.indexOf('Disconnect'), text.indexOf('Disconnect') + 10],
+      context: null,
+    });
+    await page.route('**/api/searchfox/search?*', (route) =>
+      route.fulfill({
+        json: {
+          query: RESOLVED.query,
+          groups: [
+            {
+              kind: 'normal',
+              category: 'Uses (AudioNode::Disconnect)',
+              files: [
+                {
+                  path: 'dom/media/Other.cpp',
+                  // The first line opens a comment that searchfox's excerpt doesn't close.
+                  lines: [
+                    line(10, '/* Disconnect every node'),
+                    line(40, '  void Disconnect(out);'),
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      }),
+    );
+    const started = await startReview(root);
+    child = started.child;
+    await page.goto(started.url);
+    await page.waitForFunction(() => (window as any).__APP_READY === true);
+    await expect(page.locator('#preloader-overlay')).toHaveCount(0);
+    await expect(page.locator('.stacked-code-view')).toBeVisible();
+    const stackedVoid = page
+      .locator('.stacked-code-view [data-line] span', { hasText: /void$/ })
+      .first();
+    await expect(stackedVoid).toBeAttached();
+
+    await page.evaluate(() => {
+      const app = window.__APP as unknown as Pick<AppContext, 'searchfoxLookup'>;
+      const text = '  return Disconnect(count);';
+      void app.searchfoxLookup(
+        { path: 'a.txt', line: 2, col: 9, word: 'Disconnect', text },
+        'uses',
+        false,
+      );
+    });
+
+    const panelVoid = page
+      .locator('.searchfox-line')
+      .nth(1)
+      .locator('.searchfox-code span', { hasText: /void$/ });
+    await expect(panelVoid).toBeAttached();
+    const colorOf = (locator: Locator) => locator.evaluate((node) => getComputedStyle(node).color);
+    expect(await colorOf(panelVoid)).toBe(await colorOf(stackedVoid));
+  });
+
+  for (const enabled of [true, false]) {
+    test(`the shortcuts help lists the searchfox shortcuts only when enabled (${enabled})`, async ({
+      page,
+    }) => {
+      await isolateConfig(page, { searchfox: enabled });
+      const started = await startReview(root);
+      child = started.child;
+      await page.goto(started.url);
+      await expect(page.locator('#preloader-overlay')).toHaveCount(0);
+      await page.locator('.header .wordmark').click();
+      await page.keyboard.press('?');
+      const help = page.getByRole('dialog', { name: 'Keyboard Shortcuts' });
+      await expect(help.getByText('Next file')).toBeVisible();
+      const section = help.locator('tr.shortcuts-section');
+      const rows = help.locator('tr.shortcuts-section ~ tr');
+      if (enabled) {
+        await expect(section).toContainText('Searchfox');
+        await expect(section).toContainText('searchfox.org');
+        await expect(section).toContainText('GitHub');
+        await expect(rows).toHaveText([
+          /Go to definition/,
+          /Find uses/,
+          /Open on searchfox\.org in a new tab/,
+          /Menu with Go to Definition and Find Uses/,
+          /Close the results panel or menu/,
+        ]);
+      } else {
+        await expect(section).toHaveCount(0);
+      }
+    });
+  }
+});

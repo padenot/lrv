@@ -293,6 +293,8 @@ pub struct ProjectContext {
     /// Per-commit ownership; unknown ownership preserves all review note actions.
     #[serde(default)]
     pub own_revisions: Vec<Option<bool>>,
+    /// Searchfox tree that code navigation queries.
+    pub searchfox_tree: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

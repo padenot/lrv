@@ -10,7 +10,7 @@ import { openModal } from './modal';
 import { fetchJSON } from './api';
 import { resolveAppConfig } from './config';
 import { IS_MAC } from './platform';
-import { KEYBOARD_SHORTCUTS } from './shortcuts';
+import { KEYBOARD_SHORTCUTS, SEARCHFOX_SHORTCUTS, shortcutKeys } from './shortcuts';
 import type { AppContext } from './types/app';
 import { appendLinkifiedText } from './linkify';
 
@@ -71,13 +71,19 @@ export class DialogMethods {
     const tbody = el('tbody');
     const table = el('table', { className: 'shortcuts-table' }, [thead, tbody]);
 
-    KEYBOARD_SHORTCUTS.forEach((shortcut) => {
+    const addRow = (
+      shortcut: (typeof KEYBOARD_SHORTCUTS)[number] | (typeof SEARCHFOX_SHORTCUTS)[number],
+    ) => {
+      const keys = shortcutKeys(shortcut, this.isStacked);
+      if (keys.length === 0) {
+        return;
+      }
       const row = el('tr');
 
       const keysCell = el('td');
       const keyComboDiv = el('div', { className: 'key-combo' });
 
-      shortcut.keys.forEach((combo, idx) => {
+      keys.forEach((combo, idx) => {
         if (idx > 0) {
           keyComboDiv.appendChild(el('span', { className: 'key-or', text: 'or' }));
         }
@@ -88,7 +94,7 @@ export class DialogMethods {
         parts.forEach((part, partIdx) => {
           if (partIdx > 0) {
             const plus = el('span', { text: '+' });
-            plus.style.margin = '0 2px';
+            plus.style.margin = '0 1px';
             plus.style.color = '#888';
             keyComboDiv.appendChild(plus);
           }
@@ -97,6 +103,8 @@ export class DialogMethods {
           const displayKey = part
             .replace('ArrowDown', '↓')
             .replace('ArrowUp', '↑')
+            .replace('ArrowLeft', '←')
+            .replace('ArrowRight', '→')
             .replace('Enter', '⏎');
           key.textContent = displayKey;
           keyComboDiv.appendChild(key);
@@ -110,7 +118,21 @@ export class DialogMethods {
       row.appendChild(keysCell);
       row.appendChild(actionCell);
       tbody.appendChild(row);
-    });
+    };
+    KEYBOARD_SHORTCUTS.forEach(addRow);
+    if (this.config.searchfox) {
+      tbody.appendChild(
+        el('tr', { className: 'shortcuts-section' }, [
+          el('td', { attrs: { colspan: 2 } }, [
+            el('strong', { text: 'Searchfox' }),
+            el('span', {
+              text: 'Sends clicked identifiers and file paths to searchfox.org, and fetches searchfox’s copy of files from GitHub.',
+            }),
+          ]),
+        ]),
+      );
+      SEARCHFOX_SHORTCUTS.forEach(addRow);
+    }
 
     body.appendChild(table);
   }
@@ -146,6 +168,7 @@ export class DialogMethods {
     const currentWordWrap = this.config.word_wrap;
     const currentLigatures = this.config.ligatures;
     const currentAutoFetch = this.config.auto_fetch_comments;
+    const currentSearchfox = this.config.searchfox;
 
     if (window.DEBUG) {
       console.info('Settings modal - current values:', {
@@ -298,6 +321,23 @@ export class DialogMethods {
       ]),
     ]);
 
+    const searchfoxField = el('div', { className: 'settings-field' }, [
+      el('label', { attrs: { for: 'searchfox' }, text: 'Searchfox support' }),
+      el('div', { className: 'checkbox-wrapper' }, [
+        el('input', {
+          attrs: {
+            type: 'checkbox',
+            id: 'searchfox',
+            name: 'searchfox',
+            checked: currentSearchfox,
+          },
+        }),
+        el('span', {
+          text: 'searchfox integration, see keyboard shortcuts',
+        }),
+      ]),
+    ]);
+
     form.appendChild(themeField);
     form.appendChild(fontField);
     form.appendChild(splitViewField);
@@ -305,6 +345,7 @@ export class DialogMethods {
     form.appendChild(ligaturesField);
     form.appendChild(autoCloseField);
     form.appendChild(autoFetchField);
+    form.appendChild(searchfoxField);
 
     body.appendChild(form);
     const colorField = form.querySelector<HTMLSelectElement>('#color-scheme');
@@ -329,6 +370,7 @@ export class DialogMethods {
         word_wrap: formData.get('word_wrap') === 'on',
         ligatures: formData.get('ligatures') === 'on',
         auto_fetch_comments: formData.get('auto_fetch_comments') === 'on',
+        searchfox: formData.get('searchfox') === 'on',
         stacked_view: this.config.stacked_view,
       });
 

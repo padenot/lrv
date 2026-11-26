@@ -3,6 +3,12 @@ import { detectLanguageFromPathAndContent } from './language';
 import { MONACO_HIDE_UNCHANGED } from './diff-utils';
 import { monoFontStack, prefersReducedMotion } from './font';
 import { markAppReady } from './ui-signals';
+import {
+  identifierAt,
+  searchfoxClick,
+  searchfoxMenuActions,
+  type SearchfoxTarget,
+} from './searchfox';
 import type { AppContext, DiffFile } from './types/app';
 import type { editor } from 'monaco-editor';
 
@@ -48,6 +54,7 @@ export class FileLoadingMethods {
   declare jumpToHunk: AppContext['jumpToHunk'];
   declare setFocusedLine: AppContext['setFocusedLine'];
   declare expandCurrentFileAncestors: AppContext['expandCurrentFileAncestors'];
+  declare searchfoxLookup: AppContext['searchfoxLookup'];
   private lastModifiedRangeSelection: EditorSelection | null;
   private lastOriginalRangeSelection: EditorSelection | null;
   private editorClickDisposables: Array<{ dispose(): void }>;
@@ -403,7 +410,12 @@ export class FileLoadingMethods {
     modifiedEditor.updateOptions({ lineNumbers: 'on' });
     originalEditor.updateOptions({ lineNumbers: renderSideBySide ? 'on' : 'off' });
 
-    this.setupEditorClickHandlers(file.path, modifiedEditor, originalEditor);
+    this.setupEditorClickHandlers(
+      file.path,
+      file.old_path ?? file.path,
+      modifiedEditor,
+      originalEditor,
+    );
     this.updateDecorations();
     this.renderReviewNotes();
     if (!viewState) {
@@ -413,6 +425,7 @@ export class FileLoadingMethods {
 
   setupEditorClickHandlers(
     filePath: string,
+    originalPath: string,
     modifiedEditor: editor.IStandaloneCodeEditor,
     originalEditor: editor.IStandaloneCodeEditor,
   ) {
@@ -465,7 +478,93 @@ export class FileLoadingMethods {
           );
         }
       }),
+
+      modifiedEditor.onMouseDown((e) =>
+        this.searchfoxMouseDown(e, modifiedEditor, filePath, 'new'),
+      ),
+      originalEditor.onMouseDown((e) =>
+        this.searchfoxMouseDown(e, originalEditor, originalPath, 'old'),
+      ),
     );
+
+    if (this.config.searchfox) {
+      this.editorClickDisposables.push(
+        ...this.searchfoxContextActions(modifiedEditor, filePath, 'new'),
+        ...this.searchfoxContextActions(originalEditor, originalPath, 'old'),
+      );
+    }
+  }
+
+  private searchfoxContextActions(
+    targetEditor: editor.IStandaloneCodeEditor,
+    path: string,
+    side: 'old' | 'new',
+  ) {
+    return searchfoxMenuActions.map(({ label, mode }) =>
+      targetEditor.addAction({
+        id: `searchfox.${mode}`,
+        label,
+        contextMenuGroupId: 'navigation',
+        run: () => {
+          const position = targetEditor.getPosition();
+          const target = position && this.searchfoxTargetAt(targetEditor, path, side, position);
+          if (target) {
+            void this.searchfoxLookup(target, mode, false);
+          }
+        },
+      }),
+    );
+  }
+
+  private searchfoxMouseDown(
+    e: editor.IEditorMouseEvent,
+    targetEditor: editor.IStandaloneCodeEditor,
+    path: string,
+    side: 'old' | 'new',
+  ) {
+    const click = searchfoxClick(e.event.browserEvent);
+    if (
+      !click ||
+      !this.config.searchfox ||
+      e.target.type !== monaco.editor.MouseTargetType.CONTENT_TEXT ||
+      !e.target.position
+    ) {
+      return;
+    }
+    const target = this.searchfoxTargetAt(targetEditor, path, side, e.target.position);
+    if (!target) {
+      return;
+    }
+    e.event.preventDefault();
+    e.event.stopPropagation();
+    void this.searchfoxLookup(target, click.mode, click.newTab);
+  }
+
+  private searchfoxTargetAt(
+    targetEditor: editor.IStandaloneCodeEditor,
+    path: string,
+    side: 'old' | 'new',
+    position: { lineNumber: number; column: number },
+  ): SearchfoxTarget | null {
+    const model = targetEditor.getModel();
+    if (!model) {
+      return null;
+    }
+    const text = model.getLineContent(position.lineNumber);
+    const col = position.column - 1;
+    const identifier = identifierAt(text, col);
+    if (!identifier) {
+      return null;
+    }
+    return {
+      path,
+      line: position.lineNumber,
+      col,
+      word: identifier.word,
+      text,
+      side,
+      commit_idx: this.currentCommitIdx,
+    };
   }
 
   private beginEditorGutterGesture(

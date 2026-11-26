@@ -37,6 +37,7 @@ fn test_app_state_construction() {
         phabricator_available: false,
         phabricator_revisions: Vec::new(),
         own_revisions: Vec::new(),
+        searchfox_tree: lrv::searchfox::SEARCHFOX_TREE.to_owned(),
     };
 
     let (shutdown_tx, _rx) = tokio::sync::mpsc::channel::<()>(1);
@@ -64,6 +65,9 @@ fn test_app_state_construction() {
         pull_requests: Default::default(),
         store: None,
         publish: None,
+        searchfox: std::sync::Arc::new(
+            lrv::searchfox::Searchfox::new("/tmp".to_owned()).expect("searchfox client"),
+        ),
     };
 }
 
@@ -99,6 +103,7 @@ fn test_create_router() {
         phabricator_available: false,
         phabricator_revisions: Vec::new(),
         own_revisions: Vec::new(),
+        searchfox_tree: lrv::searchfox::SEARCHFOX_TREE.to_owned(),
     };
 
     let (shutdown_tx, _rx) = tokio::sync::mpsc::channel::<()>(1);
@@ -125,6 +130,9 @@ fn test_create_router() {
         pull_requests: Default::default(),
         store: None,
         publish: None,
+        searchfox: std::sync::Arc::new(
+            lrv::searchfox::Searchfox::new("/tmp".to_owned()).expect("searchfox client"),
+        ),
     };
 
     // Should not panic
@@ -196,6 +204,7 @@ fn review_note_state() -> lrv::server::AppState {
         phabricator_available: false,
         phabricator_revisions: Vec::new(),
         own_revisions: Vec::new(),
+        searchfox_tree: lrv::searchfox::SEARCHFOX_TREE.to_owned(),
     };
 
     let (shutdown_tx, _rx) = tokio::sync::mpsc::channel::<()>(1);
@@ -222,6 +231,9 @@ fn review_note_state() -> lrv::server::AppState {
         pull_requests: Default::default(),
         store: None,
         publish: None,
+        searchfox: std::sync::Arc::new(
+            lrv::searchfox::Searchfox::new("/tmp".to_owned()).expect("searchfox client"),
+        ),
     }
 }
 
@@ -279,7 +291,7 @@ async fn test_review_note_api_round_trip() {
     .await
     .unwrap();
     assert!(buffer.contains("data: {\"version\":0}"));
-    assert!(buffer.contains("data: {\"acked\":0,\"attached\":false,"));
+    assert!(buffer.contains("data: {\"attached\":false,"));
     let waiter = agent.clone();
     let poll = tokio::spawn(async move { waiter.wait(0, Duration::from_secs(5)).await });
     tokio::time::timeout(Duration::from_secs(2), async {

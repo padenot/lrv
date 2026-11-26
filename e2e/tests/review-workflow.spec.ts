@@ -1,5 +1,5 @@
 import { commentDraftCount } from '../comment-draft-helpers';
-import { test, expect, Page } from '@playwright/test';
+import { test, expect, Locator, Page } from '@playwright/test';
 import { isolateConfig } from '../test-config';
 import { spawn, ChildProcess } from 'child_process';
 import { promisify } from 'util';
@@ -1492,6 +1492,337 @@ test.describe('Review Workflow E2E', () => {
     await expect(page.locator('#comment-count')).toHaveText('0');
   });
 
+  test.describe('stacked searchfox clicks', () => {
+    // Each line is "const <word> ...", so the second character of the word is column 7.
+    const base = 'const context = 1;\nconst filler = 4;\nconst removed = 2;\n';
+    const changed = 'const context = 1;\nconst filler = 4;\nconst added = 3;\n';
+
+    async function setupSearchfoxRepo(renamedTo?: string) {
+      if (!testRepoPath) {
+        throw new Error('Test repo not initialized');
+      }
+      fs.writeFileSync(path.join(testRepoPath, 'searchfox.txt'), base);
+      await execAsync(
+        `cd "${testRepoPath}" && git add searchfox.txt && git commit -q -m searchfox`,
+      );
+      const newPath = renamedTo ?? 'searchfox.txt';
+      if (renamedTo) {
+        await execAsync(`cd "${testRepoPath}" && git mv searchfox.txt "${renamedTo}"`);
+      }
+      fs.writeFileSync(path.join(testRepoPath, newPath), changed);
+      await stopServer();
+      await startServer();
+    }
+
+    async function mockSearchfox(page: Page) {
+      const resolves: unknown[] = [];
+      await page.route('**/api/searchfox/resolve', (route) => {
+        resolves.push(route.request().postDataJSON());
+        return route.fulfill({ json: { query: 'id:x', pretty: null, symbols: [] } });
+      });
+      await page.route('**/api/searchfox/search?*', (route) =>
+        route.fulfill({ json: { query: 'id:x', groups: [] } }),
+      );
+      return resolves;
+    }
+
+    // The mocked search is empty, so each lookup ends with a toast instead of the results panel.
+    async function expectNoResultsToast(page: Page) {
+      await expect(page.locator('.searchfox-toast')).toContainText('No searchfox results for');
+      await expect(page.locator('.searchfox-modal')).toHaveCount(0);
+    }
+
+    // Left quarter of the second character of `word`, so the caret lands before that character.
+    async function wordPosition(line: Locator, word: string) {
+      return line.evaluate((element, word) => {
+        const start = (element.textContent ?? '').indexOf(word) + 1;
+        const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+        let node = walker.nextNode() as Text;
+        let offset = start;
+        while (offset >= node.length) {
+          offset -= node.length;
+          node = walker.nextNode() as Text;
+        }
+        const range = document.createRange();
+        range.setStart(node, offset);
+        range.setEnd(node, offset + 1);
+        const glyph = range.getBoundingClientRect();
+        const box = element.getBoundingClientRect();
+        return {
+          x: glyph.left - box.left + glyph.width / 4,
+          y: glyph.top - box.top + glyph.height / 2,
+        };
+      }, word);
+    }
+
+    const lineWords = [
+      ['[data-line][data-line-type="change-addition"]', 'added'],
+      ['[data-line][data-line-type="change-deletion"]', 'removed'],
+      ['[data-line][data-line-type="context"]', 'context'],
+    ] as const;
+
+    const lookups = (oldPath: string, newPath: string) => [
+      {
+        path: newPath,
+        line: 3,
+        col: 7,
+        word: 'added',
+        text: 'const added = 3;',
+        side: 'new',
+        commit_idx: 0,
+      },
+      {
+        path: oldPath,
+        line: 3,
+        col: 7,
+        word: 'removed',
+        text: 'const removed = 2;',
+        side: 'old',
+        commit_idx: 0,
+      },
+      {
+        path: newPath,
+        line: 1,
+        col: 7,
+        word: 'context',
+        text: 'const context = 1;',
+        side: 'new',
+        commit_idx: 0,
+      },
+    ];
+
+    for (const view of ['side-by-side', 'inline'] as const) {
+      test(`Mod+click on added, deleted and context lines sends lookups in ${view} view`, async ({
+        page,
+      }) => {
+        await setupSearchfoxRepo();
+        await isolateConfig(page, { searchfox: true });
+        const resolves = await mockSearchfox(page);
+        await openStackedView(page);
+        if (view === 'inline') {
+          await page.locator('#toggle-view').click();
+        }
+        const file = page.locator('.stacked-code-view diffs-container', { hasText: 'searchfox' });
+        for (const [selector, word] of lineWords) {
+          const line = file.locator(selector).first();
+          await line.click({
+            modifiers: ['ControlOrMeta'],
+            position: await wordPosition(line, word),
+          });
+          await expectNoResultsToast(page);
+        }
+        await expect.poll(() => resolves.length).toBe(3);
+        const expected = lookups('searchfox.txt', 'searchfox.txt');
+        // Side-by-side, the first context line is in the left pane, which shows the old side.
+        if (view === 'side-by-side') {
+          expected[2]!.side = 'old';
+        }
+        expect(resolves).toEqual(expected);
+      });
+    }
+
+    test('Mod+click on a deleted line of a renamed file uses the old path', async ({ page }) => {
+      await setupSearchfoxRepo('searchfox-renamed.txt');
+      await isolateConfig(page, { searchfox: true });
+      const resolves = await mockSearchfox(page);
+      await openStackedView(page);
+      const file = page.locator('.stacked-code-view diffs-container', { hasText: 'searchfox' });
+      // Context is clicked in the additions column, so it is on the new side.
+      const renamedLines = [
+        ['[data-line][data-line-type="change-addition"]', 'added'],
+        ['[data-line][data-line-type="change-deletion"]', 'removed'],
+        ['[data-additions] [data-line][data-line-type="context"]', 'context'],
+      ] as const;
+      for (const [selector, word] of renamedLines) {
+        const line = file.locator(selector).first();
+        await line.click({
+          modifiers: ['ControlOrMeta'],
+          position: await wordPosition(line, word),
+        });
+        await expectNoResultsToast(page);
+      }
+      await expect.poll(() => resolves.length).toBe(3);
+      expect(resolves).toEqual(lookups('searchfox.txt', 'searchfox-renamed.txt'));
+    });
+
+    test('Mod+click sends no lookup with the searchfox setting off', async ({ page }) => {
+      await setupSearchfoxRepo();
+      await isolateConfig(page, { searchfox: false });
+      const resolves = await mockSearchfox(page);
+      await openStackedView(page);
+      const line = page
+        .locator('.stacked-code-view diffs-container', { hasText: 'searchfox' })
+        .locator('[data-line][data-line-type="change-addition"]')
+        .first();
+      await line.click({
+        modifiers: ['ControlOrMeta'],
+        position: await wordPosition(line, 'added'),
+      });
+      // Lookups are sent immediately, so a short wait is enough to see one.
+      await page.waitForTimeout(300);
+      expect(resolves).toEqual([]);
+    });
+
+    test('a plain click on a word sends no lookup', async ({ page }) => {
+      await setupSearchfoxRepo();
+      await isolateConfig(page, { searchfox: true });
+      const resolves = await mockSearchfox(page);
+      await openStackedView(page);
+      const line = page
+        .locator('.stacked-code-view diffs-container', { hasText: 'searchfox' })
+        .locator('[data-line][data-line-type="change-addition"]')
+        .first();
+      const dbgPos = await wordPosition(line, 'added');
+      await line.click({ position: await wordPosition(line, 'added') });
+      await page.waitForTimeout(300);
+      expect(resolves).toEqual([]);
+      await expect(page.locator('.stacked-comment-form')).toHaveCount(0);
+    });
+
+    test('right-click on an added line opens the Searchfox menu, Find Uses sends a lookup', async ({
+      page,
+    }) => {
+      await setupSearchfoxRepo();
+      await isolateConfig(page, { searchfox: true });
+      const resolves = await mockSearchfox(page);
+      await openStackedView(page);
+      const line = page
+        .locator('.stacked-code-view diffs-container', { hasText: 'searchfox' })
+        .locator('[data-line][data-line-type="change-addition"]')
+        .first();
+      await line.click({ button: 'right', position: await wordPosition(line, 'added') });
+      const menu = page.getByRole('menu');
+      await expect(
+        menu.getByRole('menuitem', { name: 'Searchfox: Go to Definition' }),
+      ).toBeVisible();
+      await menu.getByRole('menuitem', { name: 'Searchfox: Find Uses' }).click();
+      await expect(menu).toHaveCount(0);
+      await expect.poll(() => resolves.length).toBe(1);
+      expect(resolves).toEqual([lookups('searchfox.txt', 'searchfox.txt')[0]]);
+      await expectNoResultsToast(page);
+    });
+
+    test('right-click on a deleted line of a renamed file looks up the old path', async ({
+      page,
+    }) => {
+      await setupSearchfoxRepo('searchfox-renamed.txt');
+      await isolateConfig(page, { searchfox: true });
+      const resolves = await mockSearchfox(page);
+      await openStackedView(page);
+      const line = page
+        .locator('.stacked-code-view diffs-container', { hasText: 'searchfox' })
+        .locator('[data-line][data-line-type="change-deletion"]')
+        .first();
+      await line.click({ button: 'right', position: await wordPosition(line, 'removed') });
+      await page.getByRole('menuitem', { name: 'Searchfox: Go to Definition' }).click();
+      await expect.poll(() => resolves.length).toBe(1);
+      expect(resolves).toEqual([lookups('searchfox.txt', 'searchfox-renamed.txt')[1]]);
+      await expectNoResultsToast(page);
+    });
+
+    test('Mod+click on a definition in collapsed context expands, reveals and flashes it', async ({
+      page,
+    }) => {
+      if (!testRepoPath) {
+        throw new Error('Test repo not initialized');
+      }
+      const lines = Array.from({ length: 60 }, (_, i) => `const filler${i + 1} = ${i + 1};`);
+      lines[49] = 'const target = 50;';
+      fs.writeFileSync(path.join(testRepoPath, 'long.txt'), `${lines.join('\n')}\n`);
+      await execAsync(`cd "${testRepoPath}" && git add long.txt && git commit -q -m long`);
+      const changed = ['const first = target;', ...lines.slice(1)];
+      fs.writeFileSync(path.join(testRepoPath, 'long.txt'), `${changed.join('\n')}\n`);
+      await stopServer();
+      await startServer();
+      await isolateConfig(page, { searchfox: true });
+      await page.route('**/api/searchfox/resolve', (route) =>
+        route.fulfill({ json: { query: 'id:target', pretty: null, symbols: [] } }),
+      );
+      // searchfox's revision has the definition 5 lines higher than the reviewed file, so the
+      // server's mapping of the hit onto the reviewed file is mocked here.
+      await page.route('**/api/searchfox/line?*', (route) =>
+        route.fulfill({ json: { line: 50, exact: true } }),
+      );
+      await page.route('**/api/searchfox/search?*', (route) =>
+        route.fulfill({
+          json: {
+            query: 'id:target',
+            revision: 'c'.repeat(40),
+            groups: [
+              {
+                kind: 'normal',
+                category: 'Definitions (target)',
+                files: [
+                  {
+                    path: 'long.txt',
+                    lines: [
+                      { lno: 45, line: 'const target = 50;', bounds: [6, 12], context: null },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        }),
+      );
+      await openStackedView(page);
+      const line = page
+        .locator('.stacked-code-view diffs-container', { hasText: 'long.txt' })
+        .locator('[data-line][data-line-type="change-addition"]')
+        .first();
+      await line.click({
+        modifiers: ['ControlOrMeta'],
+        position: await wordPosition(line, 'target'),
+      });
+
+      const flashed = page.locator('[data-searchfox-flash]');
+      await expect(flashed).toHaveAttribute('data-line', '50');
+      await expect(flashed).toContainText('const target = 50;');
+      await expect(flashed).toHaveCount(0);
+    });
+
+    test('the Searchfox menu moves focus with arrows and closes on Escape without a lookup', async ({
+      page,
+    }) => {
+      await setupSearchfoxRepo();
+      await isolateConfig(page, { searchfox: true });
+      const resolves = await mockSearchfox(page);
+      await openStackedView(page);
+      const line = page
+        .locator('.stacked-code-view diffs-container', { hasText: 'searchfox' })
+        .locator('[data-line][data-line-type="change-addition"]')
+        .first();
+      await line.click({ button: 'right', position: await wordPosition(line, 'added') });
+      const items = page.getByRole('menu').getByRole('menuitem');
+      await expect(items.first()).toBeFocused();
+      await page.keyboard.press('ArrowDown');
+      await expect(items.nth(1)).toBeFocused();
+      await page.keyboard.press('Escape');
+      await expect(page.getByRole('menu')).toHaveCount(0);
+      // Lookups are sent immediately, so a short wait is enough to see one.
+      await page.waitForTimeout(300);
+      expect(resolves).toEqual([]);
+      await expect(page.locator('.searchfox-modal')).toHaveCount(0);
+    });
+
+    test('right-click sends no lookup and shows no Searchfox menu with the setting off', async ({
+      page,
+    }) => {
+      await setupSearchfoxRepo();
+      await isolateConfig(page, { searchfox: false });
+      const resolves = await mockSearchfox(page);
+      await openStackedView(page);
+      const line = page
+        .locator('.stacked-code-view diffs-container', { hasText: 'searchfox' })
+        .locator('[data-line][data-line-type="change-addition"]')
+        .first();
+      await line.click({ button: 'right', position: await wordPosition(line, 'added') });
+      await expect(page.getByRole('menu')).toHaveCount(0);
+      await page.waitForTimeout(300);
+      expect(resolves).toEqual([]);
+    });
+  });
+
   test('stacked mode can expand unmodified lines in the last file', async ({ page }) => {
     if (!testRepoPath) {
       throw new Error('Test repo not initialized');
@@ -1895,6 +2226,351 @@ test.describe('Review Workflow E2E', () => {
     await codeView.click();
     await page.keyboard.press('ArrowDown');
     await expect.poll(() => codeView.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+  });
+
+  // a-hunks.txt has two hunks: a line added at the top (new line 1) and line 20 deleted.
+  // The first hunk's range is new 1-4, the second's new 18-23 plus the deletion on old 20.
+  async function openHunksFixture(page: Page) {
+    if (!testRepoPath) {
+      throw new Error('Test repo not initialized');
+    }
+    const base = Array.from({ length: 30 }, (_, i) => `line ${i + 1}`);
+    fs.writeFileSync(path.join(testRepoPath, 'a-hunks.txt'), base.join('\n') + '\n');
+    await execAsync(`cd "${testRepoPath}" && git add a-hunks.txt && git commit -q -m hunks`);
+    const edited = ['top added', ...base.filter((_, i) => i !== 19)];
+    fs.writeFileSync(path.join(testRepoPath, 'a-hunks.txt'), edited.join('\n') + '\n');
+    await stopServer();
+    await startServer();
+    await openStackedView(page);
+  }
+
+  function focusedStackedRow(page: Page) {
+    return page.locator('.stacked-code-view diffs-container [data-stacked-focus]');
+  }
+
+  async function expectStackedFocus(page: Page, line: number, side: 'new' | 'old') {
+    const row = focusedStackedRow(page);
+    await expect(row).toHaveCount(1);
+    await expect(row).toHaveAttribute('data-line', String(line));
+    const deleted = await row.evaluate(
+      (element) =>
+        (element as HTMLElement).dataset.lineType === 'change-deletion' ||
+        element.closest('[data-deletions]') !== null,
+    );
+    expect(deleted).toBe(side === 'old');
+  }
+
+  test.describe('stacked keyboard focus', () => {
+    test('j, k and Shift+J move the focus through the hunks', async ({ page }) => {
+      await openHunksFixture(page);
+      await page.locator('.header .wordmark').click();
+
+      await page.keyboard.press('j');
+      await expectStackedFocus(page, 1, 'new');
+      await page.keyboard.press('j');
+      await expectStackedFocus(page, 2, 'new');
+      await page.keyboard.press('k');
+      await expectStackedFocus(page, 1, 'new');
+
+      await page.keyboard.press('Shift+J');
+      await expectStackedFocus(page, 18, 'new');
+      for (let i = 0; i < 5; i++) {
+        await page.keyboard.press('j');
+      }
+      await expectStackedFocus(page, 23, 'new');
+      await page.keyboard.press('j');
+      await expectStackedFocus(page, 20, 'old');
+      await page.keyboard.press('k');
+      await expectStackedFocus(page, 23, 'new');
+    });
+
+    test('j keeps room below the focused line for the comment form, in both views', async ({
+      page,
+    }) => {
+      if (!testRepoPath) {
+        throw new Error('Test repo not initialized');
+      }
+      const added = Array.from({ length: 80 }, (_, i) => `added ${i + 1}`);
+      fs.writeFileSync(path.join(testRepoPath, 'a-long.txt'), added.join('\n') + '\n');
+      await execAsync(`cd "${testRepoPath}" && git add -N a-long.txt`);
+      await stopServer();
+      await startServer();
+      await page.setViewportSize({ width: 1200, height: 600 });
+
+      // Lines between the focused line and the bottom of the visible code.
+      const roomBelow = {
+        stacked: () =>
+          page.evaluate(() => {
+            const row = document
+              .querySelector('.stacked-code-view diffs-container')
+              ?.shadowRoot?.querySelector<HTMLElement>('[data-stacked-focus]');
+            const view = document.querySelector<HTMLElement>('.stacked-code-view');
+            if (!row || !view) {
+              return -1;
+            }
+            const rect = row.getBoundingClientRect();
+            return (view.getBoundingClientRect().bottom - rect.bottom) / rect.height;
+          }),
+        monaco: () =>
+          page.evaluate(() => {
+            const editor = monaco.editor.getDiffEditors()[0]!.getModifiedEditor();
+            const app = window.__APP as unknown as { currentFocusedLine: { line: number } };
+            const last = editor.getVisibleRanges().at(-1)!.endLineNumber;
+            return last - app.currentFocusedLine.line;
+          }),
+      };
+
+      for (const view of ['stacked', 'monaco'] as const) {
+        if (view === 'stacked') {
+          await openStackedView(page);
+        } else {
+          await page.locator('#toggle-stacked').click();
+          await expect(page.locator('#toggle-stacked')).not.toHaveText('Mode: Stacked');
+          await expect
+            .poll(() =>
+              page.evaluate(() =>
+                monaco.editor
+                  .getDiffEditors()[0]
+                  ?.getModifiedEditor()
+                  .getValue()
+                  .startsWith('added 1'),
+              ),
+            )
+            .toBe(true);
+        }
+        await page.locator('.header .wordmark').click();
+        for (let i = 0; i < 45; i++) {
+          await page.keyboard.press('j');
+        }
+        // The focus is far past the first screen, yet the next lines stay in view.
+        await expect.poll(roomBelow[view]).toBeGreaterThanOrEqual(4);
+      }
+    });
+
+    test('h and l move the focus between a replaced line and its replacement', async ({ page }) => {
+      if (!testRepoPath) {
+        throw new Error('Test repo not initialized');
+      }
+      // Old lines 10-11 become new lines 10-12; the hunk's new range starts at line 7.
+      const base = Array.from({ length: 30 }, (_, i) => `line ${i + 1}`);
+      fs.writeFileSync(path.join(testRepoPath, 'a-replace.txt'), base.join('\n') + '\n');
+      await execAsync(`cd "${testRepoPath}" && git add a-replace.txt && git commit -q -m replace`);
+      const edited = [
+        ...base.slice(0, 9),
+        'changed 10',
+        'changed 11',
+        'changed 12',
+        ...base.slice(11),
+      ];
+      fs.writeFileSync(path.join(testRepoPath, 'a-replace.txt'), edited.join('\n') + '\n');
+      await stopServer();
+      await startServer();
+      const focus = () =>
+        page.evaluate(
+          () => (window as any).__APP.currentFocusedLine as { side: string; line: number },
+        );
+
+      for (const view of ['stacked', 'monaco'] as const) {
+        if (view === 'stacked') {
+          await openStackedView(page);
+        } else {
+          await page.locator('#toggle-stacked').click();
+          await expect(page.locator('#toggle-stacked')).not.toHaveText('Mode: Stacked');
+          await expect
+            .poll(() =>
+              page.evaluate(() =>
+                monaco.editor
+                  .getDiffEditors()[0]
+                  ?.getModifiedEditor()
+                  .getValue()
+                  .includes('changed 12'),
+              ),
+            )
+            .toBe(true);
+        }
+        await page.locator('.header .wordmark').click();
+        await page.keyboard.press('Escape');
+        for (let i = 0; i < 4; i++) {
+          await page.keyboard.press('j');
+        }
+        await expect.poll(focus).toEqual({ side: 'new', line: 10 });
+        await page.keyboard.press('h');
+        await expect.poll(focus).toEqual({ side: 'old', line: 10 });
+        if (view === 'stacked') {
+          await expectStackedFocus(page, 10, 'old');
+        }
+        await page.keyboard.press('l');
+        await expect.poll(focus).toEqual({ side: 'new', line: 10 });
+        await page.keyboard.press('j');
+        await page.keyboard.press('j');
+        // New line 12 has no deleted line of its own: it faces the block's last one.
+        await page.keyboard.press('h');
+        await expect.poll(focus).toEqual({ side: 'old', line: 11 });
+        // And back to the added line facing old line 11.
+        await page.keyboard.press('l');
+        await expect.poll(focus).toEqual({ side: 'new', line: 11 });
+        // Unchanged lines have no opposite line: h does nothing.
+        await page.keyboard.press('k');
+        await page.keyboard.press('k');
+        await expect.poll(focus).toEqual({ side: 'new', line: 9 });
+        await page.keyboard.press('h');
+        await expect.poll(focus).toEqual({ side: 'new', line: 9 });
+      }
+    });
+
+    test("j past a file's last changed line focuses the next file; k comes back", async ({
+      page,
+    }) => {
+      await openHunksFixture(page);
+      await page.locator('.header .wordmark').click();
+      const fileIndex = () => page.evaluate(() => (window as any).__APP.currentFileIndex);
+
+      // a-hunks.txt's last changed line is the deletion of old line 20.
+      await page.keyboard.press('Shift+J');
+      await page.keyboard.press('Shift+J');
+      await expectStackedFocus(page, 20, 'old');
+      await page.keyboard.press('j');
+      await expect.poll(fileIndex).toBe(1);
+      await expectStackedFocus(page, 1, 'new');
+      await page.keyboard.press('k');
+      await expect.poll(fileIndex).toBe(0);
+      await expectStackedFocus(page, 20, 'old');
+    });
+
+    test('holding j walks every changed line of every file, in order, without looping', async ({
+      page,
+    }) => {
+      if (!testRepoPath) {
+        throw new Error('Test repo not initialized');
+      }
+      // Long files with changes far from their tops, so that focusing them scrolls each file's
+      // header out of view (the scroll sync then names a neighbouring file current).
+      const long = (name: string) => Array.from({ length: 300 }, (_, i) => `${name} ${i + 1}`);
+      const first = long('first');
+      const second = long('second');
+      fs.writeFileSync(path.join(testRepoPath, 'a-first.txt'), first.join('\n') + '\n');
+      fs.writeFileSync(path.join(testRepoPath, 'b-second.txt'), second.join('\n') + '\n');
+      await execAsync(
+        `cd "${testRepoPath}" && git add a-first.txt b-second.txt && git commit -q -m long`,
+      );
+      first[279] = 'first changed';
+      second[249] = 'second changed';
+      fs.writeFileSync(path.join(testRepoPath, 'a-first.txt'), first.join('\n') + '\n');
+      fs.writeFileSync(path.join(testRepoPath, 'b-second.txt'), second.join('\n') + '\n');
+      await stopServer();
+      await startServer();
+      await page.setViewportSize({ width: 1200, height: 600 });
+      await openStackedView(page);
+      await page.locator('.header .wordmark').click();
+
+      const visited: string[] = [];
+      for (let i = 0; i < 30; i++) {
+        await page.keyboard.press('j');
+        const row = focusedStackedRow(page);
+        await expect(row).toHaveCount(1);
+        const file = await row.evaluate(
+          (element) => (element.getRootNode() as ShadowRoot).host.getAttribute('data-path') ?? '',
+        );
+        visited.push(`${file}:${await row.getAttribute('data-line')}`);
+      }
+      // Each file's hunk (3 lines of context around the change, old and new side), then on to
+      // the next file; never back to the first.
+      const firstFile = visited.filter((v) => v.startsWith('a-first.txt'));
+      const secondFile = visited.filter((v) => v.startsWith('b-second.txt'));
+      expect(visited.slice(0, firstFile.length)).toEqual(firstFile);
+      expect(secondFile.length).toBeGreaterThan(0);
+      expect(visited.slice(firstFile.length).every((v) => !v.startsWith('a-first.txt'))).toBe(true);
+      expect(secondFile[0]).toBe('b-second.txt:247');
+      // And k goes back across the boundary to the first file's last changed line.
+      for (let i = 0; i < visited.length - firstFile.length; i++) {
+        await page.keyboard.press('k');
+      }
+      const row = focusedStackedRow(page);
+      await expect(row).toHaveAttribute('data-line', '280');
+      expect(
+        await row.evaluate((element) =>
+          (element.getRootNode() as ShadowRoot).host.getAttribute('data-path'),
+        ),
+      ).toBe('a-first.txt');
+    });
+
+    test('Shift+J past the last hunk focuses the next file', async ({ page }) => {
+      await openHunksFixture(page);
+      await page.locator('.header .wordmark').click();
+
+      await page.keyboard.press('Shift+J');
+      await page.keyboard.press('Shift+J');
+      await expectStackedFocus(page, 20, 'old');
+      await page.keyboard.press('Shift+J');
+      await expect.poll(() => page.evaluate(() => (window as any).__APP.currentFileIndex)).toBe(1);
+      await expectStackedFocus(page, 1, 'new');
+    });
+
+    test('Enter comments on the focused line; Escape clears the focus', async ({ page }) => {
+      await openHunksFixture(page);
+      await page.locator('.header .wordmark').click();
+
+      await page.keyboard.press('Shift+J');
+      await expectStackedFocus(page, 18, 'new');
+      await page.keyboard.press('Enter');
+      const form = page.locator('.stacked-comment-form');
+      await expect(form).toBeVisible({ timeout: 3000 });
+      await form.locator('.stacked-comment-ta').fill('Focused comment');
+      await form.locator('.stacked-comment-save').click();
+      await expect(page.locator('.stacked-comment-box')).toContainText('new line 18');
+
+      await page.keyboard.press('Escape');
+      await expect(focusedStackedRow(page)).toHaveCount(0);
+      await page.keyboard.press('j');
+      await expectStackedFocus(page, 18, 'new');
+    });
+
+    test('the focus mark is reapplied after the view rebuilds its rows', async ({ page }) => {
+      await openHunksFixture(page);
+      await page.locator('.header .wordmark').click();
+
+      await page.keyboard.press('Shift+J');
+      await expectStackedFocus(page, 18, 'new');
+      const before = await page.evaluateHandle(() => {
+        for (const host of document.querySelectorAll('.stacked-code-view [data-path]')) {
+          const row = host.shadowRoot?.querySelector('[data-stacked-focus]');
+          if (row) {
+            return row;
+          }
+        }
+        return null;
+      });
+      // Toggling the layout rebuilds every row.
+      await page.keyboard.press('s');
+      await expect.poll(() => before.evaluate((row) => row.isConnected)).toBe(false);
+      await expectStackedFocus(page, 18, 'new');
+    });
+
+    test('the stacked help lists j, not the arrow, for the next changed line', async ({ page }) => {
+      await openStackedView(page);
+      await page.locator('.header .wordmark').click();
+      await page.keyboard.press('?');
+
+      const row = page.locator('.shortcuts-table tr', { hasText: 'Next changed line' });
+      await expect(row.locator('.key-combo')).toHaveText('j');
+      await expect(
+        page.locator('.shortcuts-table tr', { hasText: 'Find in stacked diff' }),
+      ).toHaveCount(1);
+    });
+
+    test('the editor help still lists both keys for the next changed line', async ({ page }) => {
+      await openApp(page);
+      await page.locator('.monaco-editor').first().waitFor({ timeout: 5000 });
+      await page.locator('.header .wordmark').click();
+      await page.keyboard.press('?');
+
+      const row = page.locator('.shortcuts-table tr', { hasText: 'Next changed line' });
+      await expect(row.locator('.key-combo')).toContainText('↓');
+      await expect(row.locator('.key-combo')).toContainText('j');
+      await expect(
+        page.locator('.shortcuts-table tr', { hasText: 'Find in stacked diff' }),
+      ).toHaveCount(0);
+    });
   });
 
   test('should display provided title in header', async ({ page }) => {

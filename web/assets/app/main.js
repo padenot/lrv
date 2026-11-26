@@ -1218,7 +1218,8 @@ const DEFAULT_APP_CONFIG = {
 	stacked_view: false,
 	word_wrap: false,
 	ligatures: false,
-	auto_fetch_comments: false
+	auto_fetch_comments: false,
+	searchfox: false
 };
 function resolveAppConfig(input) {
 	return {
@@ -1229,7 +1230,8 @@ function resolveAppConfig(input) {
 		stacked_view: input.stacked_view ?? DEFAULT_APP_CONFIG.stacked_view,
 		word_wrap: input.word_wrap ?? DEFAULT_APP_CONFIG.word_wrap,
 		ligatures: input.ligatures ?? DEFAULT_APP_CONFIG.ligatures,
-		auto_fetch_comments: input.auto_fetch_comments ?? DEFAULT_APP_CONFIG.auto_fetch_comments
+		auto_fetch_comments: input.auto_fetch_comments ?? DEFAULT_APP_CONFIG.auto_fetch_comments,
+		searchfox: input.searchfox ?? DEFAULT_APP_CONFIG.searchfox
 	};
 }
 //#endregion
@@ -1559,13 +1561,13 @@ const MONACO_HIDE_UNCHANGED = {
 function computeHunkRanges(hunks) {
 	const hunkRanges = [];
 	hunks.forEach((hunk) => {
-		const newLines = hunk.lines.filter((l) => l.new_line !== void 0).map((l) => l.new_line);
+		const newLines = hunk.lines.filter((l) => typeof l.new_line === "number").map((l) => l.new_line);
 		if (newLines.length > 0) hunkRanges.push({
 			side: "new",
 			start: Math.min(...newLines),
 			end: Math.max(...newLines)
 		});
-		const deletedOldLines = hunk.lines.filter((l) => l.old_line !== void 0 && l.type === "delete").map((l) => l.old_line);
+		const deletedOldLines = hunk.lines.filter((l) => typeof l.old_line === "number" && l.type === "delete").map((l) => l.old_line);
 		if (deletedOldLines.length > 0) hunkRanges.push({
 			side: "old",
 			start: Math.min(...deletedOldLines),
@@ -1573,6 +1575,90 @@ function computeHunkRanges(hunks) {
 		});
 	});
 	return { hunkRanges };
+}
+function hunkStartFocus(hunk) {
+	return {
+		side: hunk.side,
+		line: hunk.start
+	};
+}
+/**
+* Where j/k move the focus: one line within the current hunk range, then into the
+* neighbouring range (its end going backwards). Without a focused line, the start of
+* the current range. Null past the file's first or last range.
+*/
+function stepFocus(hunks, hunkIndex, focus, delta) {
+	const hunk = hunks[hunkIndex];
+	if (!hunk) return null;
+	if (!focus) return {
+		hunkIndex,
+		focus: hunkStartFocus(hunk)
+	};
+	let { side, line } = focus;
+	if (side !== hunk.side || line < hunk.start || line > hunk.end) {
+		side = hunk.side;
+		line = hunk.start;
+	}
+	const next = line + delta;
+	if (next >= hunk.start && next <= hunk.end) return {
+		hunkIndex,
+		focus: {
+			side,
+			line: next
+		}
+	};
+	const adjacentIndex = hunkIndex + delta;
+	const adjacent = hunks[adjacentIndex];
+	if (!adjacent) return null;
+	return {
+		hunkIndex: adjacentIndex,
+		focus: delta > 0 ? hunkStartFocus(adjacent) : {
+			side: adjacent.side,
+			line: adjacent.end
+		}
+	};
+}
+/** Shift+J/K: the start of the adjacent range. Null past the file's first or last range. */
+function stepHunk(hunks, hunkIndex, delta) {
+	const adjacentIndex = hunkIndex + delta;
+	const adjacent = hunks[adjacentIndex];
+	return adjacent ? {
+		hunkIndex: adjacentIndex,
+		focus: hunkStartFocus(adjacent)
+	} : null;
+}
+/**
+* The line opposite `focus` on the other side, as side-by-side shows it: within a block of
+* consecutive changed lines, the i-th deleted line faces the i-th added line, and lines past
+* the shorter side face its last line. Null for unchanged lines and for a block with nothing on
+* the other side.
+*/
+function counterpartLine(hunks, focus) {
+	for (const hunk of hunks) {
+		let block = [];
+		for (const line of [...hunk.lines, null]) {
+			if (line && (line.type === "add" || line.type === "delete")) {
+				block.push(line);
+				continue;
+			}
+			const deleted = lineNumbers(block, "delete", "old_line");
+			const added = lineNumbers(block, "add", "new_line");
+			const [from, to] = focus.side === "old" ? [deleted, added] : [added, deleted];
+			const index = from.indexOf(focus.line);
+			if (index !== -1) {
+				const line = to[Math.min(index, to.length - 1)];
+				return line === void 0 ? null : {
+					side: focus.side === "old" ? "new" : "old",
+					line
+				};
+			}
+			block = [];
+		}
+	}
+	return null;
+}
+function lineNumbers(block, type, side) {
+	return block.filter((line) => line.type === type).map((line) => line[side]).filter((line) => typeof line === "number");
 }
 //#endregion
 //#region web/src/file-data-methods.ts
@@ -11277,6 +11363,70 @@ function prefersReducedMotion() {
 	return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 //#endregion
+//#region web/src/platform.ts
+const IS_MAC = navigator.platform.toUpperCase().indexOf("MAC") >= 0;
+const MOD_KEY_LABEL = IS_MAC ? "⌘" : "Ctrl";
+//#endregion
+//#region web/src/searchfox.ts
+function resolveSearchfox(target) {
+	return fetchJSON("/api/searchfox/resolve", {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify(target)
+	});
+}
+function searchSearchfox(query) {
+	return fetchJSON(`/api/searchfox/search?q=${encodeURIComponent(query)}`);
+}
+/** Maps a hit's line, at its searchfox revision, onto the new side of `commitIdx`. */
+function revealSearchfoxLine(hit, commitIdx) {
+	return fetchJSON(`/api/searchfox/line?${new URLSearchParams({
+		path: hit.path,
+		line: String(hit.lno),
+		commit_idx: String(commitIdx),
+		revision: hit.revision
+	})}`);
+}
+/** The source of `path` at `revision`, so `line` is the line searchfox numbered. */
+function searchfoxSourceUrl(tree, revision, path, line) {
+	return `https://searchfox.org/${tree}/rev/${revision}/${path}#${line}`;
+}
+function searchfoxSearchUrl(tree, query) {
+	return `https://searchfox.org/${tree}/search?q=${encodeURIComponent(query)}`;
+}
+/** Context-menu entries for a lookup, shared by the Monaco and stacked views. */
+const searchfoxMenuActions = [{
+	label: "Searchfox: Go to Definition",
+	mode: "definition"
+}, {
+	label: "Searchfox: Find Uses",
+	mode: "uses"
+}];
+/** How long a line reached from searchfox results flashes. */
+const SEARCHFOX_FLASH_MS = 1200;
+/** Mod+click: definition; Mod+Alt+click: uses; add Shift to open
+* searchfox.org in a new tab. Returns null when Mod isn't held. */
+function searchfoxClick(event) {
+	if (!(IS_MAC ? event.metaKey : event.ctrlKey)) return null;
+	return {
+		mode: event.altKey ? "uses" : "definition",
+		newTab: event.shiftKey
+	};
+}
+const IDENTIFIER_CHAR = /[\p{L}\p{N}_$]/u;
+/** The identifier of `text` covering offset `col`, or null. */
+function identifierAt(text, col) {
+	let start = col;
+	while (start > 0 && IDENTIFIER_CHAR.test(text.charAt(start - 1))) start--;
+	let end = col;
+	while (end < text.length && IDENTIFIER_CHAR.test(text.charAt(end))) end++;
+	if (start === end || /\p{N}/u.test(text.charAt(start))) return null;
+	return {
+		word: text.slice(start, end),
+		start
+	};
+}
+//#endregion
 //#region web/src/file-loading-methods.ts
 let _loadSerial = 0;
 var FileLoadingMethods = class {
@@ -11568,12 +11718,12 @@ var FileLoadingMethods = class {
 		const originalEditor = diffEditor.getOriginalEditor();
 		modifiedEditor.updateOptions({ lineNumbers: "on" });
 		originalEditor.updateOptions({ lineNumbers: renderSideBySide ? "on" : "off" });
-		this.setupEditorClickHandlers(file.path, modifiedEditor, originalEditor);
+		this.setupEditorClickHandlers(file.path, file.old_path ?? file.path, modifiedEditor, originalEditor);
 		this.updateDecorations();
 		this.renderReviewNotes();
 		if (!viewState) this.applyInitialHunkFocus(file.path);
 	}
-	setupEditorClickHandlers(filePath, modifiedEditor, originalEditor) {
+	setupEditorClickHandlers(filePath, originalPath, modifiedEditor, originalEditor) {
 		this.editorClickDisposables?.forEach((disposable) => disposable.dispose());
 		this.editorClickDisposables = [];
 		this.lastModifiedRangeSelection = this.editorRangeSelection(modifiedEditor.getSelection());
@@ -11591,7 +11741,46 @@ var FileLoadingMethods = class {
 			if (this.isCommentGutterTarget(e) && e.target.position) this.beginEditorGutterGesture(filePath, modifiedEditor, e.target.position.lineNumber, "new");
 		}), originalEditor.onMouseDown((e) => {
 			if (this.isCommentGutterTarget(e) && e.target.position) this.beginEditorGutterGesture(filePath, originalEditor, e.target.position.lineNumber, "old");
+		}), modifiedEditor.onMouseDown((e) => this.searchfoxMouseDown(e, modifiedEditor, filePath, "new")), originalEditor.onMouseDown((e) => this.searchfoxMouseDown(e, originalEditor, originalPath, "old")));
+		if (this.config.searchfox) this.editorClickDisposables.push(...this.searchfoxContextActions(modifiedEditor, filePath, "new"), ...this.searchfoxContextActions(originalEditor, originalPath, "old"));
+	}
+	searchfoxContextActions(targetEditor, path, side) {
+		return searchfoxMenuActions.map(({ label, mode }) => targetEditor.addAction({
+			id: `searchfox.${mode}`,
+			label,
+			contextMenuGroupId: "navigation",
+			run: () => {
+				const position = targetEditor.getPosition();
+				const target = position && this.searchfoxTargetAt(targetEditor, path, side, position);
+				if (target) this.searchfoxLookup(target, mode, false);
+			}
 		}));
+	}
+	searchfoxMouseDown(e, targetEditor, path, side) {
+		const click = searchfoxClick(e.event.browserEvent);
+		if (!click || !this.config.searchfox || e.target.type !== monaco.editor.MouseTargetType.CONTENT_TEXT || !e.target.position) return;
+		const target = this.searchfoxTargetAt(targetEditor, path, side, e.target.position);
+		if (!target) return;
+		e.event.preventDefault();
+		e.event.stopPropagation();
+		this.searchfoxLookup(target, click.mode, click.newTab);
+	}
+	searchfoxTargetAt(targetEditor, path, side, position) {
+		const model = targetEditor.getModel();
+		if (!model) return null;
+		const text = model.getLineContent(position.lineNumber);
+		const col = position.column - 1;
+		const identifier = identifierAt(text, col);
+		if (!identifier) return null;
+		return {
+			path,
+			line: position.lineNumber,
+			col,
+			word: identifier.word,
+			text,
+			side,
+			commit_idx: this.currentCommitIdx
+		};
 	}
 	beginEditorGutterGesture(filePath, targetEditor, downLine, side) {
 		const serial = _loadSerial;
@@ -11648,11 +11837,11 @@ var FileLoadingMethods = class {
 	}
 };
 //#endregion
-//#region web/src/platform.ts
-const IS_MAC = navigator.platform.toUpperCase().indexOf("MAC") >= 0;
-const MOD_KEY_LABEL = IS_MAC ? "⌘" : "Ctrl";
-//#endregion
 //#region web/src/shortcuts.ts
+/** The keys that trigger `shortcut` in the given view. */
+function shortcutKeys(shortcut, stacked) {
+	return stacked && shortcut.stackedKeys ? shortcut.stackedKeys : shortcut.keys;
+}
 const KEYBOARD_SHORTCUTS = [
 	{
 		keys: ["Mod+ArrowDown", "Mod+J"],
@@ -11676,13 +11865,25 @@ const KEYBOARD_SHORTCUTS = [
 	},
 	{
 		keys: ["ArrowDown", "j"],
+		stackedKeys: ["j"],
 		action: "lineDown",
 		description: "Next changed line"
 	},
 	{
 		keys: ["ArrowUp", "k"],
+		stackedKeys: ["k"],
 		action: "lineUp",
 		description: "Previous changed line"
+	},
+	{
+		keys: ["h"],
+		action: "oldSide",
+		description: "Deleted line opposite the focused line"
+	},
+	{
+		keys: ["l"],
+		action: "newSide",
+		description: "Added line opposite the focused line"
 	},
 	{
 		keys: ["s"],
@@ -11715,7 +11916,8 @@ const KEYBOARD_SHORTCUTS = [
 		description: "Show keyboard shortcuts"
 	},
 	{
-		keys: ["Mod+F"],
+		keys: [],
+		stackedKeys: ["Mod+F"],
 		action: "findStackedDiff",
 		description: "Find in stacked diff"
 	},
@@ -11738,11 +11940,51 @@ const KEYBOARD_SHORTCUTS = [
 		description: "Previous commit (series mode)"
 	}
 ];
+/** Searchfox mouse gestures, listed in the help only when the searchfox setting is on. */
+const SEARCHFOX_SHORTCUTS = [
+	{
+		keys: ["Mod+click"],
+		description: "Go to definition"
+	},
+	{
+		keys: ["Mod+Alt+click"],
+		description: "Find uses"
+	},
+	{
+		keys: ["Mod+Shift+click"],
+		description: "Open on searchfox.org in a new tab"
+	},
+	{
+		keys: ["Right-click"],
+		description: "Menu with Go to Definition and Find Uses"
+	},
+	{
+		keys: ["Escape"],
+		description: "Close the results panel or menu"
+	}
+];
 //#endregion
 //#region web/src/navigation-methods.ts
 var NavigationMethods = class {
 	getCurrentFile() {
 		return this.files[this.currentFileIndex];
+	}
+	/**
+	* The file keyboard navigation acts on. In the stacked view that is the focused line's file
+	* while the reader is still at it; the file on screen otherwise, which can differ.
+	*/
+	navigationFileIndex() {
+		if (this.isStacked) {
+			const focused = this.stackedFocusFileIndex();
+			if (focused !== null) return focused;
+			this.clearStackedFocus();
+		}
+		return this.currentFileIndex;
+	}
+	/** The file's changed ranges. The stacked view never loads a file, so they may not exist yet. */
+	hunksOf(file) {
+		this.initFileHunks(file);
+		return this.fileHunks[file.path];
 	}
 	setupKeyboardShortcuts() {
 		document.addEventListener("keydown", (e) => {
@@ -11757,6 +11999,7 @@ var NavigationMethods = class {
 			}
 			if (!action || !this.canRunShortcut(action)) return;
 			if (action === "submitLgtm" && (e.defaultPrevented || e.repeat)) return;
+			if (action === "clearFocus" && (e.defaultPrevented || document.querySelector(".context-menu"))) return;
 			e.preventDefault();
 			switch (action) {
 				case "nextFile":
@@ -11773,6 +12016,12 @@ var NavigationMethods = class {
 					break;
 				case "lineUp":
 					this.moveLine(-1);
+					break;
+				case "oldSide":
+					this.moveSide("old");
+					break;
+				case "newSide":
+					this.moveSide("new");
 					break;
 				case "nextHunk":
 					this.nextHunk();
@@ -11793,7 +12042,8 @@ var NavigationMethods = class {
 					this.showKeyboardHelp();
 					break;
 				case "clearFocus":
-					this.clearFocusedHunk();
+					if (this.isStacked) this.clearStackedFocus();
+					else this.clearFocusedHunk();
 					break;
 				case "nextCommit":
 					this.nextCommit();
@@ -11803,7 +12053,11 @@ var NavigationMethods = class {
 		});
 	}
 	canRunShortcut(action) {
-		return !(action === "lineDown" || action === "lineUp" || action === "openComment" || action === "clearFocus") || !this.isStacked && !!this.editor;
+		return !(action === "lineDown" || action === "lineUp" || action === "oldSide" || action === "newSide" || action === "openComment" || action === "clearFocus") || this.hasCodeView();
+	}
+	hasCodeView() {
+		if (this.isStacked) return !this.currentFileIsCommit && this.files.length > 0;
+		return !!this.editor;
 	}
 	toggleView() {
 		this.isInline = !this.isInline;
@@ -11819,7 +12073,7 @@ var NavigationMethods = class {
 	}
 	matchKeyboardShortcut(e) {
 		const modKey = IS_MAC ? e.metaKey : e.ctrlKey;
-		for (const shortcut of KEYBOARD_SHORTCUTS) for (const keyCombo of shortcut.keys) if (this.matchesKeyCombo(e, keyCombo, modKey)) return shortcut.action;
+		for (const shortcut of KEYBOARD_SHORTCUTS) for (const keyCombo of shortcutKeys(shortcut, this.isStacked)) if (this.matchesKeyCombo(e, keyCombo, modKey)) return shortcut.action;
 		return null;
 	}
 	matchesKeyCombo(e, combo, modKey) {
@@ -11854,40 +12108,54 @@ var NavigationMethods = class {
 		return e.key === key;
 	}
 	nextFile() {
-		if (this.currentFileIndex < this.files.length - 1) this.loadFile(this.currentFileIndex + 1);
+		if (this.currentFileIndex < this.files.length - 1) this.openFile(this.currentFileIndex + 1);
 	}
 	previousFile() {
-		if (this.currentFileIndex > 0) this.loadFile(this.currentFileIndex - 1);
+		if (this.currentFileIndex > 0) this.openFile(this.currentFileIndex - 1);
+	}
+	/** Opens a file from the keyboard. Loading a file focuses its current hunk; so does this. */
+	/** Opens a file from the keyboard and focuses its current hunk, as loading a file does, or
+	* (stacked view) its first or last changed line when j/k cross into it. */
+	openFile(index, at = "current") {
+		if (!this.isStacked) {
+			this.loadFile(index);
+			return;
+		}
+		this.scrollToFileInStacked(index).then(() => {
+			if (!this.isStacked) return;
+			const file = this.files[index];
+			const hunks = this.hunksOf(file);
+			if (at !== "current") this.currentHunkIndex[file.path] = at === "first" ? 0 : Math.max(hunks.length - 1, 0);
+			const hunk = hunks[this.currentHunkIndex[file.path] ?? 0];
+			if (!hunk) {
+				this.clearStackedFocus();
+				return;
+			}
+			this.showStackedFocus(file.path, at === "last" ? {
+				side: hunk.side,
+				line: hunk.end
+			} : hunkStartFocus(hunk), "nearest");
+		});
 	}
 	nextHunk() {
-		const file = this.getCurrentFile();
-		const hunks = this.fileHunks[file.path];
-		if (!hunks || hunks.length === 0) {
-			this.nextFile();
-			return;
-		}
-		const currentIdx = this.currentHunkIndex[file.path] ?? 0;
-		if (currentIdx >= hunks.length - 1) this.nextFile();
-		else {
-			const nextIdx = currentIdx + 1;
-			this.currentHunkIndex[file.path] = nextIdx;
-			this.jumpToHunk(nextIdx);
-		}
+		this.jumpHunk(1);
 	}
 	previousHunk() {
-		const file = this.getCurrentFile();
-		const hunks = this.fileHunks[file.path];
-		if (!hunks || hunks.length === 0) {
-			this.previousFile();
+		this.jumpHunk(-1);
+	}
+	/** Shift+J/K: the adjacent hunk, or the adjacent file past the file's first or last hunk. */
+	jumpHunk(delta) {
+		const fileIndex = this.navigationFileIndex();
+		const file = this.files[fileIndex];
+		const step = stepHunk(this.hunksOf(file), this.currentHunkIndex[file.path] ?? 0, delta);
+		if (!step) {
+			const next = fileIndex + delta;
+			if (next >= 0 && next < this.files.length) this.openFile(next);
 			return;
 		}
-		const currentIdx = this.currentHunkIndex[file.path] ?? 0;
-		if (currentIdx <= 0) this.previousFile();
-		else {
-			const prevIdx = currentIdx - 1;
-			this.currentHunkIndex[file.path] = prevIdx;
-			this.jumpToHunk(prevIdx);
-		}
+		this.currentHunkIndex[file.path] = step.hunkIndex;
+		if (this.isStacked) this.showStackedFocus(file.path, step.focus, "center");
+		else this.jumpToHunk(step.hunkIndex);
 	}
 	jumpToHunk(hunkIndex) {
 		if (!this.editor) return;
@@ -11944,49 +12212,45 @@ var NavigationMethods = class {
 		}];
 		if (side === "old") {
 			this.focusedLineDecorationsOld = originalEditor.deltaDecorations([], dec);
-			if (reveal) originalEditor.revealLineInCenterIfOutsideViewport(monacoLine, scrollType);
+			if (reveal) revealWithMargin(originalEditor, monacoLine, scrollType);
 		} else {
 			this.focusedLineDecorationsNew = modifiedEditor.deltaDecorations([], dec);
-			if (reveal) modifiedEditor.revealLineInCenterIfOutsideViewport(monacoLine, scrollType);
+			if (reveal) revealWithMargin(modifiedEditor, monacoLine, scrollType);
 		}
 	}
 	moveLine(delta) {
-		if (!this.editor) return;
-		const file = this.getCurrentFile();
-		const hunks = this.fileHunks[file.path];
-		if (!hunks || hunks.length === 0) return;
-		let idx = this.currentHunkIndex[file.path] ?? 0;
-		const hr = hunks[idx];
-		if (!this.currentFocusedLine) {
-			const side = hr.side === "old" ? "old" : "new";
-			this.setFocusedLine(side, hr.start, true);
+		const fileIndex = this.navigationFileIndex();
+		const file = this.files[fileIndex];
+		const hunkIndex = this.currentHunkIndex[file.path] ?? 0;
+		const step = stepFocus(this.hunksOf(file), hunkIndex, this.currentFocusedLine, delta);
+		if (!step) {
+			const next = fileIndex + delta;
+			if (this.isStacked && next >= 0 && next < this.files.length) this.openFile(next, delta > 0 ? "first" : "last");
 			return;
 		}
-		let { side, line } = this.currentFocusedLine;
-		if (side !== hr.side || line < hr.start || line > hr.end) {
-			side = hr.side === "old" ? "old" : "new";
-			line = hr.start;
-		}
-		let nextLine = line + delta;
-		if (nextLine >= hr.start && nextLine <= hr.end) {
-			this.setFocusedLine(side, nextLine, true);
+		this.currentHunkIndex[file.path] = step.hunkIndex;
+		const hunkChanged = step.hunkIndex !== hunkIndex;
+		if (this.isStacked) {
+			this.showStackedFocus(file.path, step.focus, hunkChanged ? "center" : "nearest");
 			return;
 		}
-		if (delta > 0 && idx < hunks.length - 1) {
-			idx += 1;
-			this.currentHunkIndex[file.path] = idx;
-			const nhr = hunks[idx];
-			const ns = nhr.side === "old" ? "old" : "new";
-			this.jumpToHunk(idx);
-			this.setFocusedLine(ns, nhr.start, true);
-		} else if (delta < 0 && idx > 0) {
-			idx -= 1;
-			this.currentHunkIndex[file.path] = idx;
-			const phr = hunks[idx];
-			const ps = phr.side === "old" ? "old" : "new";
-			this.jumpToHunk(idx);
-			this.setFocusedLine(ps, phr.end, true);
+		if (hunkChanged) this.jumpToHunk(step.hunkIndex);
+		this.setFocusedLine(step.focus.side, step.focus.line, true);
+	}
+	/** h/l: focus the changed line opposite the focused one, on `side`. */
+	moveSide(side) {
+		const file = this.files[this.navigationFileIndex()];
+		const focus = this.currentFocusedLine;
+		if (!focus || focus.side === side) return;
+		const target = counterpartLine(file.hunks, focus);
+		if (!target) return;
+		const hunkIndex = this.hunksOf(file).findIndex((hunk) => hunk.side === target.side && hunk.start <= target.line && target.line <= hunk.end);
+		if (hunkIndex !== -1) this.currentHunkIndex[file.path] = hunkIndex;
+		if (this.isStacked) {
+			this.showStackedFocus(file.path, target, "nearest");
+			return;
 		}
+		this.setFocusedLine(target.side, target.line, true);
 	}
 	clearFocusedHunk() {
 		if (!this.editor) return;
@@ -11996,20 +12260,22 @@ var NavigationMethods = class {
 		this.focusedHunkDecorationsOld = originalEditor.deltaDecorations(this.focusedHunkDecorationsOld, []);
 	}
 	openCommentOnCurrentFocus() {
-		if (!this.editor) return;
-		const file = this.getCurrentFile();
-		const hunks = this.fileHunks[file.path];
-		if (!hunks || hunks.length === 0) return;
-		if (this.currentFocusedLine) {
-			const { side, line } = this.currentFocusedLine;
-			this.showCommentDialog(file.path, line, line, side);
-			return;
-		}
-		const hunkRange = hunks[this.currentHunkIndex[file.path] ?? 0];
-		const side = hunkRange.side === "old" ? "old" : "new";
-		this.showCommentDialog(file.path, hunkRange.start, hunkRange.start, side);
+		const file = this.files[this.navigationFileIndex()];
+		const hunk = this.hunksOf(file)[this.currentHunkIndex[file.path] ?? 0];
+		const target = this.currentFocusedLine ?? (hunk ? hunkStartFocus(hunk) : null);
+		if (!target) return;
+		if (this.isStacked) this.openStackedDraft(file.path, target.line, target.side);
+		else this.showCommentDialog(file.path, target.line, target.line, target.side);
 	}
 };
+/** Shows `line` with `FOCUS_MARGIN_LINES` of room around it, so the comment form Enter opens
+* below it is on screen; centres it when it is off screen. */
+function revealWithMargin(target, line, scrollType) {
+	target.revealLineInCenterIfOutsideViewport(line, scrollType);
+	const lineCount = target.getModel()?.getLineCount() ?? line;
+	target.revealLine(Math.min(line + 5, lineCount), scrollType);
+	target.revealLine(Math.max(line - 5, 1), scrollType);
+}
 //#endregion
 //#region web/src/commit-bar-methods.ts
 var CommitBarMethods = class {
@@ -13129,11 +13395,13 @@ var DialogMethods = class {
 		const thead = el("thead", {}, [el("tr", {}, [el("th", { text: "Shortcut" }), el("th", { text: "Action" })])]);
 		const tbody = el("tbody");
 		const table = el("table", { className: "shortcuts-table" }, [thead, tbody]);
-		KEYBOARD_SHORTCUTS.forEach((shortcut) => {
+		const addRow = (shortcut) => {
+			const keys = shortcutKeys(shortcut, this.isStacked);
+			if (keys.length === 0) return;
 			const row = el("tr");
 			const keysCell = el("td");
 			const keyComboDiv = el("div", { className: "key-combo" });
-			shortcut.keys.forEach((combo, idx) => {
+			keys.forEach((combo, idx) => {
 				if (idx > 0) keyComboDiv.appendChild(el("span", {
 					className: "key-or",
 					text: "or"
@@ -13141,12 +13409,12 @@ var DialogMethods = class {
 				combo.replace("Mod", IS_MAC ? "Cmd" : "Ctrl").split("+").forEach((part, partIdx) => {
 					if (partIdx > 0) {
 						const plus = el("span", { text: "+" });
-						plus.style.margin = "0 2px";
+						plus.style.margin = "0 1px";
 						plus.style.color = "#888";
 						keyComboDiv.appendChild(plus);
 					}
 					const key = el("span", { className: "key" });
-					key.textContent = part.replace("ArrowDown", "↓").replace("ArrowUp", "↑").replace("Enter", "⏎");
+					key.textContent = part.replace("ArrowDown", "↓").replace("ArrowUp", "↑").replace("ArrowLeft", "←").replace("ArrowRight", "→").replace("Enter", "⏎");
 					keyComboDiv.appendChild(key);
 				});
 			});
@@ -13155,7 +13423,12 @@ var DialogMethods = class {
 			row.appendChild(keysCell);
 			row.appendChild(actionCell);
 			tbody.appendChild(row);
-		});
+		};
+		KEYBOARD_SHORTCUTS.forEach(addRow);
+		if (this.config.searchfox) {
+			tbody.appendChild(el("tr", { className: "shortcuts-section" }, [el("td", { attrs: { colspan: 2 } }, [el("strong", { text: "Searchfox" }), el("span", { text: "Sends clicked identifiers and file paths to searchfox.org, and fetches searchfox’s copy of files from GitHub." })])]));
+			SEARCHFOX_SHORTCUTS.forEach(addRow);
+		}
 		body.appendChild(table);
 	}
 	showSettingsModal() {
@@ -13185,6 +13458,7 @@ var DialogMethods = class {
 		const currentWordWrap = this.config.word_wrap;
 		const currentLigatures = this.config.ligatures;
 		const currentAutoFetch = this.config.auto_fetch_comments;
+		const currentSearchfox = this.config.searchfox;
 		if (window.DEBUG) console.info("Settings modal - current values:", {
 			currentColorScheme,
 			currentFont,
@@ -13279,6 +13553,15 @@ var DialogMethods = class {
 			name: "auto_fetch_comments",
 			checked: currentAutoFetch
 		} }), el("span", { text: "Load comments from the commit’s Phabricator revision or GitHub PR (applies on next launch)" })])]);
+		const searchfoxField = el("div", { className: "settings-field" }, [el("label", {
+			attrs: { for: "searchfox" },
+			text: "Searchfox support"
+		}), el("div", { className: "checkbox-wrapper" }, [el("input", { attrs: {
+			type: "checkbox",
+			id: "searchfox",
+			name: "searchfox",
+			checked: currentSearchfox
+		} }), el("span", { text: "searchfox integration, see keyboard shortcuts" })])]);
 		form.appendChild(themeField);
 		form.appendChild(fontField);
 		form.appendChild(splitViewField);
@@ -13286,6 +13569,7 @@ var DialogMethods = class {
 		form.appendChild(ligaturesField);
 		form.appendChild(autoCloseField);
 		form.appendChild(autoFetchField);
+		form.appendChild(searchfoxField);
 		body.appendChild(form);
 		const colorField = form.querySelector("#color-scheme");
 		if (colorField) colorField.value = currentColorScheme;
@@ -13303,6 +13587,7 @@ var DialogMethods = class {
 				word_wrap: formData.get("word_wrap") === "on",
 				ligatures: formData.get("ligatures") === "on",
 				auto_fetch_comments: formData.get("auto_fetch_comments") === "on",
+				searchfox: formData.get("searchfox") === "on",
 				stacked_view: this.config.stacked_view
 			});
 			try {
@@ -14130,11 +14415,77 @@ var SeriesMethods = class {
 	}
 };
 //#endregion
+//#region web/src/context-menu.ts
+let dismissOpenMenu = null;
+/** Opens a menu of `items` at the viewport point (x, y), replacing any open menu. */
+function openContextMenu(x, y, items) {
+	dismissOpenMenu?.();
+	const previouslyFocused = document.activeElement;
+	const buttons = items.map(({ label, onSelect }) => {
+		const button = el("button", {
+			className: "context-menu-item",
+			text: label,
+			attrs: {
+				type: "button",
+				role: "menuitem"
+			}
+		});
+		button.addEventListener("click", () => {
+			dismiss();
+			onSelect();
+		});
+		return button;
+	});
+	const menu = el("div", {
+		className: "context-menu",
+		attrs: { role: "menu" }
+	}, buttons);
+	document.body.appendChild(menu);
+	const { width, height } = menu.getBoundingClientRect();
+	menu.style.left = `${Math.max(0, Math.min(x, window.innerWidth - width))}px`;
+	menu.style.top = `${Math.max(0, Math.min(y, window.innerHeight - height))}px`;
+	const onKeydown = (event) => {
+		if (event.key === "Escape") {
+			event.stopPropagation();
+			dismiss();
+			if (previouslyFocused instanceof HTMLElement) previouslyFocused.focus();
+		} else if (event.key === "Tab") dismiss();
+		else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+			event.preventDefault();
+			const step = event.key === "ArrowDown" ? 1 : -1;
+			const current = buttons.indexOf(document.activeElement);
+			buttons[(current + step + buttons.length) % buttons.length].focus();
+		}
+	};
+	const onMousedown = (event) => {
+		if (!menu.contains(event.target)) dismiss();
+	};
+	const listenerOptions = { capture: true };
+	const dismiss = () => {
+		menu.remove();
+		document.removeEventListener("keydown", onKeydown, listenerOptions);
+		document.removeEventListener("mousedown", onMousedown, listenerOptions);
+		window.removeEventListener("scroll", dismiss, listenerOptions);
+		window.removeEventListener("blur", dismiss);
+		dismissOpenMenu = null;
+	};
+	dismissOpenMenu = dismiss;
+	document.addEventListener("keydown", onKeydown, listenerOptions);
+	document.addEventListener("mousedown", onMousedown, listenerOptions);
+	window.addEventListener("scroll", dismiss, {
+		capture: true,
+		passive: true
+	});
+	window.addEventListener("blur", dismiss);
+	buttons[0].focus({ preventScroll: true });
+}
+//#endregion
 //#region web/src/stacked-view-methods.ts
 const DIFFS_THEME = {
 	dark: "pierre-dark",
 	light: "pierre-light"
 };
+const DIFFS_TOKENIZE_MAX_LINE_LENGTH = 1e3;
 function themeTypeFor(themeName) {
 	const base = window.UI_THEME_DEFS?.[themeName]?.base ?? themeName;
 	return base === "vs" || base === "hc-light" ? "light" : "dark";
@@ -14157,6 +14508,27 @@ function loadDiffsRuntime() {
 function createDiffsWorker() {
 	return new Worker("/assets/app/diffs-worker.js", { type: "module" });
 }
+const DIFFS_POOL_SETUP = {
+	poolOptions: {
+		workerFactory: createDiffsWorker,
+		poolSize: Math.min(Math.max(navigator.hardwareConcurrency ?? 4, 2), 6),
+		totalASTLRUCacheSize: 64
+	},
+	highlighterOptions: {
+		theme: DIFFS_THEME,
+		lineDiffType: "word-alt",
+		maxLineDiffLength: 1e3,
+		tokenizeMaxLineLength: DIFFS_TOKENIZE_MAX_LINE_LENGTH
+	}
+};
+async function getStackedWorkerPool() {
+	const { getOrCreateWorkerPoolSingleton } = await loadDiffsRuntime();
+	return getOrCreateWorkerPoolSingleton(DIFFS_POOL_SETUP);
+}
+/** Deleted lines, in unified or in the deletions column of split, are on the old side. */
+function isDeletionRow(row) {
+	return row.dataset.lineType === "change-deletion" || row.closest("[data-deletions]") !== null;
+}
 var StackedViewMethods = class {
 	stackedCodeView;
 	stackedViewOptions;
@@ -14166,9 +14538,13 @@ var StackedViewMethods = class {
 	stackedItemVersion;
 	stackedScrollUnsubscribe;
 	stackedRenderToken;
-	stackedHydratedFiles;
+	stackedHydrations;
 	stackedLastRangeSelection;
 	stackedFileScrollOffsets;
+	stackedInstances;
+	stackedFocusPath;
+	stackedFocusScrolls;
+	stackedFlash;
 	showStackedView() {
 		this.resetFileView();
 		this.isStacked = true;
@@ -14228,6 +14604,7 @@ var StackedViewMethods = class {
 		if (!this.isStacked) return;
 		const file = this.files[index];
 		if (!file) return;
+		this.clearStackedFocus();
 		const previousFile = this.files[this.currentFileIndex];
 		const view = this.stackedCodeView;
 		if (view && previousFile && !this.currentFileIsCommit) {
@@ -14271,6 +14648,115 @@ var StackedViewMethods = class {
 			block: "start"
 		});
 	}
+	async revealStackedLine(index, line) {
+		await this.scrollToFileInStacked(index);
+		const file = this.files[index];
+		const view = this.stackedCodeView;
+		if (!view || !file) return;
+		const id = this.stackedItemId(file.path);
+		const scroll = (target) => new Promise((resolve) => view.requestScroll(target, resolve));
+		await scroll({
+			type: "item",
+			id,
+			align: "start",
+			behavior: "instant"
+		});
+		await this.hydrateStackedFile(file, (await loadDiffsRuntime()).parseDiffFromFile);
+		const instance = this.stackedInstances?.get(file.path);
+		if (instance && "revealLine" in instance && typeof instance.revealLine === "function") instance.revealLine(line, "additions");
+		if (await scroll({
+			type: "line",
+			id,
+			lineNumber: line,
+			side: "additions",
+			align: "center",
+			behavior: "instant"
+		}) === "settled") {
+			this.stackedFlash = {
+				path: file.path,
+				line,
+				start: performance.now()
+			};
+			this.applyStackedFlash();
+		}
+	}
+	/** The rendered row of a line on one side, found in the file's pierre shadow root. */
+	findStackedRow(path, line, side) {
+		const host = document.querySelector(`.stacked-code-view [data-path="${CSS.escape(path)}"]`);
+		return Array.from(host?.shadowRoot?.querySelectorAll(`[data-line="${line}"]`) ?? []).find((row) => isDeletionRow(row) === (side === "old"));
+	}
+	/** Focuses a changed line of `path` and scrolls it to `align`. */
+	showStackedFocus(path, focus, align) {
+		this.clearStackedFocusMarks();
+		this.currentFocusedLine = focus;
+		this.stackedFocusPath = path;
+		this.applyStackedFocus();
+		const view = this.stackedCodeView;
+		if (!view) return;
+		const lineHeight = this.findStackedRow(path, focus.line, focus.side)?.offsetHeight || 20;
+		this.stackedFocusScrolls = (this.stackedFocusScrolls ?? 0) + 1;
+		view.requestScroll({
+			type: "line",
+			id: this.stackedItemId(path),
+			lineNumber: focus.line,
+			side: this.toAnnotationSide(focus.side),
+			align,
+			offset: align === "nearest" ? 5 * lineHeight : 0,
+			behavior: prefersReducedMotion() ? "instant" : "smooth"
+		}, () => {
+			this.stackedFocusScrolls = (this.stackedFocusScrolls ?? 1) - 1;
+			this.applyStackedFocus();
+		});
+	}
+	clearStackedFocus() {
+		this.clearStackedFocusMarks();
+		this.currentFocusedLine = null;
+		this.stackedFocusPath = null;
+	}
+	/**
+	* The index of the focused line's file while the reader is still at it: the line is on
+	* screen, or a focus scroll is on its way to it. Null once they have scrolled it out of view,
+	* so that j/k start over in the file on screen.
+	*/
+	stackedFocusFileIndex() {
+		const path = this.stackedFocusPath;
+		const focus = this.currentFocusedLine;
+		const index = path ? this.files.findIndex((file) => file.path === path) : -1;
+		if (!focus || index === -1) return null;
+		if ((this.stackedFocusScrolls ?? 0) > 0) return index;
+		const row = this.findStackedRow(path, focus.line, focus.side)?.getBoundingClientRect();
+		const view = document.querySelector(".stacked-code-view")?.getBoundingClientRect();
+		return row && view && row.bottom > view.top && row.top < view.bottom ? index : null;
+	}
+	/** Marks the focused row. Pierre replaces rows on re-render, so this runs after each one. */
+	applyStackedFocus() {
+		const focus = this.currentFocusedLine;
+		const path = this.stackedFocusPath;
+		if (!focus || !path || this.currentFileIsCommit) return;
+		this.findStackedRow(path, focus.line, focus.side)?.toggleAttribute("data-stacked-focus", true);
+	}
+	clearStackedFocusMarks() {
+		document.querySelectorAll(".stacked-code-view [data-path]").forEach((host) => host.shadowRoot?.querySelectorAll("[data-stacked-focus]").forEach((row) => row.removeAttribute("data-stacked-focus")));
+	}
+	/** Marks the flashing line's row; pierre replaces rows when it re-renders, so this runs again
+	* after each render, continuing the fade where it was. */
+	applyStackedFlash() {
+		const flash = this.stackedFlash;
+		if (!flash) return;
+		const elapsed = performance.now() - flash.start;
+		if (elapsed >= 1200) {
+			this.stackedFlash = null;
+			return;
+		}
+		const row = this.findStackedRow(flash.path, flash.line, "new");
+		if (!row || row.hasAttribute("data-searchfox-flash")) return;
+		row.toggleAttribute("data-searchfox-flash", true);
+		row.style.animationDelay = `-${elapsed}ms`;
+		setTimeout(() => {
+			row.removeAttribute("data-searchfox-flash");
+			row.style.animationDelay = "";
+		}, SEARCHFOX_FLASH_MS - elapsed);
+	}
 	clearStackedView() {
 		this.stackedItemVersion ??= 0;
 		this.stackedScrollUnsubscribe?.();
@@ -14279,8 +14765,12 @@ var StackedViewMethods = class {
 		this.stackedCodeView = null;
 		this.stackedViewOptions = null;
 		this.stackedItems = /* @__PURE__ */ new Map();
+		this.stackedInstances = /* @__PURE__ */ new Map();
+		this.stackedFlash = null;
+		this.currentFocusedLine = null;
+		this.stackedFocusPath = null;
 		this.stackedFileMetadata = /* @__PURE__ */ new Map();
-		this.stackedHydratedFiles = /* @__PURE__ */ new Set();
+		this.stackedHydrations = /* @__PURE__ */ new Map();
 		this.stackedLastRangeSelection = null;
 		this.stackedDraft = null;
 		this.stackedRenderToken = (this.stackedRenderToken ?? 0) + 1;
@@ -14303,6 +14793,8 @@ var StackedViewMethods = class {
 		const { CodeView, parsePatchFiles, parseDiffFromFile, getOrCreateWorkerPoolSingleton } = await loadDiffsRuntime();
 		if (!this.isStacked || !container.isConnected || renderToken !== this.stackedRenderToken || generation !== this.commitLoadGeneration) return;
 		const codeViewRoot = el("div", { className: "stacked-code-view" });
+		codeViewRoot.addEventListener("mousedown", (event) => this.handleStackedSearchfoxClick(event));
+		codeViewRoot.addEventListener("contextmenu", (event) => this.handleStackedSearchfoxContextMenu(event));
 		container.appendChild(codeViewRoot);
 		const binaryFiles = this.files.filter((file) => file.is_binary);
 		const items = this.files.map((file) => this.buildCodeViewItem(file, parsePatchFiles)).filter((item) => !!item);
@@ -14319,19 +14811,7 @@ var StackedViewMethods = class {
 			}));
 			return;
 		}
-		const workerPool = getOrCreateWorkerPoolSingleton({
-			poolOptions: {
-				workerFactory: createDiffsWorker,
-				poolSize: Math.min(Math.max(navigator.hardwareConcurrency ?? 4, 2), 6),
-				totalASTLRUCacheSize: 64
-			},
-			highlighterOptions: {
-				theme: DIFFS_THEME,
-				lineDiffType: "word-alt",
-				maxLineDiffLength: 1e3,
-				tokenizeMaxLineLength: 1e3
-			}
-		});
+		const workerPool = getOrCreateWorkerPoolSingleton(DIFFS_POOL_SETUP);
 		const options = {
 			diffStyle: this.stackedDiffStyle(),
 			overflow: this.config.word_wrap ? "wrap" : "scroll",
@@ -14348,9 +14828,14 @@ var StackedViewMethods = class {
 			onSelectedLinesChange: (selection) => this.rememberStackedSelection(selection),
 			onLineSelected: (range, context) => this.showStackedDraftFromSelection(this.pathFromCodeViewContext(context), range),
 			renderAnnotation: (annotation) => this.renderStackedAnnotation(annotation),
-			onPostRender: (_node, _instance, phase, context) => {
-				if (phase !== "unmount") {
-					const path = this.pathFromCodeViewContext(context);
+			onPostRender: (node, instance, phase, context) => {
+				const path = this.pathFromCodeViewContext(context);
+				if (phase === "unmount") this.stackedInstances?.delete(path);
+				else {
+					(this.stackedInstances ??= /* @__PURE__ */ new Map()).set(path, instance);
+					node.dataset.path = path;
+					this.applyStackedFlash();
+					this.applyStackedFocus();
 					this.hydrateStackedFile(this.files.find((file) => file.path === path), parseDiffFromFile);
 				}
 			},
@@ -14393,9 +14878,16 @@ var StackedViewMethods = class {
 		this.stackedItems.set(file.path, item);
 		return item;
 	}
-	async hydrateStackedFile(file, parseDiffFromFile) {
-		if (!file || file.is_binary || this.stackedHydratedFiles.has(file.path)) return;
-		this.stackedHydratedFiles.add(file.path);
+	hydrateStackedFile(file, parseDiffFromFile) {
+		if (!file || file.is_binary) return Promise.resolve();
+		let hydration = this.stackedHydrations.get(file.path);
+		if (!hydration) {
+			hydration = this.loadStackedFileContents(file, parseDiffFromFile);
+			this.stackedHydrations.set(file.path, hydration);
+		}
+		return hydration;
+	}
+	async loadStackedFileContents(file, parseDiffFromFile) {
 		const renderToken = this.stackedRenderToken;
 		const generation = this.commitLoadGeneration;
 		const view = this.stackedCodeView;
@@ -14475,10 +14967,13 @@ var StackedViewMethods = class {
 	}
 	showStackedDraft(file, props) {
 		if (!file) return;
-		const side = this.fromAnnotationSide(props.annotationSide);
+		this.openStackedDraft(file, props.lineNumber, this.fromAnnotationSide(props.annotationSide));
+	}
+	/** Opens the comment form on a line; a line-number click and the Enter key both come here. */
+	openStackedDraft(file, lineNumber, side) {
 		this.stackedDraft = {
 			file,
-			line: this.stackedSelectedLine(file, props.lineNumber, side),
+			line: this.stackedSelectedLine(file, lineNumber, side),
 			side
 		};
 		this.renderStackedComments();
@@ -14866,6 +15361,51 @@ var StackedViewMethods = class {
 	stackedItemId(path) {
 		return `file:${path}`;
 	}
+	handleStackedSearchfoxClick(event) {
+		const click = this.config.searchfox ? searchfoxClick(event) : null;
+		if (!click) return;
+		const target = this.stackedSearchfoxTarget(event);
+		if (!target) return;
+		event.preventDefault();
+		this.searchfoxLookup(target, click.mode, click.newTab);
+	}
+	/** On an identifier, replaces the browser menu with Searchfox lookups; elsewhere the browser menu stays. */
+	handleStackedSearchfoxContextMenu(event) {
+		const target = this.config.searchfox ? this.stackedSearchfoxTarget(event) : null;
+		if (!target) return;
+		event.preventDefault();
+		openContextMenu(event.clientX, event.clientY, searchfoxMenuActions.map(({ label, mode }) => ({
+			label,
+			onSelect: () => void this.searchfoxLookup(target, mode, false)
+		})));
+	}
+	/** The identifier under a click on a code line; null on gutters, annotations, headers and separators. */
+	stackedSearchfoxTarget(event) {
+		const nodes = event.composedPath();
+		const line = nodes.find((node) => node instanceof HTMLElement && node.hasAttribute("data-line"));
+		const fileElement = nodes.find((node) => node instanceof HTMLElement && node.dataset.path !== void 0);
+		if (!line || !fileElement) return null;
+		const caret = document.caretPositionFromPoint(event.clientX, event.clientY, { shadowRoots: [line.getRootNode()] });
+		if (!caret || !line.contains(caret.offsetNode)) return null;
+		const beforeCaret = document.createRange();
+		beforeCaret.setStart(line, 0);
+		beforeCaret.setEnd(caret.offsetNode, caret.offset);
+		const col = beforeCaret.toString().length;
+		const text = line.textContent ?? "";
+		const identifier = identifierAt(text, col);
+		if (!identifier) return null;
+		const deleted = isDeletionRow(line);
+		const file = this.fileForPath(fileElement.dataset.path);
+		return {
+			path: deleted ? file.old_path ?? file.path : file.path,
+			line: Number(line.dataset.line),
+			col,
+			word: identifier.word,
+			text,
+			side: deleted ? "old" : "new",
+			commit_idx: this.currentCommitIdx
+		};
+	}
 	pathFromCodeViewContext(context) {
 		const id = context?.item?.id ?? "";
 		return id.startsWith("file:") ? id.slice(5) : id;
@@ -14892,9 +15432,280 @@ var StackedViewMethods = class {
       }
       [data-line-annotation] { padding: 8px 12px; }
       [data-interactive-line-numbers] { cursor: pointer; }
+      [data-stacked-focus] {
+        background-color: color-mix(in srgb, var(--accent-color) 14%, transparent);
+        box-shadow: inset 2px 0 0 var(--accent-color);
+      }
+      [data-searchfox-flash] { animation: searchfox-flash ${SEARCHFOX_FLASH_MS}ms ease-out; }
+      @keyframes searchfox-flash {
+        from { background-color: color-mix(in srgb, var(--accent-color) 35%, transparent); }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        [data-searchfox-flash] {
+          animation: none;
+          background-color: color-mix(in srgb, var(--accent-color) 20%, transparent);
+        }
+      }
     `;
 	}
 };
+//#endregion
+//#region web/src/searchfox-methods.ts
+let pendingLookups = 0;
+let busyIndicator = null;
+/** Shows a progress cursor and a "Searching" pill while any lookup waits on searchfox. */
+function setSearchfoxBusy(busy) {
+	pendingLookups += busy ? 1 : -1;
+	const active = pendingLookups > 0;
+	document.body.classList.toggle("searchfox-busy", active);
+	if (active && !busyIndicator) {
+		busyIndicator = el("div", {
+			className: "searchfox-pill searchfox-busy-indicator",
+			attrs: { role: "status" }
+		}, [el("span", { className: "searchfox-spinner" }), el("span", { text: "Searching searchfox…" })]);
+		document.body.appendChild(busyIndicator);
+	} else if (!active) {
+		busyIndicator?.remove();
+		busyIndicator = null;
+	}
+}
+let toast = null;
+/** A brief message in the same pill as the busy indicator. */
+function showSearchfoxToast(message) {
+	if (toast) {
+		clearTimeout(toast.timer);
+		toast.node.remove();
+	}
+	const node = el("div", {
+		className: "searchfox-pill searchfox-toast",
+		text: message,
+		attrs: { role: "status" }
+	});
+	document.body.appendChild(node);
+	toast = {
+		node,
+		timer: setTimeout(() => {
+			node.remove();
+			toast = null;
+		}, 2500)
+	};
+}
+var SearchfoxMethods = class {
+	async searchfoxLookup(target, mode, newTab) {
+		const tree = this.context.searchfox_tree;
+		if (!this.config.searchfox || !tree) return;
+		setSearchfoxBusy(true);
+		try {
+			const resolved = await resolveSearchfox(target);
+			if (newTab && openInNewTab(searchfoxSearchUrl(tree, resolved.query))) return;
+			const results = await searchSearchfox(resolved.query);
+			if (results.groups.length === 0) {
+				showSearchfoxToast(`No searchfox results for ${resolved.pretty ?? target.word}`);
+				return;
+			}
+			if (mode === "definition") {
+				const definitions = searchfoxDefinitions(results);
+				if (definitions.length === 1 && await this.goToSearchfoxHit(tree, definitions[0])) return;
+			}
+			const panel = this.openSearchfoxPanel(resolved, tree);
+			this.renderSearchfoxResults(panel.body, tree, results, panel.close);
+		} catch (error) {
+			this.openSearchfoxPanel({
+				query: target.word,
+				pretty: null,
+				symbols: []
+			}, tree).body.appendChild(el("p", {
+				className: "searchfox-status searchfox-error",
+				text: error.message
+			}));
+		} finally {
+			setSearchfoxBusy(false);
+		}
+	}
+	openSearchfoxPanel(resolved, tree) {
+		const link = el("a", {
+			className: "btn-secondary searchfox-open-link",
+			text: "Open on searchfox ↗",
+			attrs: {
+				href: searchfoxSearchUrl(tree, resolved.query),
+				target: "_blank",
+				rel: "noopener"
+			}
+		});
+		const { body, close } = openModal({
+			title: resolved.pretty ?? resolved.query,
+			modalClass: "searchfox-modal",
+			footerContent: [link]
+		});
+		return {
+			body,
+			close
+		};
+	}
+	renderSearchfoxResults(body, tree, results, close) {
+		for (const group of results.groups) body.appendChild(this.searchfoxGroupNode(tree, results.revision, group, close));
+	}
+	searchfoxGroupNode(tree, revision, group, close) {
+		const heading = el("h3", {
+			className: "searchfox-category",
+			text: group.category
+		});
+		if (group.kind !== "normal") heading.appendChild(el("span", {
+			className: "searchfox-kind",
+			text: group.kind
+		}));
+		const section = el("section", { className: "searchfox-group" }, [heading]);
+		for (const file of group.files) {
+			const inReview = this.files.some((reviewed) => reviewed.path === file.path);
+			section.appendChild(el("div", { className: "searchfox-file" }, [el("span", {
+				className: "searchfox-path",
+				text: file.path
+			}), inReview ? el("span", {
+				className: "searchfox-in-review",
+				text: "in review",
+				attrs: { title: "Part of this review" }
+			}) : null]));
+			const rows = [];
+			for (const line of file.lines) {
+				const code = el("code", {
+					className: "searchfox-code",
+					text: line.line
+				});
+				markRange(code, line.bounds);
+				rows.push({
+					line,
+					code
+				});
+				const row = el("button", {
+					className: "searchfox-line",
+					attrs: { type: "button" }
+				}, [
+					el("span", {
+						className: "searchfox-lno",
+						text: line.lno
+					}),
+					code,
+					line.context ? el("span", {
+						className: "searchfox-context",
+						text: line.context
+					}) : null
+				]);
+				row.addEventListener("click", () => {
+					close();
+					this.goToSearchfoxHit(tree, {
+						path: file.path,
+						lno: line.lno,
+						revision
+					});
+				});
+				section.appendChild(row);
+			}
+			this.colorizeSearchfoxLines(file.path, rows);
+		}
+		return section;
+	}
+	/**
+	* Colours a file's result lines like the view they were opened from. The lines stay plain
+	* until the colours arrive; the match marks are reapplied on top.
+	*/
+	async colorizeSearchfoxLines(path, rows) {
+		if (this.isStacked) {
+			const pool = await getStackedWorkerPool();
+			const colorScheme = themeTypeFor(this.config.color_scheme);
+			await Promise.all(rows.map(async ({ line, code }) => {
+				const file = {
+					name: path,
+					contents: line.line,
+					cacheKey: `searchfox:${path}:${line.line}`
+				};
+				await pool.primeFileHighlightCache(file);
+				const hast = pool.getFileResultCache(file)?.result.code[0];
+				if (hast?.type !== "element") return;
+				code.classList.add("searchfox-pierre");
+				code.style.colorScheme = colorScheme;
+				code.replaceChildren(...hastToDom(hast.children));
+				markRange(code, line.bounds);
+			}));
+			return;
+		}
+		await Promise.all(rows.map(async ({ line, code }) => {
+			code.innerHTML = await monaco.editor.colorize(line.line, detectLanguageFromPathAndContent(path), {});
+			code.querySelectorAll("br").forEach((br) => br.remove());
+			markRange(code, line.bounds);
+		}));
+	}
+	/** Shows a hit: at its line when the file is in the review, else on searchfox.org. Returns
+	* false when the browser blocked the new tab. */
+	async goToSearchfoxHit(tree, hit) {
+		const index = this.files.findIndex((file) => file.path === hit.path);
+		if (index === -1) return openInNewTab(searchfoxSourceUrl(tree, hit.revision, hit.path, hit.lno));
+		const mapped = await revealSearchfoxLine(hit, this.currentCommitIdx);
+		if (mapped.line === null) showSearchfoxToast("No line of this file is unchanged since searchfox's revision");
+		else if (!mapped.exact) showSearchfoxToast("Line changed since searchfox's revision; showing the nearest unchanged line");
+		const line = mapped.line ?? 1;
+		if (this.isStacked) await this.revealStackedLine(index, line);
+		else {
+			await this.loadFile(index);
+			this.setFocusedLine("new", line);
+			const modified = this.editor.getModifiedEditor();
+			const flash = modified.deltaDecorations([], [{
+				range: new monaco.Range(line, 1, line, 1),
+				options: {
+					isWholeLine: true,
+					className: "searchfox-flash"
+				}
+			}]);
+			setTimeout(() => modified.deltaDecorations(flash, []), SEARCHFOX_FLASH_MS);
+		}
+		return true;
+	}
+};
+/** Hits of the "Definitions" categories of the normal (non-test, non-generated) results. */
+function searchfoxDefinitions(results) {
+	return results.groups.filter((group) => group.kind === "normal" && group.category.startsWith("Definitions")).flatMap((group) => group.files.flatMap((file) => file.lines.map((line) => ({
+		path: file.path,
+		lno: line.lno,
+		revision: results.revision
+	}))));
+}
+/** Opens `url` in a new tab; false when the browser blocked it. */
+function openInNewTab(url) {
+	const opened = window.open(url, "_blank");
+	if (opened) opened.opener = null;
+	return opened !== null;
+}
+/** DOM for pierre's highlighted hast: token spans carrying their style, and text. */
+function hastToDom(nodes) {
+	return nodes.flatMap((node) => {
+		if (node.type === "text") return [document.createTextNode(node.value)];
+		if (node.type !== "element") return [];
+		const span = document.createElement("span");
+		const style = node.properties.style;
+		if (typeof style === "string") span.setAttribute("style", style);
+		span.append(...hastToDom(node.children));
+		return [span];
+	});
+}
+/** Wraps UTF-16 offsets `bounds` of `root`'s text in <mark>s, splitting text nodes as needed. */
+function markRange(root, bounds) {
+	if (!bounds) return;
+	const [start, end] = bounds;
+	const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+	const texts = [];
+	for (let node = walker.nextNode(); node; node = walker.nextNode()) texts.push(node);
+	let offset = 0;
+	for (const text of texts) {
+		const textStart = offset;
+		offset += text.length;
+		if (offset <= start || textStart >= end) continue;
+		let piece = text;
+		if (start > textStart) piece = piece.splitText(start - textStart);
+		if (end < offset) piece.splitText(end - Math.max(start, textStart));
+		const mark = el("mark");
+		piece.replaceWith(mark);
+		mark.appendChild(piece);
+	}
+}
 //#endregion
 //#region web/src/monaco-app.ts
 function applyMixin(TargetClass, MethodsClass) {
@@ -15405,6 +16216,7 @@ applyMixin(MonacoApp, DiscussionMethods);
 applyMixin(MonacoApp, DialogMethods);
 applyMixin(MonacoApp, SeriesMethods);
 applyMixin(MonacoApp, StackedViewMethods);
+applyMixin(MonacoApp, SearchfoxMethods);
 applyMixin(MonacoApp, PublishDialogMethods);
 applyMixin(MonacoApp, ConnectAgentMethods);
 applyMixin(MonacoApp, CommitBarMethods);

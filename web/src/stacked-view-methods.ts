@@ -4,6 +4,8 @@ import type {
   CodeViewOptions,
 } from '../../node_modules/@pierre/diffs/dist/components/CodeView.js';
 import type { OnDiffLineClickProps } from '../../node_modules/@pierre/diffs/dist/managers/InteractionManager.js';
+import type { SetupWorkerPoolProps } from '../../node_modules/@pierre/diffs/dist/worker/getOrCreateWorkerPoolSingleton.js';
+import type { WorkerPoolManager } from '../../node_modules/@pierre/diffs/dist/worker/WorkerPoolManager.js';
 import type {
   AnnotationSide,
   CodeViewDiffItem,
@@ -23,6 +25,16 @@ import {
   type ReviewComment,
 } from './comments';
 import { fetchJSON } from './api';
+import { prefersReducedMotion } from './font';
+import { FOCUS_MARGIN_LINES, type FocusedLine } from './diff-utils';
+import {
+  identifierAt,
+  SEARCHFOX_FLASH_MS,
+  searchfoxClick,
+  searchfoxMenuActions,
+  type SearchfoxTarget,
+} from './searchfox';
+import { openContextMenu } from './context-menu';
 import type { ReviewNote } from './review-notes';
 import type { AppConfig, AppContext, DiffFile, DiffLine, Side } from './types/app';
 
@@ -44,8 +56,9 @@ type StackedDraft = {
 };
 
 const DIFFS_THEME = { dark: 'pierre-dark', light: 'pierre-light' } as const;
+const DIFFS_TOKENIZE_MAX_LINE_LENGTH = 1000;
 
-function themeTypeFor(themeName: string): 'light' | 'dark' {
+export function themeTypeFor(themeName: string): 'light' | 'dark' {
   const base = window.UI_THEME_DEFS?.[themeName]?.base ?? themeName;
   return base === 'vs' || base === 'hc-light' ? 'light' : 'dark';
 }
@@ -82,6 +95,31 @@ function createDiffsWorker() {
   return new Worker('/assets/app/diffs-worker.js', { type: 'module' });
 }
 
+// One singleton pool for the whole app: the stacked view and the searchfox panel both use it.
+const DIFFS_POOL_SETUP: SetupWorkerPoolProps = {
+  poolOptions: {
+    workerFactory: createDiffsWorker,
+    poolSize: Math.min(Math.max(navigator.hardwareConcurrency ?? 4, 2), 6),
+    totalASTLRUCacheSize: 64,
+  },
+  highlighterOptions: {
+    theme: DIFFS_THEME,
+    lineDiffType: 'word-alt',
+    maxLineDiffLength: 1000,
+    tokenizeMaxLineLength: DIFFS_TOKENIZE_MAX_LINE_LENGTH,
+  },
+};
+
+export async function getStackedWorkerPool(): Promise<WorkerPoolManager> {
+  const { getOrCreateWorkerPoolSingleton } = await loadDiffsRuntime();
+  return getOrCreateWorkerPoolSingleton(DIFFS_POOL_SETUP);
+}
+
+/** Deleted lines, in unified or in the deletions column of split, are on the old side. */
+function isDeletionRow(row: HTMLElement): boolean {
+  return row.dataset.lineType === 'change-deletion' || row.closest('[data-deletions]') !== null;
+}
+
 export class StackedViewMethods {
   declare files: AppContext['files'];
   declare commentManager: AppContext['commentManager'];
@@ -99,6 +137,7 @@ export class StackedViewMethods {
   declare renderFileList: () => void;
   declare currentFileIndex: number;
   declare currentFileIsCommit: boolean;
+  declare currentFocusedLine: AppContext['currentFocusedLine'];
   declare buildDiscussionNode: (discussion: Discussion) => HTMLElement;
   declare deleteDiscussion: AppContext['deleteDiscussion'];
   declare summarizeDiscussion: AppContext['summarizeDiscussion'];
@@ -109,6 +148,7 @@ export class StackedViewMethods {
   declare fetchFilePair: AppContext['fetchFilePair'];
   declare fileCacheKey: AppContext['fileCacheKey'];
   declare resetFileView: AppContext['resetFileView'];
+  declare searchfoxLookup: AppContext['searchfoxLookup'];
 
   private stackedCodeView: CodeView<StackedAnnotation> | null;
   // CodeView.setOptions replaces every option, so keep the full set to change one.
@@ -119,9 +159,17 @@ export class StackedViewMethods {
   private stackedItemVersion: number;
   private stackedScrollUnsubscribe: (() => void) | null;
   private stackedRenderToken: number;
-  private stackedHydratedFiles: Set<string>;
+  // Full-content loads per file path, kept so callers can wait for one in flight.
+  private stackedHydrations: Map<string, Promise<void>>;
   private stackedLastRangeSelection: CodeViewLineSelection | null;
   private stackedFileScrollOffsets?: Map<string, number>;
+  // Rendered pierre instance per file path, to expand collapsed context around a line.
+  private stackedInstances?: Map<string, object>;
+  // The keyboard-focused line's file, and how many focus scrolls are still running.
+  private stackedFocusPath: string | null;
+  private stackedFocusScrolls?: number;
+  // A line reached from searchfox results that is fading out.
+  private stackedFlash: { path: string; line: number; start: number } | null;
 
   showStackedView() {
     this.resetFileView();
@@ -209,6 +257,7 @@ export class StackedViewMethods {
     if (!file) {
       return;
     }
+    this.clearStackedFocus();
     const previousFile = this.files[this.currentFileIndex];
     const view = this.stackedCodeView;
     if (view && previousFile && !this.currentFileIsCommit) {
@@ -263,6 +312,151 @@ export class StackedViewMethods {
     anchor?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
+  async revealStackedLine(index: number, line: number) {
+    await this.scrollToFileInStacked(index);
+    const file = this.files[index];
+    const view = this.stackedCodeView;
+    if (!view || !file) {
+      return;
+    }
+    const id = this.stackedItemId(file.path);
+    const scroll = (target: Parameters<typeof view.requestScroll>[0]) =>
+      new Promise<string>((resolve) => view.requestScroll(target, resolve));
+    // The file is rendered once its scroll settles; only then is its pierre instance known.
+    // Collapsed context can only expand once the file's full contents are loaded.
+    await scroll({ type: 'item', id, align: 'start', behavior: 'instant' });
+    await this.hydrateStackedFile(file, (await loadDiffsRuntime()).parseDiffFromFile);
+    // Unchanged lines may be collapsed; diff instances expand just the region holding `line`.
+    const instance = this.stackedInstances?.get(file.path);
+    if (instance && 'revealLine' in instance && typeof instance.revealLine === 'function') {
+      instance.revealLine(line, 'additions');
+    }
+    const result = await scroll({
+      type: 'line',
+      id,
+      lineNumber: line,
+      side: 'additions',
+      align: 'center',
+      behavior: 'instant',
+    });
+    if (result === 'settled') {
+      this.stackedFlash = { path: file.path, line, start: performance.now() };
+      this.applyStackedFlash();
+    }
+  }
+
+  /** The rendered row of a line on one side, found in the file's pierre shadow root. */
+  private findStackedRow(path: string, line: number, side: Side): HTMLElement | undefined {
+    const host = document.querySelector<HTMLElement>(
+      `.stacked-code-view [data-path="${CSS.escape(path)}"]`,
+    );
+    return Array.from(
+      host?.shadowRoot?.querySelectorAll<HTMLElement>(`[data-line="${line}"]`) ?? [],
+    ).find((row) => isDeletionRow(row) === (side === 'old'));
+  }
+
+  /** Focuses a changed line of `path` and scrolls it to `align`. */
+  showStackedFocus(path: string, focus: FocusedLine, align: 'nearest' | 'center') {
+    this.clearStackedFocusMarks();
+    this.currentFocusedLine = focus;
+    this.stackedFocusPath = path;
+    this.applyStackedFocus();
+    const view = this.stackedCodeView;
+    if (!view) {
+      return;
+    }
+    // Rows are one line tall; before the row renders, assume a typical line height.
+    const lineHeight = this.findStackedRow(path, focus.line, focus.side)?.offsetHeight || 20;
+    this.stackedFocusScrolls = (this.stackedFocusScrolls ?? 0) + 1;
+    view.requestScroll(
+      {
+        type: 'line',
+        id: this.stackedItemId(path),
+        lineNumber: focus.line,
+        side: this.toAnnotationSide(focus.side),
+        align,
+        // With 'nearest', pierre keeps this much room above and below the line.
+        offset: align === 'nearest' ? FOCUS_MARGIN_LINES * lineHeight : 0,
+        behavior: prefersReducedMotion() ? 'instant' : 'smooth',
+      },
+      // The scroll may have rendered the line after the mark above; re-mark once it has settled.
+      () => {
+        this.stackedFocusScrolls = (this.stackedFocusScrolls ?? 1) - 1;
+        this.applyStackedFocus();
+      },
+    );
+  }
+
+  clearStackedFocus() {
+    this.clearStackedFocusMarks();
+    this.currentFocusedLine = null;
+    this.stackedFocusPath = null;
+  }
+
+  /**
+   * The index of the focused line's file while the reader is still at it: the line is on
+   * screen, or a focus scroll is on its way to it. Null once they have scrolled it out of view,
+   * so that j/k start over in the file on screen.
+   */
+  stackedFocusFileIndex(): number | null {
+    const path = this.stackedFocusPath;
+    const focus = this.currentFocusedLine;
+    const index = path ? this.files.findIndex((file) => file.path === path) : -1;
+    if (!focus || index === -1) {
+      return null;
+    }
+    if ((this.stackedFocusScrolls ?? 0) > 0) {
+      return index;
+    }
+    const row = this.findStackedRow(path!, focus.line, focus.side)?.getBoundingClientRect();
+    const view = document.querySelector('.stacked-code-view')?.getBoundingClientRect();
+    return row && view && row.bottom > view.top && row.top < view.bottom ? index : null;
+  }
+
+  /** Marks the focused row. Pierre replaces rows on re-render, so this runs after each one. */
+  private applyStackedFocus() {
+    const focus = this.currentFocusedLine;
+    const path = this.stackedFocusPath;
+    if (!focus || !path || this.currentFileIsCommit) {
+      return;
+    }
+    this.findStackedRow(path, focus.line, focus.side)?.toggleAttribute('data-stacked-focus', true);
+  }
+
+  private clearStackedFocusMarks() {
+    document
+      .querySelectorAll<HTMLElement>('.stacked-code-view [data-path]')
+      .forEach((host) =>
+        host.shadowRoot
+          ?.querySelectorAll('[data-stacked-focus]')
+          .forEach((row) => row.removeAttribute('data-stacked-focus')),
+      );
+  }
+
+  /** Marks the flashing line's row; pierre replaces rows when it re-renders, so this runs again
+   * after each render, continuing the fade where it was. */
+  private applyStackedFlash() {
+    const flash = this.stackedFlash;
+    if (!flash) {
+      return;
+    }
+    const elapsed = performance.now() - flash.start;
+    if (elapsed >= SEARCHFOX_FLASH_MS) {
+      this.stackedFlash = null;
+      return;
+    }
+    const row = this.findStackedRow(flash.path, flash.line, 'new');
+    if (!row || row.hasAttribute('data-searchfox-flash')) {
+      return;
+    }
+    row.toggleAttribute('data-searchfox-flash', true);
+    row.style.animationDelay = `-${elapsed}ms`;
+    setTimeout(() => {
+      row.removeAttribute('data-searchfox-flash');
+      row.style.animationDelay = '';
+    }, SEARCHFOX_FLASH_MS - elapsed);
+  }
+
   clearStackedView() {
     this.stackedItemVersion ??= 0;
     this.stackedScrollUnsubscribe?.();
@@ -271,8 +465,12 @@ export class StackedViewMethods {
     this.stackedCodeView = null;
     this.stackedViewOptions = null;
     this.stackedItems = new Map();
+    this.stackedInstances = new Map();
+    this.stackedFlash = null;
+    this.currentFocusedLine = null;
+    this.stackedFocusPath = null;
     this.stackedFileMetadata = new Map();
-    this.stackedHydratedFiles = new Set();
+    this.stackedHydrations = new Map();
     this.stackedLastRangeSelection = null;
     this.stackedDraft = null;
     this.stackedRenderToken = (this.stackedRenderToken ?? 0) + 1;
@@ -308,6 +506,10 @@ export class StackedViewMethods {
     }
 
     const codeViewRoot = el('div', { className: 'stacked-code-view' });
+    codeViewRoot.addEventListener('mousedown', (event) => this.handleStackedSearchfoxClick(event));
+    codeViewRoot.addEventListener('contextmenu', (event) =>
+      this.handleStackedSearchfoxContextMenu(event),
+    );
     container.appendChild(codeViewRoot);
     const binaryFiles = this.files.filter((file) => file.is_binary);
 
@@ -331,19 +533,7 @@ export class StackedViewMethods {
       return;
     }
 
-    const workerPool = getOrCreateWorkerPoolSingleton({
-      poolOptions: {
-        workerFactory: createDiffsWorker,
-        poolSize: Math.min(Math.max(navigator.hardwareConcurrency ?? 4, 2), 6),
-        totalASTLRUCacheSize: 64,
-      },
-      highlighterOptions: {
-        theme: DIFFS_THEME,
-        lineDiffType: 'word-alt',
-        maxLineDiffLength: 1000,
-        tokenizeMaxLineLength: 1000,
-      },
-    });
+    const workerPool = getOrCreateWorkerPoolSingleton(DIFFS_POOL_SETUP);
     const options: CodeViewOptions<StackedAnnotation, undefined> = {
       diffStyle: this.stackedDiffStyle(),
       overflow: this.config.word_wrap ? 'wrap' : 'scroll',
@@ -365,9 +555,17 @@ export class StackedViewMethods {
         this.renderStackedAnnotation(annotation as DiffLineAnnotation<StackedAnnotation>),
       // Expanding unmodified lines needs the full file contents, so load
       // them for every file the virtualizer renders.
-      onPostRender: (_node, _instance, phase, context) => {
-        if (phase !== 'unmount') {
-          const path = this.pathFromCodeViewContext(context);
+      onPostRender: (node, instance, phase, context) => {
+        const path = this.pathFromCodeViewContext(context);
+        if (phase === 'unmount') {
+          this.stackedInstances?.delete(path);
+        } else {
+          (this.stackedInstances ??= new Map()).set(path, instance);
+          // Pierre's file element doesn't say which file it shows; click handling and the
+          // marks below read it here.
+          node.dataset.path = path;
+          this.applyStackedFlash();
+          this.applyStackedFocus();
           void this.hydrateStackedFile(
             this.files.find((file) => file.path === path),
             parseDiffFromFile,
@@ -426,14 +624,22 @@ export class StackedViewMethods {
     return item;
   }
 
-  private async hydrateStackedFile(
+  private hydrateStackedFile(
     file: DiffFile | undefined,
     parseDiffFromFile: ParseDiffFromFile,
-  ) {
-    if (!file || file.is_binary || this.stackedHydratedFiles.has(file.path)) {
-      return;
+  ): Promise<void> {
+    if (!file || file.is_binary) {
+      return Promise.resolve();
     }
-    this.stackedHydratedFiles.add(file.path);
+    let hydration = this.stackedHydrations.get(file.path);
+    if (!hydration) {
+      hydration = this.loadStackedFileContents(file, parseDiffFromFile);
+      this.stackedHydrations.set(file.path, hydration);
+    }
+    return hydration;
+  }
+
+  private async loadStackedFileContents(file: DiffFile, parseDiffFromFile: ParseDiffFromFile) {
     const renderToken = this.stackedRenderToken;
     const generation = this.commitLoadGeneration;
     const view = this.stackedCodeView;
@@ -553,10 +759,14 @@ export class StackedViewMethods {
     if (!file) {
       return;
     }
-    const side = this.fromAnnotationSide(props.annotationSide);
+    this.openStackedDraft(file, props.lineNumber, this.fromAnnotationSide(props.annotationSide));
+  }
+
+  /** Opens the comment form on a line; a line-number click and the Enter key both come here. */
+  openStackedDraft(file: string, lineNumber: number, side: Side) {
     this.stackedDraft = {
       file,
-      line: this.stackedSelectedLine(file, props.lineNumber, side),
+      line: this.stackedSelectedLine(file, lineNumber, side),
       side,
     };
     this.renderStackedComments();
@@ -978,6 +1188,8 @@ export class StackedViewMethods {
       bestTop = top;
       bestIdx = index;
     });
+    // The keyboard focus keeps its own file (`stackedFocusPath`): a focus scroll often leaves
+    // the previous file's header as the one on top.
     if (bestIdx !== this.currentFileIndex) {
       this.currentFileIndex = bestIdx;
       this.currentFileIsCommit = false;
@@ -1052,6 +1264,76 @@ export class StackedViewMethods {
     return `file:${path}`;
   }
 
+  private handleStackedSearchfoxClick(event: MouseEvent) {
+    const click = this.config.searchfox ? searchfoxClick(event) : null;
+    if (!click) {
+      return;
+    }
+    const target = this.stackedSearchfoxTarget(event);
+    if (!target) {
+      return;
+    }
+    event.preventDefault();
+    void this.searchfoxLookup(target, click.mode, click.newTab);
+  }
+
+  /** On an identifier, replaces the browser menu with Searchfox lookups; elsewhere the browser menu stays. */
+  private handleStackedSearchfoxContextMenu(event: MouseEvent) {
+    const target = this.config.searchfox ? this.stackedSearchfoxTarget(event) : null;
+    if (!target) {
+      return;
+    }
+    event.preventDefault();
+    openContextMenu(
+      event.clientX,
+      event.clientY,
+      searchfoxMenuActions.map(({ label, mode }) => ({
+        label,
+        onSelect: () => void this.searchfoxLookup(target, mode, false),
+      })),
+    );
+  }
+
+  /** The identifier under a click on a code line; null on gutters, annotations, headers and separators. */
+  private stackedSearchfoxTarget(event: MouseEvent): SearchfoxTarget | null {
+    const nodes = event.composedPath();
+    const line = nodes.find(
+      (node): node is HTMLElement => node instanceof HTMLElement && node.hasAttribute('data-line'),
+    );
+    const fileElement = nodes.find(
+      (node): node is HTMLElement => node instanceof HTMLElement && node.dataset.path !== undefined,
+    );
+    if (!line || !fileElement) {
+      return null;
+    }
+    const caret = document.caretPositionFromPoint(event.clientX, event.clientY, {
+      shadowRoots: [line.getRootNode() as ShadowRoot],
+    });
+    if (!caret || !line.contains(caret.offsetNode)) {
+      return null;
+    }
+    const beforeCaret = document.createRange();
+    beforeCaret.setStart(line, 0);
+    beforeCaret.setEnd(caret.offsetNode, caret.offset);
+    const col = beforeCaret.toString().length;
+    const text = line.textContent ?? '';
+    const identifier = identifierAt(text, col);
+    if (!identifier) {
+      return null;
+    }
+    const deleted = isDeletionRow(line);
+    const file = this.fileForPath(fileElement.dataset.path!);
+    return {
+      path: deleted ? (file.old_path ?? file.path) : file.path,
+      line: Number(line.dataset.line),
+      col,
+      word: identifier.word,
+      text,
+      side: deleted ? 'old' : 'new',
+      commit_idx: this.currentCommitIdx,
+    };
+  }
+
   private pathFromCodeViewContext(context: unknown): string {
     const id = (context as { item?: { id?: string } } | undefined)?.item?.id ?? '';
     return id.startsWith('file:') ? id.slice('file:'.length) : id;
@@ -1080,6 +1362,20 @@ export class StackedViewMethods {
       }
       [data-line-annotation] { padding: 8px 12px; }
       [data-interactive-line-numbers] { cursor: pointer; }
+      [data-stacked-focus] {
+        background-color: color-mix(in srgb, var(--accent-color) 14%, transparent);
+        box-shadow: inset 2px 0 0 var(--accent-color);
+      }
+      [data-searchfox-flash] { animation: searchfox-flash ${SEARCHFOX_FLASH_MS}ms ease-out; }
+      @keyframes searchfox-flash {
+        from { background-color: color-mix(in srgb, var(--accent-color) 35%, transparent); }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        [data-searchfox-flash] {
+          animation: none;
+          background-color: color-mix(in srgb, var(--accent-color) 20%, transparent);
+        }
+      }
     `;
   }
 }
