@@ -61,10 +61,12 @@ struct RevisionReviewer {
 }
 
 impl RevisionReviewer {
+    /// Only meaningful on a `needs-review` revision. Rejects are sticky across diff
+    /// updates, so a current `rejected` there means the author asked for review again.
     fn pending(&self) -> bool {
         matches!(
             self.status.as_str(),
-            "added" | "blocking" | "accepted-older" | "rejected-older" | "commented"
+            "added" | "blocking" | "accepted-older" | "rejected-older" | "rejected" | "commented"
         )
     }
 }
@@ -86,14 +88,16 @@ fn my_review(revision: &RevisionData, viewer: &str, responsible: bool) -> (MyRev
     }
     let reviewers = &revision.attachments.reviewers.reviewers;
     let direct = reviewers.iter().find(|r| r.reviewer_phid == viewer);
-    if direct.is_some_and(|r| matches!(r.status.as_str(), "accepted" | "rejected")) {
-        return (MyReview::Done, false);
-    }
     let needs_review = revision
         .fields
         .status
         .as_ref()
         .is_some_and(|s| !s.closed && s.value.as_deref() == Some("needs-review"));
+    // A reject on a revision that is back in needs-review was answered by a new
+    // review request, so it falls through to `pending()` below.
+    if direct.is_some_and(|r| r.status == "accepted" || (r.status == "rejected" && !needs_review)) {
+        return (MyReview::Done, false);
+    }
     if !needs_review {
         return (MyReview::None, false);
     }
@@ -1589,7 +1593,7 @@ mod tests {
         ] {
             let revision = review_revision("PHID-USER-me", status);
             let expected = match status {
-                "accepted" | "rejected" => MyReview::Done,
+                "accepted" => MyReview::Done,
                 "resigned" => MyReview::None,
                 _ => MyReview::Waiting,
             };
@@ -1602,6 +1606,31 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn sticky_reject_waits_only_after_review_is_requested_again() {
+        // Phabricator keeps `rejected` across diff updates, so a revision back in
+        // needs-review with the viewer's reject still standing is waiting on them.
+        let mut revision = review_revision("PHID-USER-me", "rejected");
+        assert_eq!(
+            super::my_review(&revision, "PHID-USER-me", false),
+            (MyReview::Waiting, false)
+        );
+        assert_eq!(
+            super::review_state(&revision, "PHID-USER-me", false).reviewers_pending,
+            1
+        );
+        revision.fields.status.as_mut().unwrap().value = Some("needs-revision".into());
+        assert_eq!(
+            super::my_review(&revision, "PHID-USER-me", false),
+            (MyReview::Done, false)
+        );
+        let revision = review_revision("PHID-PROJ-group", "rejected");
+        assert_eq!(
+            super::my_review(&revision, "PHID-USER-me", true),
+            (MyReview::Waiting, true)
+        );
     }
 
     #[test]
