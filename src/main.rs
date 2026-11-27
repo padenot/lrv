@@ -256,8 +256,9 @@ struct Args {
     #[arg(long)]
     dev_log: bool,
 
-    /// Review a commit series (jj revset or git range, e.g. "trunk()..@" or "HEAD~5..HEAD")
-    #[arg(long)]
+    /// Review a commit series (jj revset or git range, e.g. "trunk()..@" or "HEAD~5..HEAD").
+    /// Without a value, reviews the commits not yet public on the current branch.
+    #[arg(long, num_args = 0..=1, default_missing_value = "")]
     series: Option<String>,
 
     /// Print the config directory path and exit
@@ -292,6 +293,50 @@ struct Args {
     /// nothing/"latest" for the most recent one with comments)
     #[arg(long, num_args = 0..=1, default_missing_value = "latest")]
     recover: Option<String>,
+}
+
+/// The commits `--series` reviews without a value: everything not yet public.
+/// jj stops at `trunk()`; git stops at the upstream, or at the default branch
+/// when the current branch has none.
+fn default_series_revset(working_dir: &str) -> Result<String> {
+    if repository::is_jj_repo(working_dir) {
+        return Ok("trunk()..@".to_string());
+    }
+    if git_output(working_dir, &["rev-parse", "--quiet", "--verify", "@{u}"]).is_some() {
+        return Ok("@{u}..HEAD".to_string());
+    }
+    let base = git_output(
+        working_dir,
+        &[
+            "symbolic-ref",
+            "--quiet",
+            "--short",
+            "refs/remotes/origin/HEAD",
+        ],
+    )
+    .or_else(|| {
+        ["main", "master"]
+            .into_iter()
+            .find(|&branch| {
+                git_output(working_dir, &["rev-parse", "--quiet", "--verify", branch]).is_some()
+            })
+            .map(str::to_string)
+    })
+    .context("No upstream, origin/HEAD, main or master to default --series to")?;
+    Ok(format!("{base}..HEAD"))
+}
+
+/// Trimmed stdout of a successful `git` command in `working_dir`.
+fn git_output(working_dir: &str, args: &[&str]) -> Option<String> {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(working_dir)
+        .output()
+        .ok()?;
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
 fn enumerate_series_commits(revset: &str, working_dir: &str) -> Result<Vec<String>> {
@@ -1162,12 +1207,16 @@ async fn main() -> Result<()> {
     let working_dir = project_context.working_directory.clone();
 
     // Parse diffs: series mode or single commit
-    let (diffs, pre_old, pre_new, is_series) = if let Some(ref revset) = args.series {
+    let (diffs, pre_old, pre_new, is_series) = if let Some(ref series) = args.series {
         if args.cmd.is_some() || args.file.is_some() {
             anyhow::bail!("--series cannot be combined with --cmd or --file");
         }
+        let revset = if series.is_empty() {
+            default_series_revset(&working_dir)?
+        } else {
+            series.clone()
+        };
         let parsed = if repository::is_jj_repo(&working_dir) {
-            let revset = revset.clone();
             let wd = working_dir.clone();
             let spinner = Spinner::start("Loading commits");
             let diffs = tokio::task::spawn_blocking(move || get_series_diffs_jj(&revset, &wd))
@@ -1176,7 +1225,7 @@ async fn main() -> Result<()> {
             spinner.finish(&format!("Loaded {} commits", diffs.len()));
             diffs
         } else {
-            let commits = enumerate_series_commits(revset, &working_dir)?;
+            let commits = enumerate_series_commits(&revset, &working_dir)?;
             if commits.is_empty() {
                 anyhow::bail!("No commits found for series: {}", revset);
             }
